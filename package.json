@@ -1,29 +1,8 @@
 {
-  "name": "verano-docid-api",
-  "version": "1.0.0",
-  "description": "API de Gestão de Identificadores de Documentos — Verano Labs",
-  "scripts": {
-    "dev": "bun --watch src/index.ts",
-    "start": "bun src/index.ts",
-    "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
-    "db:studio": "drizzle-kit studio"
-  },
-  "dependencies": {
-    "elysia": "^1.1.0",
-    "@elysiajs/swagger": "^1.1.0",
-    "@elysiajs/cors": "^1.1.0",
-    "drizzle-orm": "^0.31.0",
-    "better-sqlite3": "^9.6.0",
-    "pdf-parse": "^1.1.1",
-    "mammoth": "^1.7.2",
-    "nanoid": "^5.0.7"
-  },
+  "name": "verano-docid",
+  "private": true,
+  "workspaces": ["apps/*", "packages/*"],
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.10",
-    "@types/pdf-parse": "^1.1.4",
-    "drizzle-kit": "^0.22.0",
-    "typescript": "^5.4.0",
-    "bun-types": "^1.1.0"
+    "@tauri-apps/cli": "^2.11.3"
   }
 }

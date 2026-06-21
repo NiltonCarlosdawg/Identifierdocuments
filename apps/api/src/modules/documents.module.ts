@@ -1,0 +1,179 @@
+import { Elysia, t } from "elysia";
+import fs from "node:fs";
+import { attachDocument, downloadDocument } from "../services/attachment.service";
+import { requireAuth } from "../middleware/auth";
+import { db } from "../db";
+import { documents, documentShares, approvals, sectors, auditLogs, identifiers, users } from "../db/schema";
+import { eq, and } from "drizzle-orm";
+import { notify } from "../services/notification.service";
+
+export const documentsModule = new Elysia({ prefix: "/documents" })
+  .use(requireAuth())
+
+  .post("/attach", async ({ auth, body, set }) => {
+    try {
+      const result = await attachDocument(auth!, {
+        identifier: body.identifier, file: body.file,
+        uploadSource: body.uploadSource,
+      });
+      if (!result.success) { set.status = 422; return result; }
+      return result;
+    } catch (err: any) {
+      set.status = 400;
+      return { error: { code: "ATTACH_ERROR", message: err.message } };
+    }
+  }, {
+    body: t.Object({
+      identifier: t.String(),
+      file: t.File(),
+      uploadSource: t.Optional(t.Union([t.Literal("manual"), t.Literal("scanner"), t.Literal("sync")])),
+    }),
+    detail: { summary: "Associar documento", tags: ["Documentos"] },
+  })
+
+  .get("/:id", async ({ auth, params, set }) => {
+    const doc = await db.query.documents.findFirst({
+      where: and(eq(documents.tenantId, auth!.tenantId)),
+      with: { identifier: { with: { category: true } } },
+    });
+    if (!doc) { set.status = 404; return { error: { code: "NOT_FOUND", message: "Documento não encontrado." } }; }
+    return { data: doc };
+  }, {
+    params: t.Object({ id: t.String() }),
+    detail: { summary: "Metadados do documento", tags: ["Documentos"] },
+  })
+
+  .get("/:id/download", async ({ auth, params, set }) => {
+    const idRow = await db.query.identifiers.findFirst({
+      where: and(eq(identifiers.identifier, params.id), eq(identifiers.tenantId, auth!.tenantId)),
+      with: { document: true },
+    });
+    if (!idRow?.document || !fs.existsSync(idRow.document.filePath)) {
+      set.status = 404; return { error: { code: "NOT_FOUND", message: "Ficheiro não encontrado." } };
+    }
+    const fileBuffer = fs.readFileSync(idRow.document.filePath);
+    set.headers["Content-Disposition"] = `attachment; filename="${idRow.document.filename}"`;
+    set.headers["Content-Type"] = "application/octet-stream";
+    return fileBuffer;
+  }, {
+    params: t.Object({ id: t.String() }),
+    detail: { summary: "Download do documento", tags: ["Documentos"] },
+  })
+
+  .post("/:id/share", async ({ auth, params, body, set }) => {
+    try {
+      if (!body.sectorId && !body.userId) {
+        set.status = 422;
+        return { error: { code: "VALIDATION_ERROR", message: "Indique sectorId ou userId." } };
+      }
+
+      const idRow = await db.query.identifiers.findFirst({
+        where: and(eq(identifiers.identifier, params.id), eq(identifiers.tenantId, auth!.tenantId)),
+        with: { document: true },
+      });
+      if (!idRow || !idRow.document) {
+        set.status = 404; return { error: { code: "NOT_FOUND", message: "Documento não encontrado." } };
+      }
+      const docId = idRow.document.id;
+
+      const [share] = await db.insert(documentShares).values({
+        documentId: docId, sharedBy: auth!.userId,
+        sharedWithSectorId: body.sectorId ?? null,
+        sharedWithUserId: body.userId ?? null,
+      }).returning();
+
+      if (body.userId) {
+        await notify({
+          type: "document:shared",
+          userId: body.userId,
+          tenantId: auth!.tenantId,
+          payload: { documentId: docId, identifier: params.id, sharedBy: auth!.userId },
+        });
+      }
+
+      if (body.sectorId) {
+        const targetSector = await db.query.sectors.findFirst({ where: eq(sectors.id, body.sectorId) });
+        const isCrossSector = idRow.sectorId !== body.sectorId;
+
+        if (isCrossSector && targetSector?.supervisorId) {
+          await db.insert(approvals).values({
+            tenantId: auth!.tenantId, documentId: docId,
+            sectorId: body.sectorId, supervisorId: targetSector.supervisorId,
+          });
+          await notify({
+            type: "approval:pending",
+            userId: targetSector.supervisorId,
+            tenantId: auth!.tenantId,
+            payload: { documentId: docId, identifier: params.id, sectorId: body.sectorId },
+          });
+        } else if (targetSector) {
+          const members = await db.query.users.findMany({
+            where: eq(users.sectorId, body.sectorId),
+          });
+          for (const member of members) {
+            if (member.id !== auth!.userId) {
+              await notify({
+                type: "document:shared",
+                userId: member.id,
+                tenantId: auth!.tenantId,
+                payload: { documentId: docId, identifier: params.id, sectorId: body.sectorId },
+              });
+            }
+          }
+        }
+      }
+
+      await db.insert(auditLogs).values({
+        tenantId: auth!.tenantId, userId: auth!.userId, action: "SHARE",
+        resource: "documents", resourceId: docId,
+        metadata: JSON.stringify({ sharedWithSector: body.sectorId, sharedWithUser: body.userId }),
+        ip: null,
+      });
+
+      return { data: share };
+    } catch (err: any) {
+      set.status = 400;
+      return { error: { code: "SHARE_ERROR", message: err.message } };
+    }
+  }, {
+    body: t.Object({
+      sectorId: t.Optional(t.String()),
+      userId: t.Optional(t.String()),
+    }),
+    detail: { summary: "Partilhar documento", tags: ["Partilha"] },
+  })
+
+  .get("/:id/shares", async ({ auth, params }) => {
+    const idRow = await db.query.identifiers.findFirst({
+      where: and(eq(identifiers.identifier, params.id), eq(identifiers.tenantId, auth!.tenantId)),
+      with: { document: true },
+    });
+    if (!idRow?.document) return { data: [] };
+    const shares = await db.query.documentShares.findMany({
+      where: eq(documentShares.documentId, idRow.document.id),
+      with: { sector: true, user: true, sharer: true },
+    });
+    return { data: shares };
+  }, {
+    detail: { summary: "Listar partilhas", tags: ["Partilha"] },
+  })
+
+  .delete("/:id/shares/:shareId", async ({ auth, params, set }) => {
+    try {
+      const idRow = await db.query.identifiers.findFirst({
+        where: and(eq(identifiers.identifier, params.id), eq(identifiers.tenantId, auth!.tenantId)),
+        with: { document: true },
+      });
+      if (!idRow?.document) {
+        set.status = 404; return { error: { code: "NOT_FOUND", message: "Documento não encontrado." } };
+      }
+      await db.delete(documentShares)
+        .where(and(eq(documentShares.id, params.shareId), eq(documentShares.documentId, idRow.document.id)));
+      return { data: { deleted: true } };
+    } catch (err: any) {
+      set.status = 400;
+      return { error: { code: "DELETE_ERROR", message: err.message } };
+    }
+  }, {
+    detail: { summary: "Revogar partilha", tags: ["Partilha"] },
+  });

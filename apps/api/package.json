@@ -1,0 +1,32 @@
+{
+  "name": "@verano/docid-api",
+  "version": "2.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch src/index.ts",
+    "start": "bun src/index.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "bun src/db/migrate.ts",
+    "db:seed": "bun src/db/seed.ts",
+    "db:studio": "drizzle-kit studio",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "elysia": "^1.1.0",
+    "@elysiajs/swagger": "^1.1.0",
+    "@elysiajs/cors": "^1.1.0",
+    "drizzle-orm": "^0.31.0",
+    "postgres": "^3.4.0",
+    "jose": "^5.2.0",
+    "ioredis": "^5.4.0",
+    "pdf-parse": "^1.1.1",
+    "mammoth": "^1.7.2",
+    "nanoid": "^5.0.7"
+  },
+  "devDependencies": {
+    "@types/pdf-parse": "^1.1.4",
+    "drizzle-kit": "^0.22.0",
+    "typescript": "^5.4.0",
+    "bun-types": "^1.1.0"
+  }
+}

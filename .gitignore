@@ -6,3 +6,4 @@ dist/
 uploads/
 .env
 bun.lockb
+apps/desktop/src-tauri/target/
