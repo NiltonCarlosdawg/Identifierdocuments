@@ -1,7 +1,7 @@
 import { db } from "../db";
 import { users, organizations, userRoles, roles } from "../db/schema";
 import { eq, and } from "drizzle-orm";
-import { signToken } from "../middleware/auth";
+import { signToken, verifyTokenWithGrace } from "../middleware/auth";
 import type { AuthPayload } from "../middleware/auth";
 
 export async function login(email: string, password: string, organizationSlug?: string) {
@@ -84,4 +84,34 @@ export async function changePassword(auth: AuthPayload, currentPassword: string,
   const newHash = await Bun.password.hash(newPassword);
   await db.update(users).set({ passwordHash: newHash }).where(eq(users.id, auth.userId));
   return { message: "Password alterada com sucesso." };
+}
+
+export async function refreshToken(token: string) {
+  const payload = await verifyTokenWithGrace(token);
+  const user = await db.query.users.findFirst({
+    where: eq(users.id, payload.userId),
+    with: { userRoles: { with: { role: true } } },
+  });
+  if (!user || !user.isActive) throw new Error("Utilizador não encontrado ou inactivo.");
+
+  const userRolesList = user.userRoles.map((ur) => ur.role.name);
+  const newToken = await signToken({
+    userId: user.id,
+    tenantId: user.tenantId,
+    sectorId: user.sectorId,
+    roles: userRolesList,
+  });
+
+  return {
+    token: newToken,
+    user: {
+      id: user.id,
+      email: user.email,
+      fullName: user.fullName,
+      tenantId: user.tenantId,
+      sectorId: user.sectorId,
+      roles: userRolesList,
+      organization: null,
+    },
+  };
 }

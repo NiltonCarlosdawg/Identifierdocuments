@@ -71,6 +71,11 @@ export default function Login() {
             {loading ? "A entrar..." : "Entrar"}
           </button>
         </form>
+
+        <p className="mt-6 text-center text-xs text-gray-400">
+          Ainda não tem uma organização?{' '}
+          <button onClick={() => navigate("/onboarding")} className="text-verano-600 hover:underline">Criar</button>
+        </p>
       </div>
     </div>
   );

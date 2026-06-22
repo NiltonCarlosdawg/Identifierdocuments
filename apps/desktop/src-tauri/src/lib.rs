@@ -1,8 +1,11 @@
+mod commands;
 mod db;
 mod sync;
 
+use commands::{scanner, watcher};
 use sync::{start_background_sync, SyncState};
 use tauri::Manager;
+use watcher::WatcherState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -10,6 +13,7 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_sql::Builder::new().build())
         .plugin(tauri_plugin_fs::init())
+        .manage(WatcherState::new())
         .setup(|app| {
             let app_data = app.path().app_data_dir().expect("app data dir");
             let db_path = app_data.join("offline.db");
@@ -43,6 +47,13 @@ pub fn run() {
             sync::remove_queue_item,
             sync::retry_queue_item,
             sync::force_sync,
+            watcher::start_watcher,
+            watcher::stop_watcher,
+            watcher::add_watched_folder,
+            watcher::remove_watched_folder,
+            watcher::get_watched_folders,
+            scanner::list_scanners,
+            scanner::scan_document,
         ])
         .run(tauri::generate_context!())
         .expect("Erro ao iniciar DocID");

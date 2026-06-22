@@ -33,22 +33,13 @@ export default function OfflineQueuePanel() {
     refresh();
 
     const interval = setInterval(refresh, 8000);
-    let unlistenTauri: (() => void) | undefined;
     let unlistenSync: (() => void) | undefined;
 
-    syncService.onSyncEvent((event) => {
-      if (event === "sync:complete" || event === "sync:progress" || event === "sync:failed") {
-        loadQueue();
-      }
-    }).then((fn) => { unlistenSync = fn; });
-
-    listen<{ uploaded: number }>("sync:complete", () => {
-      loadQueue();
-    }).then((fn) => { unlistenTauri = fn; });
+    syncService.onSyncEvent(() => { loadQueue(); })
+      .then((fn) => { unlistenSync = fn; });
 
     return () => {
       clearInterval(interval);
-      unlistenTauri?.();
       unlistenSync?.();
     };
   }, [token, refresh, loadQueue]);

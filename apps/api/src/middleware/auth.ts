@@ -24,6 +24,11 @@ export function verifyToken(token: string): Promise<AuthPayload> {
   return jwtVerify(token, JWT_SECRET).then(({ payload }) => payload as unknown as AuthPayload);
 }
 
+export function verifyTokenWithGrace(token: string, graceSeconds = 86400): Promise<AuthPayload> {
+  return jwtVerify(token, JWT_SECRET, { clockTolerance: `${graceSeconds}s` })
+    .then(({ payload }) => payload as unknown as AuthPayload);
+}
+
 export const authMiddleware = new Elysia()
   .derive({ as: "global" }, async ({ headers }): Promise<{ auth: AuthPayload | null }> => {
     const authHeader = headers.authorization;

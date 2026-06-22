@@ -85,7 +85,7 @@ export const syncService = {
   },
 
   onSyncEvent(
-    handler: (event: string, payload: unknown) => void,
+    handler: (event: string, payload?: unknown) => void,
   ): Promise<UnlistenFn> {
     if (!isTauri()) return Promise.resolve(() => {});
 

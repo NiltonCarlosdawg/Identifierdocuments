@@ -15,6 +15,7 @@ export default function Documents() {
   const fileRef = useRef<HTMLInputElement>(null);
   const [upload, setUpload] = useState({ identifier: "", file: null as File | null });
   const [offlineMode, setOfflineMode] = useState(false);
+  const [uploadError, setUploadError] = useState("");
   const user = useAuthStore((s) => s.user);
   const refreshQueue = useQueueStore((s) => s.refresh);
   const [shareId, setShareId] = useState<string | null>(null);
@@ -25,8 +26,8 @@ export default function Documents() {
     api.get<any>("/categories").then((res) => {
       const cats = Object.values(res.data.groups).flat() as any[];
       setCategories(cats);
-    });
-    api.get<any>("/identifiers").then((res) => setIdentifiers(res.data || []));
+    }).catch(() => {});
+    api.get<any>("/identifiers").then((res) => setIdentifiers(res.data || [])).catch(() => {});
     loadDocs();
   }, []);
 
@@ -34,7 +35,7 @@ export default function Documents() {
     api.get<any>("/identifiers").then((res) => {
       const docs = (res.data || []).filter((i: any) => i.document);
       setDocuments(docs);
-    });
+    }).catch(() => {});
   };
 
   useEffect(() => {
@@ -59,6 +60,7 @@ export default function Documents() {
       return;
     }
 
+    setUploadError("");
     const form = new FormData();
     form.append("identifier", upload.identifier);
     form.append("file", upload.file);
@@ -68,22 +70,26 @@ export default function Documents() {
       setShowUpload(false);
       setUpload({ identifier: "", file: null });
     } catch (err: any) {
-      alert(err.message);
+      setUploadError(err.message);
     }
   };
 
   const loadShares = async (identifier: string) => {
-    const res = await api.get<any>(`/documents/${identifier}/shares`);
-    setShares(res.data || []);
+    try {
+      const res = await api.get<any>(`/documents/${identifier}/shares`);
+      setShares(res.data || []);
+    } catch {
+      setShares([]);
+    }
     setSharesId(identifier);
   };
 
   const revokeShare = async (identifier: string, shareId: string) => {
-    await api.delete(`/documents/${identifier}/shares/${shareId}`);
+    await api.patch(`/documents/${identifier}/shares/${shareId}/revoke`, {});
     loadShares(identifier);
   };
 
-  const download = async (identifier: string) => {
+  const download = async (identifier: string, filename?: string) => {
     try {
       const res = await fetch(`http://localhost:3000/documents/${identifier}/download`, {
         headers: { Authorization: `Bearer ${(await import("../stores/auth")).useAuthStore.getState().token}` },
@@ -93,7 +99,7 @@ export default function Documents() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `${identifier}.pdf`;
+      a.download = filename || identifier;
       a.click();
       URL.revokeObjectURL(url);
     } catch {
@@ -105,7 +111,7 @@ export default function Documents() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-gray-900">Documentos</h1>
-        <button onClick={() => setShowUpload(!showUpload)} className="flex items-center gap-2 rounded-lg bg-verano-600 px-4 py-2 text-sm font-medium text-white hover:bg-verano-700 transition-colors">
+        <button onClick={() => { setShowUpload(!showUpload); setUploadError(""); }} className="flex items-center gap-2 rounded-lg bg-verano-600 px-4 py-2 text-sm font-medium text-white hover:bg-verano-700 transition-colors">
           <Upload className="h-4 w-4" /> {showUpload ? "Fechar" : "Upload Documento"}
         </button>
       </div>
@@ -113,6 +119,13 @@ export default function Documents() {
       {showUpload && (
         <div className="mb-6 rounded-xl bg-white p-5 shadow-sm border border-gray-100">
           <h2 className="text-lg font-semibold mb-4">Associar Documento</h2>
+          {uploadError && (
+            <div className="mb-4 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+              <span className="mt-0.5 text-red-500">⚠</span>
+              <span>{uploadError}</span>
+              <button onClick={() => setUploadError("")} className="ml-auto text-red-400 hover:text-red-600">✕</button>
+            </div>
+          )}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <select value={upload.identifier} onChange={(e) => setUpload({ ...upload, identifier: e.target.value })} className="rounded-lg border border-gray-300 px-3 py-2 text-sm">
               <option value="">Seleccionar identificador</option>
@@ -157,7 +170,7 @@ export default function Documents() {
                 <td className="px-4 py-3 text-xs">{doc.origin}</td>
                 <td className="px-4 py-3">
                   <div className="flex flex-wrap gap-1">
-                    <button onClick={() => download(doc.identifier)} className="flex items-center gap-1 rounded-lg bg-gray-100 px-2 py-1.5 text-xs font-medium hover:bg-gray-200 transition-colors">
+                    <button onClick={() => download(doc.identifier, doc.document?.filename)} className="flex items-center gap-1 rounded-lg bg-gray-100 px-2 py-1.5 text-xs font-medium hover:bg-gray-200 transition-colors">
                       <Download className="h-3 w-3" /> Download
                     </button>
                     <button onClick={() => setShareId(doc.identifier)} className="flex items-center gap-1 rounded-lg bg-verano-50 px-2 py-1.5 text-xs font-medium text-verano-700 hover:bg-verano-100 transition-colors">
@@ -194,19 +207,23 @@ export default function Documents() {
               <p className="text-sm text-gray-400">Nenhuma partilha registada.</p>
             ) : (
               <ul className="space-y-2">
-                {shares.map((s) => (
-                  <li key={s.id} className="flex items-center justify-between rounded-lg border px-3 py-2 text-sm">
-                    <span>
-                      {s.sector ? `Sector: ${s.sector.name}` : s.user ? `Utilizador: ${s.user.fullName}` : "—"}
-                    </span>
-                    <button
-                      onClick={() => revokeShare(sharesId, s.id)}
-                      className="text-xs text-red-600 hover:underline"
-                    >
-                      Revogar
-                    </button>
-                  </li>
-                ))}
+                {shares.map((s) => {
+                  const revoked = !!s.revokedAt;
+                  return (
+                    <li key={s.id} className={`flex items-center justify-between rounded-lg border px-3 py-2 text-sm ${revoked ? "bg-gray-50 opacity-60" : ""}`}>
+                      <span className={revoked ? "line-through text-gray-400" : ""}>
+                        {s.sector ? `Sector: ${s.sector.name}` : s.user ? `Utilizador: ${s.user.fullName}` : "—"}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        {revoked ? (
+                          <span className="text-xs text-gray-400">Revogada</span>
+                        ) : (
+                          <button onClick={() => revokeShare(sharesId, s.id)} className="text-xs text-red-600 hover:underline">Revogar</button>
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
               </ul>
             )}
             <button onClick={() => setSharesId(null)} className="mt-4 rounded-lg bg-gray-100 px-4 py-2 text-sm hover:bg-gray-200">

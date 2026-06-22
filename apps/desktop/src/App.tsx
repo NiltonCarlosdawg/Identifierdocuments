@@ -2,11 +2,14 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import { useAuthStore } from "./stores/auth";
 import Layout from "./components/Layout";
 import Login from "./routes/Login";
+import Onboarding from "./routes/Onboarding";
 import Dashboard from "./routes/Dashboard";
 import Identifiers from "./routes/Identifiers";
 import Documents from "./routes/Documents";
 import Approvals from "./routes/Approvals";
 import Sectors from "./routes/Sectors";
+import Users from "./routes/Users";
+import Settings from "./routes/Settings";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token);
@@ -20,12 +23,15 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={token ? <Navigate to="/" replace /> : <Login />} />
+      <Route path="/onboarding" element={token ? <Navigate to="/" replace /> : <Onboarding />} />
       <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
         <Route index element={<Dashboard />} />
         <Route path="identificadores" element={<Identifiers />} />
         <Route path="documentos" element={<Documents />} />
         <Route path="aprovacoes" element={<Approvals />} />
         <Route path="sectores" element={<Sectors />} />
+        <Route path="utilizadores" element={<Users />} />
+        <Route path="configuracoes" element={<Settings />} />
       </Route>
     </Routes>
   );

@@ -1,5 +1,5 @@
 import { Elysia, t } from "elysia";
-import { login, getMe, changePassword } from "../services/auth.service";
+import { login, getMe, changePassword, refreshToken } from "../services/auth.service";
 import { requireAuth } from "../middleware/auth";
 import { checkRateLimit } from "../middleware/rateLimit";
 
@@ -25,6 +25,19 @@ export const authModule = new Elysia({ prefix: "/auth" })
       organizationSlug: t.Optional(t.String()),
     }),
     detail: { summary: "Login", tags: ["Autenticação"] },
+  })
+
+  .post("/refresh", async ({ body, set }) => {
+    try {
+      const result = await refreshToken(body.token);
+      return { data: result };
+    } catch (err: any) {
+      set.status = 401;
+      return { error: { code: "TOKEN_EXPIRED", message: "Sessão expirada. Faça login novamente." } };
+    }
+  }, {
+    body: t.Object({ token: t.String() }),
+    detail: { summary: "Renovar token", tags: ["Autenticação"] },
   })
 
   .use(requireAuth())

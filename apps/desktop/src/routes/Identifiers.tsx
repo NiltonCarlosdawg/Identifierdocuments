@@ -1,6 +1,30 @@
 import { useEffect, useState } from "react";
 import { api } from "../services/api";
-import { Plus, Search, Copy, Check, X } from "lucide-react";
+import { Plus, Search, Copy, Check, X, LayoutGrid, List, Shield } from "lucide-react";
+
+const CONTRACT_CATEGORIES = ["CPS", "CPF", "CTR", "CLA"];
+
+function isContractCategory(id: string): boolean {
+  return CONTRACT_CATEGORIES.includes(id);
+}
+
+function statusTagStyle(status: string): string {
+  switch (status) {
+    case "active": return "bg-green-100 text-green-700 border-green-200";
+    case "attached": return "bg-blue-100 text-blue-700 border-blue-200";
+    case "cancelled": return "bg-red-100 text-red-700 border-red-200";
+    default: return "bg-gray-100 text-gray-700 border-gray-200";
+  }
+}
+
+function statusLabel(status: string): string {
+  switch (status) {
+    case "active": return "activo";
+    case "attached": return "documento anexado";
+    case "cancelled": return "cancelado";
+    default: return "rascunho";
+  }
+}
 
 export default function Identifiers() {
   const [identifiers, setIdentifiers] = useState<any[]>([]);
@@ -9,12 +33,13 @@ export default function Identifiers() {
   const [copied, setCopied] = useState("");
   const [form, setForm] = useState({ categoryId: "", issuedTo: "", description: "", origin: "digital" });
   const [filterCat, setFilterCat] = useState("");
+  const [viewMode, setViewMode] = useState<"table" | "profiles">("table");
 
   useEffect(() => {
     api.get<any>("/categories").then((res) => {
       const cats = Object.values(res.data.groups).flat() as any[];
       setCategories(cats);
-    });
+    }).catch(() => {});
     loadIdentifiers();
   }, []);
 
@@ -22,10 +47,10 @@ export default function Identifiers() {
     const path = filterCat ? `/identifiers?categoryId=${filterCat}` : "/identifiers";
     api.get<any>(path).then((res) => {
       setIdentifiers(res.data || []);
-    });
+    }).catch(() => {});
   };
 
-  useEffect(() => { loadIdentifiers(); }, [filterCat]);
+  useEffect(() => { loadIdentifiers(); }, [filterCat]); // eslint-disable-line
 
   const generate = async () => {
     try {
@@ -95,13 +120,71 @@ export default function Identifiers() {
         </div>
       )}
 
-      <div className="mb-4 flex items-center gap-3">
-        <Search className="h-4 w-4 text-gray-400" />
-        <select value={filterCat} onChange={(e) => setFilterCat(e.target.value)} className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm">
-          <option value="">Todas categorias</option>
-          {categories.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
+      <div className="mb-4 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <Search className="h-4 w-4 text-gray-400" />
+          <select value={filterCat} onChange={(e) => setFilterCat(e.target.value)} className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm">
+            <option value="">Todas categorias</option>
+            {categories.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </div>
+        <div className="flex items-center gap-1 rounded-lg border border-gray-200 p-0.5">
+          <button onClick={() => setViewMode("table")} className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${viewMode === "table" ? "bg-verano-600 text-white" : "text-gray-500 hover:text-gray-700"}`}>
+            <List className="inline h-3.5 w-3.5 mr-1" />Lista
+          </button>
+          <button onClick={() => setViewMode("profiles")} className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${viewMode === "profiles" ? "bg-verano-600 text-white" : "text-gray-500 hover:text-gray-700"}`}>
+            <LayoutGrid className="inline h-3.5 w-3.5 mr-1" />Perfis
+          </button>
+        </div>
       </div>
+
+      {viewMode === "profiles" && identifiers.filter((i) => isContractCategory(i.categoryId)).length > 0 && (
+        <div className="mb-6">
+          <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">Contratos</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {identifiers.filter((i) => isContractCategory(i.categoryId)).map((id: any) => (
+              <div key={id.id} className="rounded-xl bg-white border border-gray-200 shadow-sm hover:shadow-md transition-shadow overflow-hidden">
+                <div className="bg-gradient-to-r from-verano-600 to-verano-700 px-4 py-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-verano-200">{id.category?.name || id.categoryId}</span>
+                    <span className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${statusTagStyle(id.status)}`}>
+                      {statusLabel(id.status)}
+                    </span>
+                  </div>
+                  <p className="mt-1 font-mono text-sm font-bold text-white">{id.identifier}</p>
+                </div>
+                <div className="p-4 space-y-3">
+                  <div className="flex items-center gap-2 text-sm">
+                    <Shield className="h-4 w-4 text-gray-400" />
+                    <span className="text-gray-700">{id.issuedTo || "—"}</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${id.origin === "digital" ? "bg-blue-50 text-blue-600" : "bg-amber-50 text-amber-600"}`}>
+                      {id.origin === "digital" ? "Digital" : "Físico"}
+                    </span>
+                    {id.description && (
+                      <span className="rounded-full bg-purple-50 text-purple-600 px-2 py-0.5 text-[11px] font-medium">
+                        {id.description}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 pt-1 border-t border-gray-100">
+                    <button onClick={() => copyToClipboard(id.identifier)} className="flex items-center gap-1 rounded-lg bg-gray-100 px-2.5 py-1.5 text-xs font-medium hover:bg-gray-200 transition-colors">
+                      {copied === id.identifier ? <Check className="h-3 w-3 text-green-600" /> : <Copy className="h-3 w-3" />}
+                      {copied === id.identifier ? "Copiado" : "Copiar"}
+                    </button>
+                    {id.status !== "cancelled" && (
+                      <button onClick={() => cancelId(id.identifier)} className="flex items-center gap-1 rounded-lg bg-red-50 px-2.5 py-1.5 text-xs font-medium text-red-600 hover:bg-red-100 transition-colors">
+                        <X className="h-3 w-3" /> Cancelar
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="rounded-xl bg-white shadow-sm border border-gray-100 overflow-hidden">
         <table className="w-full text-sm">

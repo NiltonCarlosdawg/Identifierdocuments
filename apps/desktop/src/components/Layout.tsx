@@ -1,7 +1,7 @@
 import { Outlet, NavLink, useNavigate } from "react-router-dom";
 import { useAuthStore } from "../stores/auth";
 import {
-  LayoutDashboard, FileText, Fingerprint, LogOut, Building2, CheckSquare, Users,
+  LayoutDashboard, FileText, Fingerprint, LogOut, Building2, CheckSquare, Users, UserPlus, Cog,
 } from "lucide-react";
 import OfflineQueuePanel, { OfflineQueueBadge } from "./OfflineQueuePanel";
 import NotificationBell from "./NotificationBell";
@@ -12,6 +12,8 @@ const navItems = [
   { to: "/documentos", label: "Documentos", icon: FileText },
   { to: "/aprovacoes", label: "Aprovações", icon: CheckSquare, roles: ["ORG_ADMIN", "SECTOR_SUPERVISOR"] },
   { to: "/sectores", label: "Sectores", icon: Users, roles: ["ORG_ADMIN"] },
+  { to: "/utilizadores", label: "Utilizadores", icon: UserPlus, roles: ["ORG_ADMIN"] },
+  { to: "/configuracoes", label: "Configurações", icon: Cog, roles: ["ORG_ADMIN"] },
 ];
 
 export default function Layout() {
