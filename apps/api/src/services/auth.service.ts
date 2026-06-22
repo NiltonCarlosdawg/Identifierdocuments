@@ -4,9 +4,19 @@ import { eq, and } from "drizzle-orm";
 import { signToken } from "../middleware/auth";
 import type { AuthPayload } from "../middleware/auth";
 
-export async function login(email: string, password: string) {
+export async function login(email: string, password: string, organizationSlug?: string) {
+  let whereCondition: any = eq(users.email, email);
+
+  if (organizationSlug) {
+    const org = await db.query.organizations.findFirst({
+      where: eq(organizations.slug, organizationSlug),
+    });
+    if (!org) throw new Error("Organização não encontrada.");
+    whereCondition = and(eq(users.email, email), eq(users.tenantId, org.id));
+  }
+
   const user = await db.query.users.findFirst({
-    where: eq(users.email, email),
+    where: whereCondition,
     with: { organization: true, userRoles: { with: { role: true } } },
   });
 

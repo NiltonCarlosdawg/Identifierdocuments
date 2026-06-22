@@ -1,6 +1,6 @@
 import { db } from "../db";
 import { rolePermissions, userRoles, roles } from "../db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, or, isNull } from "drizzle-orm";
 import type { AuthPayload } from "./auth";
 
 async function getUserPermissions(auth: AuthPayload): Promise<string[]> {
@@ -12,7 +12,15 @@ async function getUserPermissions(auth: AuthPayload): Promise<string[]> {
     .from(userRoles)
     .innerJoin(roles, eq(userRoles.roleId, roles.id))
     .innerJoin(rolePermissions, eq(rolePermissions.roleId, roles.id))
-    .where(and(eq(userRoles.userId, auth.userId), eq(roles.tenantId, auth.tenantId)));
+    .where(
+      and(
+        eq(userRoles.userId, auth.userId),
+        or(
+          eq(roles.tenantId, auth.tenantId),
+          isNull(roles.tenantId)
+        )
+      )
+    );
 
   return rows.map((r) => `${r.permResource}:${r.permAction}`);
 }

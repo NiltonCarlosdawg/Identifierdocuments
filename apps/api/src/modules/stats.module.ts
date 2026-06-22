@@ -1,7 +1,7 @@
 import { Elysia } from "elysia";
 import { db } from "../db";
 import { identifiers, documents, auditLogs, categories } from "../db/schema";
-import { eq, sql } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { requireAuth } from "../middleware/auth";
 
 export const statsModule = new Elysia({ prefix: "/stats" })
@@ -38,7 +38,12 @@ export const statsModule = new Elysia({ prefix: "/stats" })
     const [failedAttach] = await db
       .select({ total: sql`COUNT(*)` })
       .from(auditLogs)
-      .where(eq(auditLogs.action, "ATTACH_FAILED"));
+      .where(
+        and(
+          eq(auditLogs.tenantId, tenantId),
+          eq(auditLogs.action, "ATTACH_FAILED")
+        )
+      );
 
     return {
       data: {

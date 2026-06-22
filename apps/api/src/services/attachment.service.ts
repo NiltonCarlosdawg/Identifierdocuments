@@ -85,17 +85,18 @@ export async function attachDocument(
 }
 
 export async function getDocumentMeta(auth: AuthPayload, identifier: string) {
-  return db.query.documents.findFirst({
-    where: and(eq(documents.tenantId, auth.tenantId)),
-    with: { identifier: { with: { category: true } } },
+  const idRow = await db.query.identifiers.findFirst({
+    where: and(eq(identifiers.identifier, identifier), eq(identifiers.tenantId, auth.tenantId)),
+    with: { document: { with: { identifier: { with: { category: true } } } } },
   });
+  return idRow?.document ?? null;
 }
 
 export async function downloadDocument(auth: AuthPayload, identifier: string) {
-  const doc = await db.query.documents.findFirst({
-    where: and(eq(documents.tenantId, auth.tenantId)),
-    with: { identifier: true },
+  const idRow = await db.query.identifiers.findFirst({
+    where: and(eq(identifiers.identifier, identifier), eq(identifiers.tenantId, auth.tenantId)),
+    with: { document: true },
   });
-  if (!doc || !fs.existsSync(doc.filePath)) return null;
-  return { filePath: doc.filePath, fileName: doc.filename };
+  if (!idRow?.document || !fs.existsSync(idRow.document.filePath)) return null;
+  return { filePath: idRow.document.filePath, fileName: idRow.document.filename };
 }

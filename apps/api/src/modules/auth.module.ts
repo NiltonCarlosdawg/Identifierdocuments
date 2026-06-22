@@ -12,14 +12,18 @@ export const authModule = new Elysia({ prefix: "/auth" })
       return { error: { code: "RATE_LIMITED", message: "Muitas tentativas. Tente novamente em 1 minuto." } };
     }
     try {
-      const result = await login(body.email, body.password);
+      const result = await login(body.email, body.password, body.organizationSlug);
       return { data: result };
     } catch (err: any) {
       set.status = 401;
       return { error: { code: "INVALID_CREDENTIALS", message: err.message } };
     }
   }, {
-    body: t.Object({ email: t.String({ format: "email" }), password: t.String({ minLength: 6 }) }),
+    body: t.Object({
+      email: t.String({ format: "email" }),
+      password: t.String({ minLength: 6 }),
+      organizationSlug: t.Optional(t.String()),
+    }),
     detail: { summary: "Login", tags: ["Autenticação"] },
   })
 

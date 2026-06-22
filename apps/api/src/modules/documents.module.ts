@@ -1,6 +1,6 @@
 import { Elysia, t } from "elysia";
 import fs from "node:fs";
-import { attachDocument, downloadDocument } from "../services/attachment.service";
+import { attachDocument, getDocumentMeta, downloadDocument } from "../services/attachment.service";
 import { requireAuth } from "../middleware/auth";
 import { db } from "../db";
 import { documents, documentShares, approvals, sectors, auditLogs, identifiers, users } from "../db/schema";
@@ -32,10 +32,7 @@ export const documentsModule = new Elysia({ prefix: "/documents" })
   })
 
   .get("/:id", async ({ auth, params, set }) => {
-    const doc = await db.query.documents.findFirst({
-      where: and(eq(documents.tenantId, auth!.tenantId)),
-      with: { identifier: { with: { category: true } } },
-    });
+    const doc = await getDocumentMeta(auth!, params.id);
     if (!doc) { set.status = 404; return { error: { code: "NOT_FOUND", message: "Documento não encontrado." } }; }
     return { data: doc };
   }, {
@@ -44,16 +41,13 @@ export const documentsModule = new Elysia({ prefix: "/documents" })
   })
 
   .get("/:id/download", async ({ auth, params, set }) => {
-    const idRow = await db.query.identifiers.findFirst({
-      where: and(eq(identifiers.identifier, params.id), eq(identifiers.tenantId, auth!.tenantId)),
-      with: { document: true },
-    });
-    if (!idRow?.document || !fs.existsSync(idRow.document.filePath)) {
+    const result = await downloadDocument(auth!, params.id);
+    if (!result) {
       set.status = 404; return { error: { code: "NOT_FOUND", message: "Ficheiro não encontrado." } };
     }
-    const fileBuffer = fs.readFileSync(idRow.document.filePath);
-    const asciiName = idRow.document.filename.replace(/[^\x20-\x7E]/g, "_");
-    set.headers["Content-Disposition"] = `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(idRow.document.filename)}`;
+    const fileBuffer = fs.readFileSync(result.filePath);
+    const asciiName = result.fileName.replace(/[^\x20-\x7E]/g, "_");
+    set.headers["Content-Disposition"] = `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(result.fileName)}`;
     set.headers["Content-Type"] = "application/octet-stream";
     return fileBuffer;
   }, {

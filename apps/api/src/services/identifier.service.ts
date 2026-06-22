@@ -1,6 +1,6 @@
 import { db } from "../db";
 import { identifiers, categories, documents, auditLogs, organizations } from "../db/schema";
-import { eq, and, desc, sql, like } from "drizzle-orm";
+import { eq, and, desc, sql } from "drizzle-orm";
 import type { AuthPayload } from "../middleware/auth";
 
 function buildIdentifier(orgPrefix: string, catPrefix: string, year: number, month: number, day: number, seq: number): string {
@@ -20,11 +20,20 @@ export async function generateIdentifier(auth: AuthPayload, opts: { categoryId: 
   const org = await db.query.organizations.findFirst({ where: eq(organizations.id, auth.tenantId) });
   const orgPrefix = org?.identifierPrefix || "VL";
 
-  const seqResult = await db
-    .select({ next: sql`COALESCE(MAX(sequence), 0) + 1` })
-    .from(identifiers)
-    .where(and(eq(identifiers.tenantId, auth.tenantId), eq(identifiers.categoryId, opts.categoryId)))
-    .then((r) => Number(r[0].next));
+  const seqResult = await db.transaction(async (tx) => {
+    const lockKey = sql`hashtext(${auth.tenantId || ''} || '-' || ${opts.categoryId})`;
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(${lockKey})`);
+    const [row] = await tx
+      .select({ next: sql<number>`COALESCE(MAX(sequence), 0) + 1` })
+      .from(identifiers)
+      .where(
+        and(
+          eq(identifiers.tenantId, auth.tenantId),
+          eq(identifiers.categoryId, opts.categoryId)
+        )
+      );
+    return Number(row.next);
+  });
 
   const identifierStr = buildIdentifier(orgPrefix, cat.prefix, year, month, day, seqResult);
 

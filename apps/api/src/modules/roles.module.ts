@@ -1,7 +1,7 @@
 import { Elysia, t } from "elysia";
 import { db } from "../db";
 import { roles, rolePermissions } from "../db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, or, isNull } from "drizzle-orm";
 import { requireAuth, requireRole } from "../middleware/auth";
 
 export const rolesModule = new Elysia({ prefix: "/roles" })
@@ -9,14 +9,13 @@ export const rolesModule = new Elysia({ prefix: "/roles" })
 
   .get("/", async ({ auth }) => {
     const rows = await db.query.roles.findMany({
-      where: eq(roles.tenantId, auth!.tenantId),
+      where: or(
+        eq(roles.tenantId, auth!.tenantId),
+        isNull(roles.tenantId)
+      ),
       with: { permissions: true },
     });
-    const systemRoles = await db.query.roles.findMany({
-      where: and(eq(roles.isSystem, true)),
-      with: { permissions: true },
-    });
-    return { data: [...rows, ...systemRoles] };
+    return { data: rows };
   }, { detail: { summary: "Listar roles", tags: ["Roles"] } })
 
   .use(requireRole("ORG_ADMIN"))
