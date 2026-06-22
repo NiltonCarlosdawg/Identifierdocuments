@@ -1,10 +1,16 @@
 import { Elysia, t } from "elysia";
 import { login, getMe, changePassword } from "../services/auth.service";
 import { requireAuth } from "../middleware/auth";
+import { checkRateLimit } from "../middleware/rateLimit";
 
 export const authModule = new Elysia({ prefix: "/auth" })
 
-  .post("/login", async ({ body, set }) => {
+  .post("/login", async ({ body, request, set }) => {
+    const ip = request.headers.get("x-forwarded-for") || "unknown";
+    if (!checkRateLimit(`login:${ip}`)) {
+      set.status = 429;
+      return { error: { code: "RATE_LIMITED", message: "Muitas tentativas. Tente novamente em 1 minuto." } };
+    }
     try {
       const result = await login(body.email, body.password);
       return { data: result };

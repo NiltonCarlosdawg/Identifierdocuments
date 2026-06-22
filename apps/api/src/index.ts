@@ -17,6 +17,7 @@ import { documentsModule } from "./modules/documents.module";
 import { approvalsModule } from "./modules/approvals.module";
 import { auditModule } from "./modules/audit.module";
 import { statsModule } from "./modules/stats.module";
+import { classifierModule } from "./modules/classifier.module";
 import { notificationSSEModule } from "./services/notification.service";
 
 const app = new Elysia()
@@ -43,6 +44,7 @@ const app = new Elysia()
         { name: "Auditoria", description: "Log de operações" },
         { name: "Estatísticas", description: "Métricas" },
         { name: "Notificações", description: "SSE em tempo real" },
+        { name: "Classificador", description: "Classificação por IA (Groq)" },
       ],
       servers: [{ url: "http://localhost:3000", description: "Desenvolvimento" }],
     },
@@ -56,6 +58,12 @@ const app = new Elysia()
     status: "online",
     docs: "/docs",
   }), { detail: { summary: "Health check", tags: ["Sistema"] } })
+  .get("/health", () => ({
+    status: "healthy",
+    version: "2.0.0",
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+  }), { detail: { summary: "Health check detalhado", tags: ["Sistema"] } })
 
   // Public: criar organização (onboarding)
   .post("/tenants", async ({ body, set }) => {
@@ -114,6 +122,7 @@ const app = new Elysia()
   .use(approvalsModule)
   .use(auditModule)
   .use(statsModule)
+  .use(classifierModule)
   .use(notificationSSEModule)
   .onError(({ code, error, set }) => {
     if (code === "NOT_FOUND") {

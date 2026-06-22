@@ -116,6 +116,7 @@ export const documentShares = pgTable("document_shares", {
   sharedBy: uuid("shared_by").notNull().references(() => users.id),
   sharedWithSectorId: uuid("shared_with_sector_id").references(() => sectors.id),
   sharedWithUserId: uuid("shared_with_user_id").references(() => users.id),
+  revokedAt: timestamp("revoked_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

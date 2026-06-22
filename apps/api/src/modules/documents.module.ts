@@ -4,7 +4,7 @@ import { attachDocument, downloadDocument } from "../services/attachment.service
 import { requireAuth } from "../middleware/auth";
 import { db } from "../db";
 import { documents, documentShares, approvals, sectors, auditLogs, identifiers, users } from "../db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
 import { notify } from "../services/notification.service";
 
 export const documentsModule = new Elysia({ prefix: "/documents" })
@@ -52,7 +52,8 @@ export const documentsModule = new Elysia({ prefix: "/documents" })
       set.status = 404; return { error: { code: "NOT_FOUND", message: "Ficheiro não encontrado." } };
     }
     const fileBuffer = fs.readFileSync(idRow.document.filePath);
-    set.headers["Content-Disposition"] = `attachment; filename="${idRow.document.filename}"`;
+    const asciiName = idRow.document.filename.replace(/[^\x20-\x7E]/g, "_");
+    set.headers["Content-Disposition"] = `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(idRow.document.filename)}`;
     set.headers["Content-Type"] = "application/octet-stream";
     return fileBuffer;
   }, {
@@ -80,7 +81,7 @@ export const documentsModule = new Elysia({ prefix: "/documents" })
         documentId: docId, sharedBy: auth!.userId,
         sharedWithSectorId: body.sectorId ?? null,
         sharedWithUserId: body.userId ?? null,
-      }).returning();
+      }).returning({ id: documentShares.id, documentId: documentShares.documentId, sharedBy: documentShares.sharedBy, sharedWithSectorId: documentShares.sharedWithSectorId, sharedWithUserId: documentShares.sharedWithUserId, createdAt: documentShares.createdAt });
 
       if (body.userId) {
         await notify({
@@ -133,6 +134,7 @@ export const documentsModule = new Elysia({ prefix: "/documents" })
       return { data: share };
     } catch (err: any) {
       set.status = 400;
+      console.error("[SHARE_ERROR]", err);
       return { error: { code: "SHARE_ERROR", message: err.message } };
     }
   }, {
@@ -158,7 +160,7 @@ export const documentsModule = new Elysia({ prefix: "/documents" })
     detail: { summary: "Listar partilhas", tags: ["Partilha"] },
   })
 
-  .delete("/:id/shares/:shareId", async ({ auth, params, set }) => {
+  .patch("/:id/shares/:shareId/revoke", async ({ auth, params, set }) => {
     try {
       const idRow = await db.query.identifiers.findFirst({
         where: and(eq(identifiers.identifier, params.id), eq(identifiers.tenantId, auth!.tenantId)),
@@ -167,13 +169,26 @@ export const documentsModule = new Elysia({ prefix: "/documents" })
       if (!idRow?.document) {
         set.status = 404; return { error: { code: "NOT_FOUND", message: "Documento não encontrado." } };
       }
-      await db.delete(documentShares)
-        .where(and(eq(documentShares.id, params.shareId), eq(documentShares.documentId, idRow.document.id)));
-      return { data: { deleted: true } };
+      const [share] = await db.update(documentShares)
+        .set({ revokedAt: new Date() })
+        .where(and(
+          eq(documentShares.id, params.shareId),
+          eq(documentShares.documentId, idRow.document.id),
+          isNull(documentShares.revokedAt),
+        ))
+        .returning();
+      if (!share) { set.status = 404; return { error: { code: "NOT_FOUND", message: "Partilha não encontrada ou já revogada." } }; }
+      await db.insert(auditLogs).values({
+        tenantId: auth!.tenantId, userId: auth!.userId, action: "REVOKE_SHARE",
+        resource: "documents", resourceId: idRow.document.id,
+        metadata: JSON.stringify({ shareId: params.shareId }), ip: null,
+      });
+      return { data: { id: share.id, revokedAt: share.revokedAt } };
     } catch (err: any) {
       set.status = 400;
-      return { error: { code: "DELETE_ERROR", message: err.message } };
+      return { error: { code: "REVOKE_ERROR", message: err.message } };
     }
   }, {
+    params: t.Object({ id: t.String(), shareId: t.String() }),
     detail: { summary: "Revogar partilha", tags: ["Partilha"] },
   });

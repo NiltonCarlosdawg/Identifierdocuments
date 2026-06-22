@@ -9,11 +9,16 @@ import type { AuthPayload } from "../middleware/auth";
 const UPLOAD_DIR = process.env.UPLOAD_DIR || "./uploads";
 if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
+function sanitizeFilename(name: string): string {
+  return path.basename(name).replace(/[<>:"/\\|?*\x00-\x1F]/g, "_").slice(0, 255);
+}
+
 export async function attachDocument(
   auth: AuthPayload,
   opts: { identifier: string; file: File; uploadSource?: "manual" | "scanner" | "sync" }
 ) {
   const { identifier, file, uploadSource = "manual" } = opts;
+  const safeName = sanitizeFilename(file.name);
 
   const idRow = await db.query.identifiers.findFirst({
     where: and(eq(identifiers.identifier, identifier), eq(identifiers.tenantId, auth.tenantId)),
@@ -54,7 +59,7 @@ export async function attachDocument(
   const [doc] = await db.insert(documents).values({
     tenantId: auth.tenantId,
     identifierId: idRow.id,
-    filename: file.name,
+    filename: safeName,
     mimeType: file.type || "application/octet-stream",
     filePath: finalPath,
     fileSize: file.size,
@@ -68,7 +73,7 @@ export async function attachDocument(
   await db.insert(auditLogs).values({
     tenantId: auth.tenantId, userId: auth.userId, action: "ATTACH",
     resource: "documents", resourceId: doc.id,
-    metadata: JSON.stringify({ identifier, filename: file.name, method: verification.method }), ip: null,
+    metadata: JSON.stringify({ identifier, filename: safeName, method: verification.method }), ip: null,
   });
 
   const fullDoc = await db.query.documents.findFirst({

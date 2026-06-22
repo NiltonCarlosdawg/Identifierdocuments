@@ -65,17 +65,32 @@ export const notificationSSEModule = new Elysia()
     const streamUserId = userId;
     const stream = new ReadableStream({
       start(controller) {
+        let active = true;
+
         const heartbeat = setInterval(() => {
-          controller.enqueue(encoder.encode(`:heartbeat\n\n`));
+          if (!active) { clearInterval(heartbeat); return; }
+          try {
+            controller.enqueue(encoder.encode(`:heartbeat\n\n`));
+          } catch {
+            active = false;
+            clearInterval(heartbeat);
+          }
         }, 30000);
 
         const unsub = subscribe(streamUserId, (event) => {
-          controller.enqueue(encoder.encode(`event: ${event.type}\ndata: ${JSON.stringify(event.payload)}\n\n`));
+          if (!active) return;
+          try {
+            controller.enqueue(encoder.encode(`event: ${event.type}\ndata: ${JSON.stringify(event.payload)}\n\n`));
+          } catch {
+            active = false;
+            clearInterval(heartbeat);
+          }
         });
 
         controller.enqueue(encoder.encode(`event: connected\ndata: {}\n\n`));
 
         return () => {
+          active = false;
           clearInterval(heartbeat);
           unsub();
         };
