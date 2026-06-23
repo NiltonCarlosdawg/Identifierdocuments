@@ -1,8 +1,6 @@
-import { Elysia, t } from "elysia";
+import { Elysia } from "elysia";
 import { swagger } from "@elysiajs/swagger";
 import { cors } from "@elysiajs/cors";
-import { db } from "./db";
-import { organizations, users, sectors, roles, userRoles } from "./db/schema";
 import { authMiddleware } from "./middleware/auth";
 import { tenantMiddleware } from "./middleware/tenant";
 import { authModule } from "./modules/auth.module";
@@ -64,51 +62,6 @@ const app = new Elysia()
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
   }), { detail: { summary: "Health check detalhado", tags: ["Sistema"] } })
-
-  // Public: criar organização (onboarding)
-  .post("/tenants", async ({ body, set }) => {
-    try {
-      const slug = body.name.toLowerCase().replace(/[^a-z0-9]/g, "-");
-      const [org] = await db.insert(organizations).values({
-        name: body.name, slug,
-        identifierPrefix: body.identifierPrefix || "VL",
-        plan: body.plan || "starter",
-      }).returning();
-
-      const [sector] = await db.insert(sectors).values({
-        tenantId: org.id, name: "Administração", code: "ADM",
-      }).returning();
-
-      const passwordHash = await Bun.password.hash(body.adminPassword);
-      const [admin] = await db.insert(users).values({
-        tenantId: org.id, sectorId: sector.id,
-        email: body.adminEmail, passwordHash,
-        fullName: "Administrador",
-      }).returning();
-
-      const [adminRole] = await db.insert(roles).values({
-        tenantId: org.id, name: "ORG_ADMIN", isSystem: true,
-      }).returning();
-
-      await db.insert(userRoles).values({
-        userId: admin.id, roleId: adminRole.id, sectorId: sector.id,
-      });
-
-      return { data: { id: org.id, name: org.name, slug: org.slug } };
-    } catch (err: any) {
-      set.status = 400;
-      return { error: { code: "TENANT_ERROR", message: err.message } };
-    }
-  }, {
-    body: t.Object({
-      name: t.String(),
-      adminEmail: t.String({ format: "email" }),
-      adminPassword: t.String({ minLength: 6 }),
-      identifierPrefix: t.Optional(t.String()),
-      plan: t.Optional(t.String()),
-    }),
-    detail: { summary: "Criar organização (onboarding)", tags: ["Organizações"] },
-  })
 
   .use(authModule)
   .use(tenantsModule)

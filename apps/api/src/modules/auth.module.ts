@@ -7,7 +7,8 @@ export const authModule = new Elysia({ prefix: "/auth" })
 
   .post("/login", async ({ body, request, set }) => {
     const ip = request.headers.get("x-forwarded-for") || "unknown";
-    if (!checkRateLimit(`login:${ip}`)) {
+    const rateLimitKey = `login:${ip}:${body.email}`;
+    if (!checkRateLimit(rateLimitKey)) {
       set.status = 429;
       return { error: { code: "RATE_LIMITED", message: "Muitas tentativas. Tente novamente em 1 minuto." } };
     }

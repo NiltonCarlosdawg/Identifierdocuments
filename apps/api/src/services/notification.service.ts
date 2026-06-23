@@ -58,8 +58,13 @@ export const notificationSSEModule = new Elysia()
     }
 
     set.headers["Content-Type"] = "text/event-stream";
-    set.headers["Cache-Control"] = "no-cache";
+    set.headers["Cache-Control"] = "no-cache, no-store";
     set.headers["Connection"] = "keep-alive";
+    set.headers["X-Accel-Buffering"] = "no";
+
+    if (!auth?.userId && query.access_token) {
+      console.warn(`[SSE] Token via query param para userId=${userId} — considerar token SSE dedicado`);
+    }
 
     const encoder = new TextEncoder();
     const streamUserId = userId;

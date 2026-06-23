@@ -62,14 +62,16 @@ async function seed() {
   }
 
   for (const sysRole of SYSTEM_ROLES) {
-    const existingRole = await db.select().from(roles).where(
-      and(eq(roles.name, sysRole.name), eq(roles.isSystem, true))
-    );
-    if (existingRole.length === 0) {
-      const [role] = await db.insert(roles).values({ name: sysRole.name, isSystem: true, tenantId: null }).returning();
-      for (const perm of sysRole.permissions) {
-        await db.insert(rolePermissions).values({ roleId: role.id, resource: perm.resource, action: perm.action });
-      }
+    const existingRole = await db.query.roles.findFirst({
+      where: and(eq(roles.name, sysRole.name), eq(roles.isSystem, true)),
+    });
+    const role = existingRole
+      ? existingRole
+      : (await db.insert(roles).values({ name: sysRole.name, isSystem: true, tenantId: null }).returning())[0];
+
+    await db.delete(rolePermissions).where(eq(rolePermissions.roleId, role.id));
+    for (const perm of sysRole.permissions) {
+      await db.insert(rolePermissions).values({ roleId: role.id, resource: perm.resource, action: perm.action });
     }
   }
 

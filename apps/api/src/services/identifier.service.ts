@@ -32,12 +32,12 @@ function checkVisibility(
   const visibility = row.visibility ?? "public";
   if (visibility === "public") return { visible: true, restricted: false };
 
-  const isAdmin = auth.roles.includes("ORG_ADMIN");
   const isOwnSector = row.sectorId != null && row.sectorId === auth.sectorId;
-
   if (isOwnSector) return { visible: true, restricted: false };
-  if (isAdmin) return { visible: true, restricted: true };
+
   if (row.document && sharedDocIds.has(row.document.id)) return { visible: true, restricted: false };
+
+  if (auth.roles.includes("ORG_ADMIN")) return { visible: true, restricted: true };
 
   return { visible: false, restricted: false };
 }
@@ -45,6 +45,7 @@ function checkVisibility(
 export async function generateIdentifier(auth: AuthPayload, opts: {
   categoryId: string; issuedTo?: string; description?: string;
   origin?: "digital" | "physical"; visibility?: "public" | "sector_only";
+  sectorId?: string;
 }) {
   const cat = await db.query.categories.findFirst({ where: eq(categories.id, opts.categoryId) });
   if (!cat) throw new Error(`Categoria '${opts.categoryId}' não encontrada.`);
@@ -75,9 +76,14 @@ export async function generateIdentifier(auth: AuthPayload, opts: {
   const identifierStr = buildIdentifier(orgPrefix, cat.prefix, year, month, day, seqResult);
   const visibility = opts.visibility ?? cat.defaultVisibility ?? "public";
 
+  const resolvedSectorId = opts.sectorId ?? auth.sectorId;
+  if (!resolvedSectorId) {
+    throw new Error("Sector não definido. Indique sectorId no body ou associe o utilizador a um sector.");
+  }
+
   const [id] = await db.insert(identifiers).values({
     tenantId: auth.tenantId,
-    sectorId: auth.sectorId!,
+    sectorId: resolvedSectorId,
     categoryId: opts.categoryId,
     identifier: identifierStr,
     sequence: seqResult,

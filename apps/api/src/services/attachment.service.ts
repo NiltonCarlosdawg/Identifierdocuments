@@ -86,26 +86,42 @@ export async function attachDocument(
 
 async function canAccessDocument(auth: AuthPayload, identifierId: string, sectorId: string | null, visibility: string | null, docId: string | null): Promise<{ allowed: boolean; restricted: boolean }> {
   const v = visibility ?? "public";
+
+  // Nível 1 — público
   if (v === "public") return { allowed: true, restricted: false };
 
-  if (sectorId != null && sectorId === auth.sectorId) return { allowed: true, restricted: false };
+  // Nível 2 — mesmo sector que emitiu o documento
+  if (sectorId != null && sectorId === auth.sectorId) {
+    return { allowed: true, restricted: false };
+  }
 
-  if (docId && auth.sectorId) {
-    const share = await db.query.documentShares.findFirst({
-      where: and(
-        eq(documentShares.documentId, docId),
-        or(
-          eq(documentShares.sharedWithSectorId, auth.sectorId!),
+  // Nível 3 — partilha activa (userId directo OU sector do utilizador)
+  if (docId) {
+    const shareConditions = [
+      eq(documentShares.documentId, docId),
+      isNull(documentShares.revokedAt),
+    ];
+
+    const userShareConditions = auth.sectorId
+      ? or(
           eq(documentShares.sharedWithUserId, auth.userId),
-        ),
-        isNull(documentShares.revokedAt),
-      ),
+          eq(documentShares.sharedWithSectorId, auth.sectorId),
+        )
+      : eq(documentShares.sharedWithUserId, auth.userId);
+
+    const share = await db.query.documentShares.findFirst({
+      where: and(...shareConditions, userShareConditions),
     });
+
     if (share) return { allowed: true, restricted: false };
   }
 
-  if (auth.roles.includes("ORG_ADMIN")) return { allowed: false, restricted: true };
+  // Nível 4 — ORG_ADMIN sem partilha: vê mas não descarrega
+  if (auth.roles.includes("ORG_ADMIN")) {
+    return { allowed: false, restricted: true };
+  }
 
+  // Nível 5 — sem acesso
   return { allowed: false, restricted: false };
 }
 

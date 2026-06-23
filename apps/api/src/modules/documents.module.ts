@@ -94,7 +94,17 @@ export const documentsModule = new Elysia({ prefix: "/documents" })
         const targetSector = await db.query.sectors.findFirst({ where: eq(sectors.id, body.sectorId) });
         const isCrossSector = idRow.sectorId !== body.sectorId;
 
-        if (isCrossSector && targetSector?.supervisorId) {
+        if (isCrossSector) {
+          if (!targetSector?.supervisorId) {
+            await db.delete(documentShares).where(eq(documentShares.id, share.id));
+            set.status = 422;
+            return {
+              error: {
+                code: "NO_SUPERVISOR",
+                message: "O sector destino não tem supervisor definido. Não é possível criar partilha cross-sector sem aprovação.",
+              },
+            };
+          }
           await db.insert(approvals).values({
             tenantId: auth!.tenantId, documentId: docId,
             sectorId: body.sectorId, supervisorId: targetSector.supervisorId,
