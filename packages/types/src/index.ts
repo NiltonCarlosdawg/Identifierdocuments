@@ -56,6 +56,7 @@ export type Category = {
   name: string;
   group: string;
   prefix: string;
+  defaultVisibility: "public" | "sector_only";
   createdAt: string;
 };
 
@@ -68,6 +69,7 @@ export type Identifier = {
   sequence: number;
   issuedTo: string | null;
   description: string | null;
+  visibility: "public" | "sector_only";
   status: "draft" | "active" | "attached" | "cancelled";
   origin: "digital" | "physical";
   createdBy: string | null;
@@ -94,6 +96,7 @@ export type DocumentShare = {
   sharedBy: string;
   sharedWithSectorId: string | null;
   sharedWithUserId: string | null;
+  revokedAt: string | null;
   createdAt: string;
 };
 
@@ -103,6 +106,8 @@ export type Approval = {
   documentId: string;
   sectorId: string;
   supervisorId: string | null;
+  requesterId: string | null;
+  type: "cross_sector" | "access_request";
   status: "pending" | "approved" | "rejected";
   notes: string | null;
   requestedAt: string;

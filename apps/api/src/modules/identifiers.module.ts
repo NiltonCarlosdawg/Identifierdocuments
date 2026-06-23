@@ -10,6 +10,7 @@ export const identifiersModule = new Elysia({ prefix: "/identifiers" })
       const result = await generateIdentifier(auth!, {
         categoryId: body.categoryId, issuedTo: body.issuedTo,
         description: body.description, origin: body.origin,
+        visibility: body.visibility,
       });
       return { data: result };
     } catch (err: any) {
@@ -22,6 +23,7 @@ export const identifiersModule = new Elysia({ prefix: "/identifiers" })
       issuedTo: t.Optional(t.String()),
       description: t.Optional(t.String()),
       origin: t.Optional(t.Union([t.Literal("digital"), t.Literal("physical")])),
+      visibility: t.Optional(t.Union([t.Literal("public"), t.Literal("sector_only")])),
     }),
     detail: { summary: "Gerar identificador", tags: ["Identificadores"] },
   })

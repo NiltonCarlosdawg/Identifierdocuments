@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { db } from "../db";
-import { identifiers, documents, auditLogs } from "../db/schema";
-import { eq, and } from "drizzle-orm";
+import { identifiers, documents, documentShares, auditLogs } from "../db/schema";
+import { eq, and, or, isNull } from "drizzle-orm";
 import { verifyDocumentContainsIdentifier } from "./document.service";
 import type { AuthPayload } from "../middleware/auth";
 
@@ -84,19 +84,58 @@ export async function attachDocument(
   return { success: true, message: "Documento associado com sucesso.", document: fullDoc, verification };
 }
 
+async function canAccessDocument(auth: AuthPayload, identifierId: string, sectorId: string | null, visibility: string | null, docId: string | null): Promise<{ allowed: boolean; restricted: boolean }> {
+  const v = visibility ?? "public";
+  if (v === "public") return { allowed: true, restricted: false };
+
+  if (sectorId != null && sectorId === auth.sectorId) return { allowed: true, restricted: false };
+
+  if (docId && auth.sectorId) {
+    const share = await db.query.documentShares.findFirst({
+      where: and(
+        eq(documentShares.documentId, docId),
+        or(
+          eq(documentShares.sharedWithSectorId, auth.sectorId!),
+          eq(documentShares.sharedWithUserId, auth.userId),
+        ),
+        isNull(documentShares.revokedAt),
+      ),
+    });
+    if (share) return { allowed: true, restricted: false };
+  }
+
+  if (auth.roles.includes("ORG_ADMIN")) return { allowed: false, restricted: true };
+
+  return { allowed: false, restricted: false };
+}
+
 export async function getDocumentMeta(auth: AuthPayload, identifier: string) {
   const idRow = await db.query.identifiers.findFirst({
     where: and(eq(identifiers.identifier, identifier), eq(identifiers.tenantId, auth.tenantId)),
     with: { document: { with: { identifier: { with: { category: true } } } } },
   });
-  return idRow?.document ?? null;
+  if (!idRow?.document) return null;
+
+  const { allowed, restricted } = await canAccessDocument(
+    auth, idRow.id, idRow.sectorId, idRow.visibility, idRow.document.id,
+  );
+  if (!allowed && !restricted) return null;
+
+  return { ...idRow.document, restricted };
 }
 
-export async function downloadDocument(auth: AuthPayload, identifier: string) {
+export async function downloadDocument(auth: AuthPayload, identifier: string): Promise<{ filePath: string; fileName: string } | { error: "NOT_FOUND" | "ACCESS_REQUIRED" }> {
   const idRow = await db.query.identifiers.findFirst({
     where: and(eq(identifiers.identifier, identifier), eq(identifiers.tenantId, auth.tenantId)),
     with: { document: true },
   });
-  if (!idRow?.document || !fs.existsSync(idRow.document.filePath)) return null;
+  if (!idRow?.document || !fs.existsSync(idRow.document.filePath)) return { error: "NOT_FOUND" };
+
+  const { allowed, restricted } = await canAccessDocument(
+    auth, idRow.id, idRow.sectorId, idRow.visibility, idRow.document.id,
+  );
+  if (!allowed && restricted) return { error: "ACCESS_REQUIRED" };
+  if (!allowed) return { error: "NOT_FOUND" };
+
   return { filePath: idRow.document.filePath, fileName: idRow.document.filename };
 }

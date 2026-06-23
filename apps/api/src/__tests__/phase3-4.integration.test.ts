@@ -312,6 +312,170 @@ describe("Notificações", () => {
   });
 });
 
+describe("Visibility — sector_only vs public", () => {
+  let adminToken = "";
+  let memberToken = "";
+  let supervisorToken = "";
+  let sectorAId = "";
+  let sectorBId = "";
+  let supervisorUserId = "";
+  let pubIdentifier = "";
+  let restrictedIdentifier = "";
+
+  test("setup: criar sectores, supervisor e member", async () => {
+    const login = await api<any>("/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email: `admin-${RUN_ID}@test.docid`, password: "testpass123" }),
+    });
+    adminToken = login.body.data.token;
+
+    const sectors = await api<any>("/sectors", { token: adminToken });
+    sectorAId = sectors.body.data[0].id;
+
+    const sectorB = await api<any>("/sectors", {
+      method: "POST", token: adminToken,
+      body: JSON.stringify({ name: "Visibilidade", code: `VIS${RUN_ID.slice(-4)}` }),
+    });
+    sectorBId = sectorB.body.data.id;
+
+    const supEmail = `vis-sup-${RUN_ID}@test.docid`;
+    const sup = await api<any>("/users", { method: "POST", token: adminToken,
+      body: JSON.stringify({ email: supEmail, password: "testpass123", fullName: "Vis Supervisor", sectorId: sectorBId }),
+    });
+    supervisorUserId = sup.body.data.id;
+
+    const roles = await api<any>("/roles", { token: adminToken });
+    const supRole = roles.body.data.find((r: any) => r.name === "SECTOR_SUPERVISOR");
+    await api(`/users/${supervisorUserId}/roles`, { method: "POST", token: adminToken,
+      body: JSON.stringify({ roleId: supRole.id, sectorId: sectorBId }),
+    });
+    await api(`/sectors/${sectorBId}/supervisor`, { method: "PATCH", token: adminToken,
+      body: JSON.stringify({ supervisorId: supervisorUserId }),
+    });
+
+    const supLogin = await api<any>("/auth/login", { method: "POST",
+      body: JSON.stringify({ email: supEmail, password: "testpass123" }),
+    });
+    supervisorToken = supLogin.body.data.token;
+  });
+
+  test("gerar identifier public (admin, sector A) e sector_only (supervisor, sector B)", async () => {
+    const pub = await api<any>("/identifiers/generate", { method: "POST", token: adminToken,
+      body: JSON.stringify({ categoryId: "MEM", origin: "digital" }),
+    });
+    expect(pub.status).toBe(200);
+    pubIdentifier = pub.body.data.identifier;
+    expect(pub.body.data.visibility).toBe("public");
+
+    const restr = await api<any>("/identifiers/generate", { method: "POST", token: supervisorToken,
+      body: JSON.stringify({ categoryId: "CPS", origin: "digital" }),
+    });
+    expect(restr.status).toBe(200);
+    restrictedIdentifier = restr.body.data.identifier;
+    expect(restr.body.data.visibility).toBe("sector_only");
+  });
+
+  test("attach documents para ambos identifiers", async () => {
+    for (const id of [pubIdentifier, restrictedIdentifier]) {
+      const content = `Documento ${id}`;
+      const file = new File([content], "doc.txt", { type: "text/plain" });
+      const form = new FormData();
+      form.append("identifier", id);
+      form.append("file", file);
+      form.append("uploadSource", "manual");
+      const res = await fetch(`${BASE}/documents/attach`, {
+        method: "POST", headers: { Authorization: `Bearer ${adminToken}` }, body: form,
+      });
+      expect(res.status).toBe(200);
+    }
+  });
+
+  test("admin vê public e sector_only na lista (restricted=true)", async () => {
+    const list = await api<any>(`/identifiers?limit=50`, { token: adminToken });
+    const found = list.body.data.filter((i: any) => i.identifier === restrictedIdentifier);
+    expect(found.length).toBe(1);
+    expect(found[0].restricted).toBe(true);
+
+    const foundPub = list.body.data.filter((i: any) => i.identifier === pubIdentifier);
+    expect(foundPub.length).toBe(1);
+    expect(foundPub[0].restricted).toBe(false);
+  });
+
+  test("supervisor (sector B) vê o seu próprio sector_only", async () => {
+    const list = await api<any>(`/identifiers?limit=50`, { token: supervisorToken });
+    const found = list.body.data.filter((i: any) => i.identifier === restrictedIdentifier);
+    expect(found.length).toBe(1);
+    expect(found[0].restricted).toBe(false);
+  });
+
+  test("supervisor vê public identifier", async () => {
+    const list = await api<any>(`/identifiers?limit=50`, { token: supervisorToken });
+    const found = list.body.data.filter((i: any) => i.identifier === pubIdentifier);
+    expect(found.length).toBe(1);
+  });
+
+  test("admin não descarrega sector_only (403)", async () => {
+    const res = await fetch(`${BASE}/documents/${restrictedIdentifier}/download`, {
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body.error.code).toBe("ACCESS_REQUIRED");
+  });
+
+  test("admin descarrega public sem problemas", async () => {
+    const res = await fetch(`${BASE}/documents/${pubIdentifier}/download`, {
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    expect(res.status).toBe(200);
+  });
+
+  test("supervisor vê o próprio sector_only via GET /:identifier", async () => {
+    const res = await api<any>(`/identifiers/${restrictedIdentifier}`, { token: supervisorToken });
+    expect(res.status).toBe(200);
+    expect(res.body.data.restricted).toBe(false);
+  });
+
+  test("request-access cria approval pendente", async () => {
+    const req = await api<any>(`/documents/${restrictedIdentifier}/request-access`, {
+      method: "POST", token: adminToken,
+      body: JSON.stringify({ reason: "Preciso consultar para auditoria" }),
+    });
+    expect(req.status).toBe(200);
+    expect(req.body.data.type).toBe("access_request");
+    expect(req.body.data.status).toBe("pending");
+
+    const approvals = await api<any>(`/approvals?status=pending`, { token: supervisorToken });
+    const match = approvals.body.data.find((a: any) => a.type === "access_request");
+    expect(match).toBeDefined();
+  });
+
+  test("request-access duplicado retorna 409", async () => {
+    const req = await api<any>(`/documents/${restrictedIdentifier}/request-access`, {
+      method: "POST", token: adminToken,
+      body: JSON.stringify({}),
+    });
+    expect(req.status).toBe(409);
+    expect(req.body.error?.code).toBe("ALREADY_REQUESTED");
+  });
+
+  test("supervisor aprova access_request → share criado → admin descarrega", async () => {
+    const approvals = await api<any>(`/approvals?status=pending`, { token: supervisorToken });
+    const accessReq = approvals.body.data.find((a: any) => a.type === "access_request");
+    expect(accessReq).toBeDefined();
+    const approve = await api<any>(`/approvals/${accessReq.id}`, {
+      method: "PATCH", token: supervisorToken,
+      body: JSON.stringify({ status: "approved" }),
+    });
+    expect(approve.status).toBe(200);
+
+    const res = await fetch(`${BASE}/documents/${restrictedIdentifier}/download`, {
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    expect(res.status).toBe(200);
+  });
+});
+
 describe("Sectores e RBAC", () => {
   let token = "";
 

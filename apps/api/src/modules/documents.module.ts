@@ -4,7 +4,7 @@ import { attachDocument, getDocumentMeta, downloadDocument } from "../services/a
 import { requireAuth } from "../middleware/auth";
 import { db } from "../db";
 import { documents, documentShares, approvals, sectors, auditLogs, identifiers, users } from "../db/schema";
-import { eq, and, isNull } from "drizzle-orm";
+import { eq, and, isNull, or } from "drizzle-orm";
 import { notify } from "../services/notification.service";
 
 export const documentsModule = new Elysia({ prefix: "/documents" })
@@ -42,7 +42,11 @@ export const documentsModule = new Elysia({ prefix: "/documents" })
 
   .get("/:id/download", async ({ auth, params, set }) => {
     const result = await downloadDocument(auth!, params.id);
-    if (!result) {
+    if ("error" in result) {
+      if (result.error === "ACCESS_REQUIRED") {
+        set.status = 403;
+        return { error: { code: "ACCESS_REQUIRED", message: "Solicite acesso ao supervisor do sector emitente." } };
+      }
       set.status = 404; return { error: { code: "NOT_FOUND", message: "Ficheiro não encontrado." } };
     }
     const fileBuffer = fs.readFileSync(result.filePath);
@@ -152,6 +156,67 @@ export const documentsModule = new Elysia({ prefix: "/documents" })
     return { data: shares };
   }, {
     detail: { summary: "Listar partilhas", tags: ["Partilha"] },
+  })
+
+  .post("/:id/request-access", async ({ auth, params, body, set }) => {
+    try {
+      const idRow = await db.query.identifiers.findFirst({
+        where: and(eq(identifiers.identifier, params.id), eq(identifiers.tenantId, auth!.tenantId)),
+        with: { document: true, sector: true },
+      });
+      if (!idRow?.document) {
+        set.status = 404; return { error: { code: "NOT_FOUND", message: "Documento não encontrado." } };
+      }
+      if (idRow.visibility !== "sector_only") {
+        set.status = 422; return { error: { code: "NOT_RESTRICTED", message: "Apenas documentos sector_only necessitam de pedido de acesso." } };
+      }
+
+      const supervisorId = idRow.sector?.supervisorId;
+      if (!supervisorId) {
+        set.status = 422; return { error: { code: "NO_SUPERVISOR", message: "Sector emitente não tem supervisor definido." } };
+      }
+
+      const existing = await db.query.approvals.findFirst({
+        where: and(
+          eq(approvals.documentId, idRow.document.id),
+          eq(approvals.requesterId, auth!.userId),
+          eq(approvals.type, "access_request"),
+          eq(approvals.status, "pending"),
+        ),
+      });
+      if (existing) {
+        set.status = 409; return { error: { code: "ALREADY_REQUESTED", message: "Já existe um pedido de acesso pendente para este documento." } };
+      }
+
+      const [approval] = await db.insert(approvals).values({
+        tenantId: auth!.tenantId, documentId: idRow.document.id,
+        sectorId: idRow.sectorId, supervisorId,
+        requesterId: auth!.userId, type: "access_request",
+        notes: body.reason ?? null,
+      }).returning();
+
+      await notify({
+        type: "access:requested",
+        userId: supervisorId,
+        tenantId: auth!.tenantId,
+        payload: { documentId: idRow.document.id, identifier: params.id, requesterId: auth!.userId },
+      });
+
+      await db.insert(auditLogs).values({
+        tenantId: auth!.tenantId, userId: auth!.userId, action: "REQUEST_ACCESS",
+        resource: "documents", resourceId: idRow.document.id,
+        metadata: JSON.stringify({ identifier: params.id, approvalId: approval.id }),
+        ip: null,
+      });
+
+      return { data: approval };
+    } catch (err: any) {
+      set.status = 400;
+      return { error: { code: "REQUEST_ERROR", message: err.message } };
+    }
+  }, {
+    body: t.Object({ reason: t.Optional(t.String()) }),
+    detail: { summary: "Solicitar acesso a documento sector_only", tags: ["Documentos"] },
   })
 
   .patch("/:id/shares/:shareId/revoke", async ({ auth, params, set }) => {

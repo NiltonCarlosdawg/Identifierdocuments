@@ -1,8 +1,7 @@
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::Mutex;
 
 pub struct WatcherState {
@@ -25,19 +24,24 @@ pub async fn start_watcher(app: AppHandle, state: tauri::State<'_, WatcherState>
         return Err("Watcher já está em execução.".to_string());
     }
 
-    let folders = state.folders.lock().await;
-    if folders.is_empty() {
-        return Err("Nenhuma pasta configurada para monitorizar.".to_string());
+    {
+        let folders = state.folders.lock().await;
+        if folders.is_empty() {
+            return Err("Nenhuma pasta configurada para monitorizar.".to_string());
+        }
     }
 
     state.running.store(true, Ordering::SeqCst);
 
     let app_clone = app.clone();
-    let folders_clone = folders.clone();
-    let running = Arc::new(AtomicBool::new(true));
 
     tokio::spawn(async move {
+        let state = app_clone.state::<WatcherState>();
         let (tx, mut rx) = tokio::sync::mpsc::channel(256);
+
+        let folders = state.folders.lock().await;
+        let folders_vec = folders.clone();
+        drop(folders);
 
         let mut watcher = RecommendedWatcher::new(
             move |res: Result<Event, notify::Error>| {
@@ -49,13 +53,13 @@ pub async fn start_watcher(app: AppHandle, state: tauri::State<'_, WatcherState>
         )
         .expect("Falha ao criar watcher");
 
-        for folder in &folders_clone {
+        for folder in &folders_vec {
             if let Err(e) = watcher.watch(folder, RecursiveMode::Recursive) {
                 eprintln!("Erro ao monitorizar {:?}: {}", folder, e);
             }
         }
 
-        while running.load(Ordering::SeqCst) {
+        while state.running.load(Ordering::SeqCst) {
             tokio::select! {
                 Some(event) = rx.recv() => {
                     if let EventKind::Create(_) = event.kind {

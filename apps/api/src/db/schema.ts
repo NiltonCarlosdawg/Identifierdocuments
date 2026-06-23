@@ -71,6 +71,7 @@ export const categories = pgTable("categories", {
   name: text("name").notNull(),
   group: text("group").notNull(),
   prefix: text("prefix").notNull().unique(),
+  defaultVisibility: text("default_visibility", { enum: ["public", "sector_only"] }).notNull().default("public"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -83,6 +84,7 @@ export const identifiers = pgTable("identifiers", {
   sequence: integer("sequence").notNull(),
   issuedTo: text("issued_to"),
   description: text("description"),
+  visibility: text("visibility", { enum: ["public", "sector_only"] }).notNull().default("public"),
   status: text("status", { enum: ["draft", "active", "attached", "cancelled"] }).notNull().default("draft"),
   origin: text("origin", { enum: ["digital", "physical"] }).notNull().default("digital"),
   createdBy: uuid("created_by").references(() => users.id),
@@ -126,6 +128,8 @@ export const approvals = pgTable("approvals", {
   documentId: uuid("document_id").notNull().references(() => documents.id),
   sectorId: uuid("sector_id").notNull().references(() => sectors.id),
   supervisorId: uuid("supervisor_id").references(() => users.id),
+  requesterId: uuid("requester_id").references(() => users.id),
+  type: text("type", { enum: ["cross_sector", "access_request"] }).notNull().default("cross_sector"),
   status: text("status", { enum: ["pending", "approved", "rejected"] }).notNull().default("pending"),
   notes: text("notes"),
   requestedAt: timestamp("requested_at").notNull().defaultNow(),

@@ -1,6 +1,6 @@
 import { db } from "../db";
-import { identifiers, categories, documents, auditLogs, organizations } from "../db/schema";
-import { eq, and, desc, sql } from "drizzle-orm";
+import { identifiers, categories, documents, documentShares, auditLogs, organizations, sectors } from "../db/schema";
+import { eq, and, or, desc, sql, isNull } from "drizzle-orm";
 import type { AuthPayload } from "../middleware/auth";
 
 function buildIdentifier(orgPrefix: string, catPrefix: string, year: number, month: number, day: number, seq: number): string {
@@ -8,7 +8,44 @@ function buildIdentifier(orgPrefix: string, catPrefix: string, year: number, mon
   return `${orgPrefix}-${catPrefix}-${year}-${mmdd}-${String(seq).padStart(3, "0")}`;
 }
 
-export async function generateIdentifier(auth: AuthPayload, opts: { categoryId: string; issuedTo?: string; description?: string; origin?: "digital" | "physical" }) {
+async function getSharedDocIds(auth: AuthPayload): Promise<Set<string>> {
+  if (!auth.sectorId) return new Set();
+  const rows = await db.select({ documentId: documentShares.documentId })
+    .from(documentShares)
+    .where(and(
+      or(
+        eq(documentShares.sharedWithSectorId, auth.sectorId),
+        eq(documentShares.sharedWithUserId, auth.userId),
+      ),
+      isNull(documentShares.revokedAt),
+    ));
+  return new Set(rows.map(r => r.documentId));
+}
+
+type VisibilityResult = { visible: boolean; restricted: boolean };
+
+function checkVisibility(
+  row: { visibility: string | null; sectorId: string | null; document?: { id: string } | null },
+  auth: AuthPayload,
+  sharedDocIds: Set<string>,
+): VisibilityResult {
+  const visibility = row.visibility ?? "public";
+  if (visibility === "public") return { visible: true, restricted: false };
+
+  const isAdmin = auth.roles.includes("ORG_ADMIN");
+  const isOwnSector = row.sectorId != null && row.sectorId === auth.sectorId;
+
+  if (isOwnSector) return { visible: true, restricted: false };
+  if (isAdmin) return { visible: true, restricted: true };
+  if (row.document && sharedDocIds.has(row.document.id)) return { visible: true, restricted: false };
+
+  return { visible: false, restricted: false };
+}
+
+export async function generateIdentifier(auth: AuthPayload, opts: {
+  categoryId: string; issuedTo?: string; description?: string;
+  origin?: "digital" | "physical"; visibility?: "public" | "sector_only";
+}) {
   const cat = await db.query.categories.findFirst({ where: eq(categories.id, opts.categoryId) });
   if (!cat) throw new Error(`Categoria '${opts.categoryId}' não encontrada.`);
 
@@ -36,6 +73,7 @@ export async function generateIdentifier(auth: AuthPayload, opts: { categoryId: 
   });
 
   const identifierStr = buildIdentifier(orgPrefix, cat.prefix, year, month, day, seqResult);
+  const visibility = opts.visibility ?? cat.defaultVisibility ?? "public";
 
   const [id] = await db.insert(identifiers).values({
     tenantId: auth.tenantId,
@@ -43,6 +81,7 @@ export async function generateIdentifier(auth: AuthPayload, opts: { categoryId: 
     categoryId: opts.categoryId,
     identifier: identifierStr,
     sequence: seqResult,
+    visibility,
     issuedTo: opts.issuedTo ?? null,
     description: opts.description ?? null,
     status: "active",
@@ -56,14 +95,16 @@ export async function generateIdentifier(auth: AuthPayload, opts: { categoryId: 
     action: "GENERATE",
     resource: "identifiers",
     resourceId: id.id,
-    metadata: JSON.stringify({ identifier: identifierStr, category: cat.name }),
+    metadata: JSON.stringify({ identifier: identifierStr, category: cat.name, visibility }),
     ip: null,
   });
 
   return id;
 }
 
-export async function listIdentifiers(auth: AuthPayload, filters: { categoryId?: string; status?: string; origin?: string; page?: number; limit?: number }) {
+export async function listIdentifiers(auth: AuthPayload, filters: {
+  categoryId?: string; status?: string; origin?: string; page?: number; limit?: number;
+}) {
   const { categoryId, status, origin, page = 1, limit = 20 } = filters;
   const offset = (page - 1) * limit;
 
@@ -72,21 +113,27 @@ export async function listIdentifiers(auth: AuthPayload, filters: { categoryId?:
   if (status) conditions.push(eq(identifiers.status, status as any));
   if (origin) conditions.push(eq(identifiers.origin, origin as any));
 
-  const rows = await db.query.identifiers.findMany({
+  const allRows = await db.query.identifiers.findMany({
     where: and(...conditions),
     with: { category: true, document: true, sector: true },
     orderBy: desc(identifiers.createdAt),
-    limit,
-    offset,
   });
 
-  const [totalResult] = await db
-    .select({ total: sql`COUNT(*)` })
-    .from(identifiers)
-    .where(and(...conditions))
-    .then((r) => r);
+  const sharedDocIds = await getSharedDocIds(auth);
 
-  return { data: rows, meta: { total: Number(totalResult.total), page, limit } };
+  const filtered = allRows.filter(row => {
+    const { visible } = checkVisibility(row, auth, sharedDocIds);
+    return visible;
+  });
+
+  const data = filtered.map(row => {
+    const { restricted } = checkVisibility(row, auth, sharedDocIds);
+    return { ...row, restricted };
+  });
+
+  const paginated = data.slice(offset, offset + limit);
+
+  return { data: paginated, meta: { total: data.length, page, limit } };
 }
 
 export async function getIdentifier(auth: AuthPayload, identifierStr: string) {
@@ -96,6 +143,10 @@ export async function getIdentifier(auth: AuthPayload, identifierStr: string) {
   });
 
   if (!row) return null;
+
+  const sharedDocIds = await getSharedDocIds(auth);
+  const { visible, restricted } = checkVisibility(row, auth, sharedDocIds);
+  if (!visible) return null;
 
   await db.insert(auditLogs).values({
     tenantId: auth.tenantId,
@@ -107,7 +158,7 @@ export async function getIdentifier(auth: AuthPayload, identifierStr: string) {
     ip: null,
   });
 
-  return row;
+  return { ...row, restricted };
 }
 
 export async function cancelIdentifier(auth: AuthPayload, identifierStr: string, reason: string) {

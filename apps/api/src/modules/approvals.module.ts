@@ -1,6 +1,6 @@
 import { Elysia, t } from "elysia";
 import { db } from "../db";
-import { approvals, documents } from "../db/schema";
+import { approvals, documents, documentShares, auditLogs } from "../db/schema";
 import { eq, and } from "drizzle-orm";
 import { requireAuth } from "../middleware/auth";
 import { notify } from "../services/notification.service";
@@ -82,6 +82,36 @@ export const approvalsModule = new Elysia({ prefix: "/approvals" })
 
       const doc = existing.document;
       const identifierStr = doc?.identifier?.identifier;
+
+      if (body.status === "approved" && existing.type === "access_request" && existing.requesterId) {
+        await db.insert(documentShares).values({
+          documentId: approval.documentId, sharedBy: auth!.userId,
+          sharedWithUserId: existing.requesterId,
+        });
+        await notify({
+          type: "access:granted",
+          userId: existing.requesterId,
+          tenantId: auth!.tenantId,
+          payload: {
+            documentId: approval.documentId,
+            identifier: identifierStr,
+          },
+        });
+      }
+
+      if (body.status === "rejected" && existing.requesterId) {
+        await notify({
+          type: "access:rejected",
+          userId: existing.requesterId,
+          tenantId: auth!.tenantId,
+          payload: {
+            documentId: approval.documentId,
+            identifier: identifierStr,
+            notes: body.notes,
+          },
+        });
+      }
+
       if (doc?.uploadedBy) {
         await notify({
           type: `approval:${body.status}`,
