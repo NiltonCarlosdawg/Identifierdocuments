@@ -1,6 +1,6 @@
 import { db } from "./index";
 import { categories, roles, rolePermissions } from "./schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
 
 const CATEGORIES: Array<{ id: string; name: string; group: string; prefix: string; defaultVisibility: "public" | "sector_only" }> = [
   { id: "PROP", prefix: "PROP", group: "Comercial",     name: "Proposta Comercial",                      defaultVisibility: "public" },
@@ -62,12 +62,21 @@ async function seed() {
   }
 
   for (const sysRole of SYSTEM_ROLES) {
+    let role: (typeof roles.$inferSelect) | undefined;
     const existingRole = await db.query.roles.findFirst({
-      where: and(eq(roles.name, sysRole.name), eq(roles.isSystem, true)),
+      where: and(eq(roles.name, sysRole.name), isNull(roles.tenantId)),
     });
-    const role = existingRole
-      ? existingRole
-      : (await db.insert(roles).values({ name: sysRole.name, isSystem: true, tenantId: null }).returning())[0];
+
+    if (existingRole) {
+      role = existingRole;
+    } else {
+      const [newRole] = await db.insert(roles).values({
+        name: sysRole.name,
+        isSystem: true,
+        tenantId: null,
+      }).returning();
+      role = newRole;
+    }
 
     await db.delete(rolePermissions).where(eq(rolePermissions.roleId, role.id));
     for (const perm of sysRole.permissions) {
