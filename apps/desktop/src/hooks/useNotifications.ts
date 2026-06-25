@@ -2,7 +2,11 @@ import { useEffect, useState, useCallback } from "react";
 import { useAuthStore } from "../stores/auth";
 import { api } from "../services/api";
 
-const BASE_URL = "http://localhost:3000";
+import { useAppConfigStore } from "../stores/config";
+
+function getBaseUrl(): string {
+  return useAppConfigStore.getState().apiBaseUrl || "http://localhost:3000";
+}
 
 export interface AppNotification {
   id: string;
@@ -59,7 +63,7 @@ export function useNotifications() {
 
     loadNotifications();
 
-    const url = `${BASE_URL}/notifications/stream?access_token=${encodeURIComponent(token)}`;
+    const url = `${getBaseUrl()}/notifications/stream?access_token=${encodeURIComponent(token)}`;
     const source = new EventSource(url);
 
     const handlers: Array<[string, (e: MessageEvent) => void]> = [

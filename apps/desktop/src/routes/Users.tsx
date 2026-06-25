@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api } from "../services/api";
-import { UserPlus, UserCheck, UserX, Shield } from "lucide-react";
+import { Building2, Edit, FilterX, Shield, TrendingUp, UserCheck, UserPlus, UserX } from "lucide-react";
+import { EmptyState, MetricCard, Modal, PageHeader, Pagination, StatusChip } from "../components/docid-ui";
 
 export default function Users() {
   const [users, setUsers] = useState<any[]>([]);
@@ -10,6 +11,9 @@ export default function Users() {
   const [editing, setEditing] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [editEmail, setEditEmail] = useState("");
+  const [sectorFilter, setSectorFilter] = useState("");
+  const [roleFilter, setRoleFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
   const [newUser, setNewUser] = useState({ fullName: "", email: "", password: "", sectorId: "", roleId: "" });
 
   const load = () => {
@@ -19,6 +23,12 @@ export default function Users() {
   };
 
   useEffect(() => { load(); }, []);
+
+  const filteredUsers = useMemo(() => users.filter((u) => (
+    (!sectorFilter || u.sectorId === sectorFilter)
+    && (!statusFilter || String(!!u.isActive) === statusFilter)
+    && (!roleFilter || u.userRoles?.some((ur: any) => ur.roleId === roleFilter))
+  )), [users, sectorFilter, roleFilter, statusFilter]);
 
   const createUser = async () => {
     if (!newUser.fullName || !newUser.email || !newUser.password || !newUser.sectorId) return;
@@ -41,31 +51,9 @@ export default function Users() {
     load();
   };
 
-  const moveSector = async (id: string, sectorId: string) => {
-    await api.patch(`/users/${id}/sector`, { sectorId });
-    load();
-  };
-
   const toggleActive = async (id: string, current: boolean) => {
-    if (current) {
-      await api.delete(`/users/${id}`);
-    } else {
-      await api.patch(`/users/${id}`, { isActive: true });
-    }
-    load();
-  };
-
-  const assignRole = async (userId: string, roleId: string) => {
-    try {
-      await api.post(`/users/${userId}/roles`, { roleId });
-      load();
-    } catch (err: any) {
-      alert(err.message);
-    }
-  };
-
-  const removeRole = async (userId: string, roleId: string) => {
-    await api.delete(`/users/${userId}/roles/${roleId}`);
+    if (current) await api.delete(`/users/${id}`);
+    else await api.patch(`/users/${id}`, { isActive: true });
     load();
   };
 
@@ -79,130 +67,130 @@ export default function Users() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Utilizadores</h1>
-        <button
-          onClick={() => setShowCreate(!showCreate)}
-          className="flex items-center gap-2 rounded-lg bg-verano-600 px-4 py-2 text-sm font-medium text-white hover:bg-verano-700 transition-colors"
-        >
-          <UserPlus className="h-4 w-4" /> {showCreate ? "Fechar" : "Novo utilizador"}
-        </button>
+      <PageHeader
+        title="Utilizadores"
+        description="Gerencie os acessos e permissões da sua organização."
+        actions={<button onClick={() => setShowCreate(true)} className="docid-button-primary"><UserPlus className="h-4 w-4" /> Adicionar Utilizador</button>}
+      />
+
+      <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <MetricCard label="Total Activos" value={users.filter((u) => u.isActive).length.toString()} icon={UserCheck} accent="text-docid-secondary" />
+        <MetricCard label="Total Utilizadores" value={users.length.toString()} icon={UserCheck} accent="text-docid-secondary" />
+        <MetricCard label="Sectores" value={sectors.length.toString()} icon={Building2} />
+        <MetricCard label="Administradores" value={users.filter((u) => u.roles?.some((r: any) => r.name === "ORG_ADMIN")).length.toString()} icon={Shield} accent="text-docid-primary-soft" />
       </div>
 
-      {showCreate && (
-        <div className="mb-6 rounded-xl bg-white p-5 shadow-sm border border-gray-100">
-          <h2 className="text-lg font-semibold mb-4">Criar utilizador</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <input placeholder="Nome completo" value={newUser.fullName} onChange={(e) => setNewUser({ ...newUser, fullName: e.target.value })}
-              className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
-            <input placeholder="Email" type="email" value={newUser.email} onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
-              className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
-            <input placeholder="Password (mín. 6 caracteres)" type="password" value={newUser.password} onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
-              className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
-            <select value={newUser.sectorId} onChange={(e) => setNewUser({ ...newUser, sectorId: e.target.value })}
-              className="rounded-lg border border-gray-300 px-3 py-2 text-sm">
-              <option value="">Seleccionar sector</option>
-              {sectors.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
-            <select value={newUser.roleId} onChange={(e) => setNewUser({ ...newUser, roleId: e.target.value })}
-              className="rounded-lg border border-gray-300 px-3 py-2 text-sm">
-              <option value="">Role (opcional)</option>
-              {roles.filter((r) => r.id).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-            </select>
-          </div>
-          <button onClick={createUser} disabled={!newUser.fullName || !newUser.email || !newUser.password || !newUser.sectorId}
-            className="mt-4 rounded-lg bg-verano-600 px-4 py-2 text-sm font-medium text-white hover:bg-verano-700 disabled:opacity-50 transition-colors">
-            Criar
+      <section className="docid-panel mb-6 p-4">
+        <div className="grid gap-3 md:grid-cols-4">
+          <select value={sectorFilter} onChange={(e) => setSectorFilter(e.target.value)} className="docid-input">
+            <option value="">Todos os Sectores</option>
+            {sectors.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+          <select value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)} className="docid-input">
+            <option value="">Todas as Roles</option>
+            {roles.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+          </select>
+          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="docid-input">
+            <option value="">Todos os Status</option>
+            <option value="true">Ativo</option>
+            <option value="false">Inativo</option>
+          </select>
+          <button onClick={() => { setSectorFilter(""); setRoleFilter(""); setStatusFilter(""); }} className="docid-button-secondary">
+            <FilterX className="h-4 w-4" /> Limpar Filtros
           </button>
         </div>
-      )}
+      </section>
 
-      <div className="rounded-xl bg-white shadow-sm border border-gray-100 overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50 text-left text-xs uppercase text-gray-500">
+      <section className="docid-panel overflow-hidden">
+        <table className="docid-table">
+          <thead>
             <tr>
-              <th className="px-4 py-3">Nome</th>
-              <th className="px-4 py-3">Email</th>
-              <th className="px-4 py-3">Sector</th>
-              <th className="px-4 py-3">Roles</th>
-              <th className="px-4 py-3">Estado</th>
-              <th className="px-4 py-3">Acções</th>
+              <th>Nome</th>
+              <th>Email</th>
+              <th>Sector</th>
+              <th>Role</th>
+              <th>Status</th>
+              <th>Data Criação</th>
+              <th>Ações</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-100">
-            {users.map((u) => (
-              <tr key={u.id} className={`hover:bg-gray-50 ${!u.isActive ? "opacity-50" : ""}`}>
-                <td className="px-4 py-3">
+          <tbody>
+            {filteredUsers.map((u) => (
+              <tr key={u.id} className={!u.isActive ? "opacity-60" : ""}>
+                <td>
                   {editing === u.id ? (
-                    <input value={editName} onChange={(e) => setEditName(e.target.value)}
-                      className="w-full rounded-lg border border-gray-300 px-2 py-1 text-sm" />
+                    <input value={editName} onChange={(e) => setEditName(e.target.value)} className="docid-input w-full" />
                   ) : (
-                    <span className="font-medium">{u.fullName}</span>
-                  )}
-                </td>
-                <td className="px-4 py-3">
-                  {editing === u.id ? (
-                    <input value={editEmail} onChange={(e) => setEditEmail(e.target.value)}
-                      className="w-full rounded-lg border border-gray-300 px-2 py-1 text-sm" />
-                  ) : (
-                    <span className="text-gray-600">{u.email}</span>
-                  )}
-                </td>
-                <td className="px-4 py-3">
-                  <select value={u.sectorId || ""} onChange={(e) => moveSector(u.id, e.target.value)}
-                    className="rounded-lg border border-gray-200 px-2 py-1 text-xs bg-transparent hover:border-gray-300">
-                    {sectors.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                  </select>
-                </td>
-                <td className="px-4 py-3">
-                  <div className="flex flex-wrap gap-1">
-                    {u.userRoles?.map((ur: any) => (
-                      <span key={ur.id} className="inline-flex items-center gap-1 rounded-full bg-verano-50 px-2 py-0.5 text-xs font-medium text-verano-700">
-                        <Shield className="h-3 w-3" />
-                        {ur.role?.name || ur.roleId}
-                        <button onClick={() => removeRole(u.id, ur.roleId)} className="ml-0.5 text-verano-400 hover:text-red-500">✕</button>
+                    <div className="flex items-center gap-3">
+                      <span className="flex h-8 w-8 items-center justify-center rounded-full bg-docid-surface-high text-xs font-semibold text-docid-primary-soft">
+                        {u.fullName?.split(" ").map((p: string) => p[0]).join("").slice(0, 2).toUpperCase()}
                       </span>
-                    ))}
-                    <select defaultValue="" onChange={(e) => { if (e.target.value) assignRole(u.id, e.target.value); e.target.value = ""; }}
-                      className="rounded-lg border border-gray-200 px-1 py-0.5 text-xs bg-transparent hover:border-gray-300">
-                      <option value="">+ role</option>
-                      {roles.filter((r) => !u.userRoles?.some((ur: any) => ur.roleId === r.id)).map((r) => (
-                        <option key={r.id} value={r.id}>{r.name}</option>
-                      ))}
-                    </select>
+                      <span className="font-medium">{u.fullName}</span>
+                    </div>
+                  )}
+                </td>
+                <td>{editing === u.id ? <input value={editEmail} onChange={(e) => setEditEmail(e.target.value)} className="docid-input w-full" /> : <span className="text-docid-muted">{u.email}</span>}</td>
+                <td>{sectorName(u.sectorId)}</td>
+                <td>
+                  <div className="flex flex-wrap gap-1">
+                    {u.userRoles?.length ? u.userRoles.map((ur: any) => (
+                      <StatusChip key={ur.id} tone="info">{ur.role?.name || ur.roleId}</StatusChip>
+                    )) : <StatusChip>MEMBER</StatusChip>}
                   </div>
                 </td>
-                <td className="px-4 py-3">
-                  {u.isActive ? (
-                    <span className="inline-flex items-center gap-1 text-xs text-green-600"><UserCheck className="h-3 w-3" /> Activo</span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1 text-xs text-gray-400"><UserX className="h-3 w-3" /> Inactivo</span>
-                  )}
-                </td>
-                <td className="px-4 py-3">
+                <td><StatusChip tone={u.isActive ? "success" : "neutral"}>{u.isActive ? "Ativo" : "Inativo"}</StatusChip></td>
+                <td className="text-docid-muted">{u.createdAt ? new Date(u.createdAt).toLocaleDateString("pt-AO") : "—"}</td>
+                <td>
                   <div className="flex gap-2">
                     {editing === u.id ? (
                       <>
-                        <button onClick={() => saveEdit(u.id)} className="rounded-lg bg-verano-600 px-3 py-1 text-xs font-medium text-white">Guardar</button>
-                        <button onClick={() => setEditing(null)} className="rounded-lg bg-gray-100 px-3 py-1 text-xs">Cancelar</button>
+                        <button onClick={() => saveEdit(u.id)} className="text-docid-secondary hover:underline">Guardar</button>
+                        <button onClick={() => setEditing(null)} className="text-docid-muted hover:underline">Cancelar</button>
                       </>
                     ) : (
-                      <button onClick={() => startEdit(u)} className="rounded-lg bg-gray-100 px-3 py-1 text-xs font-medium hover:bg-gray-200">Editar</button>
+                      <button onClick={() => startEdit(u)} className="text-docid-primary-soft hover:underline"><Edit className="inline h-4 w-4" /></button>
                     )}
-                    <button onClick={() => toggleActive(u.id, u.isActive)}
-                      className={`rounded-lg px-3 py-1 text-xs font-medium ${u.isActive ? "bg-red-50 text-red-600 hover:bg-red-100" : "bg-green-50 text-green-600 hover:bg-green-100"}`}>
-                      {u.isActive ? "Desactivar" : "Activar"}
+                    <button onClick={() => toggleActive(u.id, u.isActive)} className={u.isActive ? "text-docid-error" : "text-docid-secondary"}>
+                      {u.isActive ? <UserX className="h-4 w-4" /> : <UserCheck className="h-4 w-4" />}
                     </button>
                   </div>
                 </td>
               </tr>
             ))}
-            {users.length === 0 && (
-              <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">Nenhum utilizador encontrado.</td></tr>
-            )}
           </tbody>
         </table>
-      </div>
+        {filteredUsers.length === 0 && <EmptyState>Nenhum utilizador encontrado.</EmptyState>}
+        <Pagination totalLabel={`${filteredUsers.length} utilizador${filteredUsers.length !== 1 ? "es" : ""}`} />
+      </section>
+
+      {showCreate && (
+        <Modal
+          title="Add New User"
+          onClose={() => setShowCreate(false)}
+          footer={(
+            <>
+              <button onClick={() => setShowCreate(false)} className="docid-button-secondary">Cancelar</button>
+              <button onClick={createUser} disabled={!newUser.fullName || !newUser.email || !newUser.password || !newUser.sectorId} className="docid-button-primary">Guardar</button>
+            </>
+          )}
+        >
+          <p className="mb-5 text-sm text-docid-muted">Perfil do novo utilizador</p>
+          <div className="grid gap-4 md:grid-cols-2">
+            <input placeholder="Nome completo" value={newUser.fullName} onChange={(e) => setNewUser({ ...newUser, fullName: e.target.value })} className="docid-input" />
+            <input placeholder="Email corporativo" type="email" value={newUser.email} onChange={(e) => setNewUser({ ...newUser, email: e.target.value })} className="docid-input" />
+            <input placeholder="Palavra-passe" type="password" value={newUser.password} onChange={(e) => setNewUser({ ...newUser, password: e.target.value })} className="docid-input" />
+            <input placeholder="Confirmar palavra-passe" type="password" className="docid-input" />
+            <select value={newUser.sectorId} onChange={(e) => setNewUser({ ...newUser, sectorId: e.target.value })} className="docid-input">
+              <option value="">Selecionar sector</option>
+              {sectors.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+            <select value={newUser.roleId} onChange={(e) => setNewUser({ ...newUser, roleId: e.target.value })} className="docid-input">
+              <option value="">Access Role</option>
+              {roles.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+            </select>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

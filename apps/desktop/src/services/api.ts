@@ -1,12 +1,15 @@
 import { useAuthStore } from "../stores/auth";
+import { useAppConfigStore } from "../stores/config";
 
-const BASE_URL = "http://localhost:3000";
+function getBaseUrl(): string {
+  return useAppConfigStore.getState().apiBaseUrl || "http://localhost:3000";
+}
 
 async function refreshCurrentToken(): Promise<boolean> {
   const currentToken = useAuthStore.getState().token;
   if (!currentToken) return false;
   try {
-    const res = await fetch(`${BASE_URL}/auth/refresh`, {
+      const res = await fetch(`${getBaseUrl()}/auth/refresh`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ token: currentToken }),
@@ -35,14 +38,14 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     delete headers["Content-Type"];
   }
 
-  const res = await fetch(`${BASE_URL}${path}`, { ...options, headers });
+  const res = await fetch(`${getBaseUrl()}${path}`, { ...options, headers });
 
   if (res.status === 401 && path !== "/auth/refresh") {
     const refreshed = await refreshCurrentToken();
     if (refreshed) {
       const newToken = useAuthStore.getState().token;
       headers["Authorization"] = `Bearer ${newToken}`;
-      const retryRes = await fetch(`${BASE_URL}${path}`, { ...options, headers });
+      const retryRes = await fetch(`${getBaseUrl()}${path}`, { ...options, headers });
       if (!retryRes.ok) {
         const body = await retryRes.json().catch(() => ({}));
         const message = body.message || body.error?.message || `Erro ${retryRes.status}`;
@@ -77,3 +80,11 @@ export const api = {
     request<T>(path, { method: "PATCH", body: JSON.stringify(body) }),
   delete: <T>(path: string) => request<T>(path, { method: "DELETE" }),
 };
+
+export async function getMe() {
+  return request<{ data: {
+    id: string; email: string; fullName: string; isActive: boolean;
+    tenantId: string; sectorId: string | null; sectorName: string | null;
+    organizationName: string | null; roles: string[]; createdAt: string;
+  } | null }>("/auth/me");
+}

@@ -2,6 +2,9 @@ import { Elysia, t } from "elysia";
 import { login, getMe, changePassword, refreshToken } from "../services/auth.service";
 import { requireAuth } from "../middleware/auth";
 import { checkRateLimit } from "../middleware/rateLimit";
+import { db } from "../db/index";
+import { users } from "../db/schema";
+import { eq } from "drizzle-orm";
 
 export const authModule = new Elysia({ prefix: "/auth" })
 
@@ -44,6 +47,23 @@ export const authModule = new Elysia({ prefix: "/auth" })
   .use(requireAuth())
   .get("/me", ({ auth }) => getMe(auth!), {
     detail: { summary: "Perfil do utilizador", tags: ["Autenticação"] },
+  })
+
+  .use(requireAuth())
+  .patch("/me", async ({ auth, body, set }) => {
+    try {
+      const [updated] = await db.update(users)
+        .set({ fullName: body.fullName })
+        .where(eq(users.id, auth!.userId))
+        .returning({ id: users.id, fullName: users.fullName, email: users.email });
+      return { data: updated };
+    } catch (err: any) {
+      set.status = 400;
+      return { error: { code: "UPDATE_ERROR", message: err.message } };
+    }
+  }, {
+    body: t.Object({ fullName: t.String() }),
+    detail: { summary: "Actualizar perfil", tags: ["Autenticação"] },
   })
 
   .use(requireAuth())

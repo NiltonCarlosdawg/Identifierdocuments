@@ -15,10 +15,10 @@ const statusLabel: Record<string, string> = {
 };
 
 const statusColor: Record<string, string> = {
-  pending: "bg-yellow-100 text-yellow-800",
-  uploading: "bg-blue-100 text-blue-800",
-  uploaded: "bg-green-100 text-green-800",
-  failed: "bg-red-100 text-red-800",
+  pending: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300",
+  uploading: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300",
+  uploaded: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300",
+  failed: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300",
 };
 
 export default function OfflineQueuePanel() {
@@ -64,52 +64,52 @@ export default function OfflineQueuePanel() {
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
       <div className="absolute inset-0 bg-black/30" onClick={() => setPanelOpen(false)} />
-      <div className="relative flex h-full w-full max-w-md flex-col bg-white shadow-xl">
-        <div className="flex items-center justify-between border-b px-5 py-4">
+      <div className="relative flex h-full w-full max-w-md flex-col bg-docid-surface shadow-xl">
+        <div className="flex items-center justify-between border-b border-docid-border px-5 py-4">
           <div>
-            <h2 className="text-lg font-semibold text-gray-900">Fila Offline</h2>
-            <p className="text-xs text-gray-500">
+            <h2 className="text-lg font-semibold text-docid-text">Fila Offline</h2>
+            <p className="text-xs text-docid-muted">
               {online ? (
-                <span className="flex items-center gap-1 text-green-600">
+                <span className="flex items-center gap-1 text-docid-secondary">
                   <CheckCircle2 className="h-3 w-3" /> Online
                 </span>
               ) : (
-                <span className="flex items-center gap-1 text-orange-600">
+                <span className="flex items-center gap-1 text-orange-500">
                   <CloudOff className="h-3 w-3" /> Offline
                 </span>
               )}
             </p>
           </div>
-          <button onClick={() => setPanelOpen(false)} className="rounded-lg p-1.5 hover:bg-gray-100">
-            <X className="h-5 w-5 text-gray-500" />
+          <button onClick={() => setPanelOpen(false)} className="rounded-lg p-1.5 hover:bg-docid-surface-low text-docid-muted">
+            <X className="h-5 w-5" />
           </button>
         </div>
 
-        <div className="flex items-center gap-2 border-b px-5 py-3">
+        <div className="flex items-center gap-2 border-b border-docid-border px-5 py-3">
           <button
             onClick={handleForceSync}
             disabled={!online || pending === 0}
-            className="flex items-center gap-2 rounded-lg bg-verano-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-verano-700 disabled:opacity-50"
+            className="flex items-center gap-2 rounded-lg bg-docid-primary px-3 py-1.5 text-xs font-medium text-white hover:brightness-110 disabled:opacity-50"
           >
             <RefreshCw className="h-3.5 w-3.5" /> Sincronizar agora
           </button>
-          <span className="text-xs text-gray-500">{pending} pendente(s)</span>
+          <span className="text-xs text-docid-muted">{pending} pendente(s)</span>
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
           {items.length === 0 && (
-            <div className="flex flex-col items-center justify-center py-12 text-gray-400">
+            <div className="flex flex-col items-center justify-center py-12 text-docid-muted">
               <Upload className="h-10 w-10 mb-2 opacity-50" />
               <p className="text-sm">Nenhum ficheiro na fila.</p>
             </div>
           )}
 
           {items.map((item) => (
-            <div key={item.id} className="rounded-lg border border-gray-100 p-4 shadow-sm">
+            <div key={item.id} className="rounded-lg border border-docid-border bg-docid-surface-low p-4">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium text-gray-900">{item.filename}</p>
-                  <p className="truncate font-mono text-xs text-gray-500">{item.identifier}</p>
+                  <p className="truncate text-sm font-medium text-docid-text">{item.filename}</p>
+                  <p className="truncate font-mono text-xs text-docid-muted">{item.identifier}</p>
                 </div>
                 <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${statusColor[item.status]}`}>
                   {item.status === "uploading" ? (
@@ -119,21 +119,21 @@ export default function OfflineQueuePanel() {
               </div>
 
               {item.last_error && (
-                <div className="mt-2 flex items-start gap-1.5 text-xs text-red-600">
+                <div className="mt-2 flex items-start gap-1.5 text-xs text-docid-error">
                   <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
                   <span className="line-clamp-2">{item.last_error}</span>
                 </div>
               )}
 
               {item.attempts > 0 && item.status !== "uploaded" && (
-                <p className="mt-1 text-xs text-gray-400">Tentativas: {item.attempts}/3</p>
+                <p className="mt-1 text-xs text-docid-muted">Tentativas: {item.attempts}/3</p>
               )}
 
               <div className="mt-3 flex gap-2">
                 {item.status === "failed" && (
                   <button
                     onClick={() => handleRetry(item.id)}
-                    className="flex items-center gap-1 rounded-lg bg-gray-100 px-2.5 py-1 text-xs font-medium hover:bg-gray-200"
+                    className="flex items-center gap-1 rounded-lg bg-docid-surface-highest px-2.5 py-1 text-xs font-medium text-docid-text hover:bg-docid-border"
                   >
                     <RotateCcw className="h-3 w-3" /> Retentar
                   </button>
@@ -141,7 +141,7 @@ export default function OfflineQueuePanel() {
                 {item.status !== "uploading" && (
                   <button
                     onClick={() => handleRemove(item.id)}
-                    className="flex items-center gap-1 rounded-lg bg-red-50 px-2.5 py-1 text-xs font-medium text-red-600 hover:bg-red-100"
+                    className="flex items-center gap-1 rounded-lg bg-docid-error/10 px-2.5 py-1 text-xs font-medium text-docid-error hover:bg-docid-error/20"
                   >
                     <Trash2 className="h-3 w-3" /> Remover
                   </button>
@@ -179,19 +179,19 @@ export function OfflineQueueBadge() {
   return (
     <>
       {syncToast && (
-        <div className="fixed right-6 top-16 z-50 rounded-lg bg-green-700 px-4 py-2 text-sm text-white shadow-lg">
+        <div className="fixed right-6 top-16 z-50 rounded-lg bg-docid-secondary px-4 py-2 text-sm text-white shadow-lg">
           {syncToast}
         </div>
       )}
       <button
       onClick={() => setPanelOpen(true)}
-      className="relative flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm hover:bg-gray-100 transition-colors"
+      className="relative flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm hover:bg-docid-surface-low transition-colors text-docid-muted"
       title="Fila offline"
     >
       {!online ? (
         <CloudOff className="h-4 w-4 text-orange-500" />
       ) : (
-        <Upload className="h-4 w-4 text-gray-500" />
+        <Upload className="h-4 w-4 text-docid-muted" />
       )}
       {pending > 0 && (
         <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-orange-500 px-1 text-[10px] font-bold text-white">

@@ -358,6 +358,19 @@ pub fn set_sync_credentials(
 }
 
 #[tauri::command]
+pub fn set_api_base_url(state: State<'_, SyncState>, url: String) -> Result<(), String> {
+    let mut base = state.api_base_url.lock().map_err(|e| e.to_string())?;
+    *base = url.trim_end_matches('/').to_string();
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_api_base_url(state: State<'_, SyncState>) -> Result<String, String> {
+    let base = state.api_base_url.lock().map_err(|e| e.to_string())?;
+    Ok(base.clone())
+}
+
+#[tauri::command]
 pub fn clear_sync_credentials(state: State<'_, SyncState>) -> Result<(), String> {
     let mut auth = state.auth_token.lock().map_err(|e| e.to_string())?;
     *auth = None;

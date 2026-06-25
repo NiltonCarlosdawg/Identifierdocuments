@@ -1,10 +1,11 @@
 import { Elysia, t } from "elysia";
 import fs from "node:fs";
+import path from "node:path";
 import { attachDocument, getDocumentMeta, downloadDocument } from "../services/attachment.service";
 import { requireAuth } from "../middleware/auth";
 import { db } from "../db";
 import { documents, documentShares, approvals, sectors, auditLogs, identifiers, users } from "../db/schema";
-import { eq, and, isNull, or } from "drizzle-orm";
+import { eq, and, isNull, or, desc } from "drizzle-orm";
 import { notify } from "../services/notification.service";
 
 export const documentsModule = new Elysia({ prefix: "/documents" })
@@ -29,6 +30,54 @@ export const documentsModule = new Elysia({ prefix: "/documents" })
       uploadSource: t.Optional(t.Union([t.Literal("manual"), t.Literal("scanner"), t.Literal("sync")])),
     }),
     detail: { summary: "Associar documento", tags: ["Documentos"] },
+  })
+
+  .get("/", async ({ auth, query }: { auth: any; query: { limit?: string; page?: string; identifierId?: string } }) => {
+    const limit = Math.min(parseInt(query.limit || "20", 10), 100);
+    const page = parseInt(query.page || "1", 10);
+    const offset = (page - 1) * limit;
+
+    const conditions = [eq(documents.tenantId, auth!.tenantId)];
+    if (query.identifierId) conditions.push(eq(documents.identifierId, query.identifierId));
+
+    const rows = await db.query.documents.findMany({
+      where: and(...conditions),
+      with: {
+        identifier: { with: { category: true } },
+        uploader: true,
+      },
+      orderBy: [desc(documents.createdAt)],
+      limit,
+      offset,
+    });
+
+    const baseUrl = process.env.API_BASE_URL || "http://localhost:3000";
+    const safe = rows.map((d) => ({
+      id: d.id,
+      filename: d.filename,
+      fileSize: d.fileSize,
+      mimeType: d.mimeType,
+      status: d.identifier?.status || "active",
+      createdAt: d.createdAt,
+      fileUrl: `${baseUrl}/documents/${d.id}/download`,
+      thumbnailUrl: `${baseUrl}/documents/${d.id}/thumbnail`,
+      identifier: d.identifier ? {
+        id: d.identifier.id,
+        identifier: d.identifier.identifier,
+        categoryId: d.identifier.category?.id,
+        categoryName: d.identifier.category?.name,
+      } : null,
+      uploadedBy: d.uploader?.fullName || null,
+    }));
+
+    return { data: safe };
+  }, {
+    query: t.Object({
+      limit: t.Optional(t.String()),
+      page: t.Optional(t.String()),
+      identifierId: t.Optional(t.String()),
+    }),
+    detail: { summary: "Listar documentos", tags: ["Documentos"] },
   })
 
   .get("/:id", async ({ auth, params, set }) => {
@@ -57,6 +106,22 @@ export const documentsModule = new Elysia({ prefix: "/documents" })
   }, {
     params: t.Object({ id: t.String() }),
     detail: { summary: "Download do documento", tags: ["Documentos"] },
+  })
+
+  .get("/:id/thumbnail", async ({ auth, params, set }: { auth: any; params: { id: string }; set: any }) => {
+    const THUMBNAIL_DIR = process.env.THUMBNAIL_DIR || "./thumbnails";
+    const thumbPath = path.join(THUMBNAIL_DIR, `${params.id}.png`);
+    if (fs.existsSync(thumbPath)) {
+      const fileBuffer = fs.readFileSync(thumbPath);
+      set.headers["Content-Type"] = "image/png";
+      set.headers["Cache-Control"] = "public, max-age=86400";
+      return fileBuffer;
+    }
+    set.status = 204;
+    return new Uint8Array(0);
+  }, {
+    params: t.Object({ id: t.String() }),
+    detail: { summary: "Thumbnail do documento", tags: ["Documentos"] },
   })
 
   .post("/:id/share", async ({ auth, params, body, set }) => {

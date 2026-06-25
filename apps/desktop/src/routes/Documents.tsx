@@ -1,46 +1,54 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../services/api";
 import { syncService } from "../services/sync";
 import { useAuthStore } from "../stores/auth";
+import { useAppConfigStore } from "../stores/config";
 import { useQueueStore } from "../stores/queue";
-import { Upload, Download, FileText, CloudOff, Share2, History } from "lucide-react";
+import { Download, FileText, History, Search, Share2, Upload, UploadCloud } from "lucide-react";
 import ShareDocumentModal from "../components/ShareDocumentModal";
+import { EmptyState, Modal, PageHeader, Pagination, StatusChip } from "../components/docid-ui";
 
 export default function Documents() {
   const [documents, setDocuments] = useState<any[]>([]);
   const [identifiers, setIdentifiers] = useState<any[]>([]);
   const [showUpload, setShowUpload] = useState(false);
-  const [filterCat, setFilterCat] = useState("");
   const [categories, setCategories] = useState<any[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
   const [upload, setUpload] = useState({ identifier: "", file: null as File | null });
   const [offlineMode, setOfflineMode] = useState(false);
   const [uploadError, setUploadError] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [query, setQuery] = useState("");
   const user = useAuthStore((s) => s.user);
   const refreshQueue = useQueueStore((s) => s.refresh);
   const [shareId, setShareId] = useState<string | null>(null);
   const [sharesId, setSharesId] = useState<string | null>(null);
   const [shares, setShares] = useState<any[]>([]);
 
+  const loadDocs = () => {
+    api.get<any>("/identifiers").then((res) => {
+      const docs = (res.data || []).filter((i: any) => i.document);
+      setDocuments(docs);
+      setIdentifiers(res.data || []);
+    }).catch(() => {});
+  };
+
   useEffect(() => {
     api.get<any>("/categories").then((res) => {
       const cats = Object.values(res.data.groups).flat() as any[];
       setCategories(cats);
     }).catch(() => {});
-    api.get<any>("/identifiers").then((res) => setIdentifiers(res.data || [])).catch(() => {});
     loadDocs();
-  }, []);
-
-  const loadDocs = () => {
-    api.get<any>("/identifiers").then((res) => {
-      const docs = (res.data || []).filter((i: any) => i.document);
-      setDocuments(docs);
-    }).catch(() => {});
-  };
-
-  useEffect(() => {
     syncService.isOnline().then((online) => setOfflineMode(!online));
   }, []);
+
+  const filteredDocs = useMemo(() => documents.filter((doc) => {
+    const text = `${doc.identifier} ${doc.document?.filename} ${doc.category?.name || doc.categoryId}`.toLowerCase();
+    return (!categoryFilter || doc.categoryId === categoryFilter)
+      && (!statusFilter || doc.document?.status === statusFilter || doc.status === statusFilter)
+      && (!query || text.includes(query.toLowerCase()));
+  }), [documents, categoryFilter, statusFilter, query]);
 
   const attach = async () => {
     if (!upload.file || !upload.identifier || !user) return;
@@ -90,8 +98,9 @@ export default function Documents() {
   };
 
   const download = async (identifier: string, filename?: string) => {
+    const apiBaseUrl = useAppConfigStore.getState().apiBaseUrl || "http://localhost:3000";
     try {
-      const res = await fetch(`http://localhost:3000/documents/${identifier}/download`, {
+      const res = await fetch(`${apiBaseUrl}/documents/${identifier}/download`, {
         headers: { Authorization: `Bearer ${(await import("../stores/auth")).useAuthStore.getState().token}` },
       });
       if (!res.ok) { alert("Erro ao descarregar"); return; }
@@ -109,128 +118,151 @@ export default function Documents() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Documentos</h1>
-        <button onClick={() => { setShowUpload(!showUpload); setUploadError(""); }} className="flex items-center gap-2 rounded-lg bg-verano-600 px-4 py-2 text-sm font-medium text-white hover:bg-verano-700 transition-colors">
-          <Upload className="h-4 w-4" /> {showUpload ? "Fechar" : "Upload Documento"}
-        </button>
-      </div>
+      <PageHeader
+        title="Documentos"
+        description="Gerencie e visualize o repositório centralizado de arquivos corporativos."
+        actions={<button onClick={() => { setShowUpload(true); setUploadError(""); }} className="docid-button-primary"><Upload className="h-4 w-4" /> Fazer Upload</button>}
+      />
 
-      {showUpload && (
-        <div className="mb-6 rounded-xl bg-white p-5 shadow-sm border border-gray-100">
-          <h2 className="text-lg font-semibold mb-4">Associar Documento</h2>
-          {uploadError && (
-            <div className="mb-4 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-              <span className="mt-0.5 text-red-500">⚠</span>
-              <span>{uploadError}</span>
-              <button onClick={() => setUploadError("")} className="ml-auto text-red-400 hover:text-red-600">✕</button>
-            </div>
-          )}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <select value={upload.identifier} onChange={(e) => setUpload({ ...upload, identifier: e.target.value })} className="rounded-lg border border-gray-300 px-3 py-2 text-sm">
-              <option value="">Seleccionar identificador</option>
-              {identifiers.filter((i) => i.status === "active").map((i: any) => (
-                <option key={i.id} value={i.identifier}>{i.identifier} — {i.issuedTo || i.categoryId}</option>
-              ))}
-            </select>
-            <input ref={fileRef} type="file" onChange={(e) => setUpload({ ...upload, file: e.target.files?.[0] || null })} className="text-sm" />
+      <section className="docid-panel mb-6 p-4">
+        <div className="grid gap-3 md:grid-cols-5">
+          <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className="docid-input">
+            <option value="">Todas as Categorias</option>
+            {categories.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="docid-input">
+            <option value="">Qualquer Status</option>
+            <option value="active">Online</option>
+            <option value="attached">Sincronizando</option>
+            <option value="offline">Offline</option>
+          </select>
+          <select className="docid-input">
+            <option>Todos os Sectores</option>
+            <option>Operações</option>
+            <option>Financeiro</option>
+            <option>RH</option>
+          </select>
+          <select className="docid-input">
+            <option>Últimos 30 dias</option>
+            <option>Último trimestre</option>
+            <option>Ano corrente</option>
+          </select>
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-docid-outline" />
+            <input value={query} onChange={(e) => setQuery(e.target.value)} className="docid-input w-full pl-10" placeholder="Nome ou ID..." />
           </div>
-          <label className="mt-3 flex items-center gap-2 text-sm text-gray-600">
-            <input type="checkbox" checked={offlineMode} onChange={(e) => setOfflineMode(e.target.checked)} />
-            <CloudOff className="h-4 w-4" /> Guardar na fila offline (enviar depois)
-          </label>
-          <button onClick={attach} disabled={!upload.file || !upload.identifier} className="mt-4 rounded-lg bg-verano-600 px-4 py-2 text-sm font-medium text-white hover:bg-verano-700 disabled:opacity-50 transition-colors">
-            {offlineMode ? "Adicionar à fila" : "Associar"}
-          </button>
         </div>
-      )}
+      </section>
 
-      <div className="rounded-xl bg-white shadow-sm border border-gray-100 overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50 text-left text-xs uppercase text-gray-500">
+      <section className="docid-panel overflow-hidden">
+        <table className="docid-table">
+          <thead>
             <tr>
-              <th className="px-4 py-3">Identificador</th>
-              <th className="px-4 py-3">Ficheiro</th>
-              <th className="px-4 py-3">Categoria</th>
-              <th className="px-4 py-3">Tamanho</th>
-              <th className="px-4 py-3">Origem</th>
-              <th className="px-4 py-3">Acções</th>
+              <th>Identificador</th>
+              <th>Nome do ficheiro</th>
+              <th>Categoria</th>
+              <th>Sector</th>
+              <th>Origem</th>
+              <th>Status Upload</th>
+              <th>Ações</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-100">
-            {documents.map((doc: any) => (
-              <tr key={doc.id} className="hover:bg-gray-50">
-                <td className="px-4 py-3 font-mono text-xs">{doc.identifier}</td>
-                <td className="px-4 py-3 flex items-center gap-2">
-                  <FileText className="h-4 w-4 text-gray-400" />
-                  {doc.document?.filename || "—"}
+          <tbody>
+            {filteredDocs.map((doc: any) => (
+              <tr key={doc.id}>
+                <td className="font-mono text-docid-primary-soft">{doc.identifier}</td>
+                <td>
+                  <div className="flex items-center gap-2">
+                    <FileText className="h-4 w-4 text-docid-muted" />
+                    <span>{doc.document?.filename || "—"}</span>
+                  </div>
                 </td>
-                <td className="px-4 py-3">{doc.category?.name || doc.categoryId}</td>
-                <td className="px-4 py-3">{doc.document?.fileSize ? `${(doc.document.fileSize / 1024).toFixed(1)} KB` : "—"}</td>
-                <td className="px-4 py-3 text-xs">{doc.origin}</td>
-                <td className="px-4 py-3">
-                  <div className="flex flex-wrap gap-1">
-                    <button onClick={() => download(doc.identifier, doc.document?.filename)} className="flex items-center gap-1 rounded-lg bg-gray-100 px-2 py-1.5 text-xs font-medium hover:bg-gray-200 transition-colors">
-                      <Download className="h-3 w-3" /> Download
-                    </button>
-                    <button onClick={() => setShareId(doc.identifier)} className="flex items-center gap-1 rounded-lg bg-verano-50 px-2 py-1.5 text-xs font-medium text-verano-700 hover:bg-verano-100 transition-colors">
-                      <Share2 className="h-3 w-3" /> Partilhar
-                    </button>
-                    <button onClick={() => loadShares(doc.identifier)} className="flex items-center gap-1 rounded-lg bg-gray-100 px-2 py-1.5 text-xs font-medium hover:bg-gray-200 transition-colors">
-                      <History className="h-3 w-3" /> Partilhas
-                    </button>
+                <td>{doc.category?.name || doc.categoryId}</td>
+                <td>{doc.sector?.name || "—"}</td>
+                <td><StatusChip tone={doc.origin === "digital" ? "info" : "warning"}>{doc.origin || "digital"}</StatusChip></td>
+                <td><StatusChip tone={doc.status === "cancelled" ? "error" : "success"}>{doc.document ? "Online" : "Offline"}</StatusChip></td>
+                <td>
+                  <div className="flex flex-wrap gap-2">
+                    <button onClick={() => download(doc.identifier, doc.document?.filename)} className="text-docid-muted hover:text-docid-primary-soft"><Download className="h-4 w-4" /></button>
+                    <button onClick={() => setShareId(doc.identifier)} className="text-docid-muted hover:text-docid-primary-soft"><Share2 className="h-4 w-4" /></button>
+                    <button onClick={() => loadShares(doc.identifier)} className="text-docid-muted hover:text-docid-primary-soft"><History className="h-4 w-4" /></button>
                   </div>
                 </td>
               </tr>
             ))}
-            {documents.length === 0 && (
-              <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">Nenhum documento encontrado.</td></tr>
-            )}
           </tbody>
         </table>
-      </div>
+        {filteredDocs.length === 0 && <EmptyState>Nenhum documento encontrado.</EmptyState>}
+        <Pagination totalLabel={`${filteredDocs.length} documento${filteredDocs.length !== 1 ? "s" : ""}`} />
+      </section>
 
-      {shareId && (
-        <ShareDocumentModal
-          identifier={shareId}
-          onClose={() => setShareId(null)}
-          onShared={() => {}}
-        />
+      {showUpload && (
+        <Modal
+          title="Upload de Documento"
+          onClose={() => setShowUpload(false)}
+          footer={(
+            <>
+              <button className="docid-button-secondary" onClick={() => setShowUpload(false)}>Cancelar</button>
+              <button onClick={attach} disabled={!upload.file || !upload.identifier} className="docid-button-primary">
+                {offlineMode ? "Adicionar à fila" : "Adicionar"}
+              </button>
+            </>
+          )}
+        >
+          <p className="mb-5 text-sm text-docid-muted">Siga os passos para registar o novo ficheiro no sistema.</p>
+          {uploadError && <div className="mb-4 rounded-lg border border-docid-error/30 bg-docid-error/10 p-3 text-sm text-docid-error">{uploadError}</div>}
+          <div className="grid gap-5">
+            <label>
+              <span className="mb-2 block text-xs font-semibold uppercase tracking-wider text-docid-muted">Selecionar Identificador</span>
+              <select value={upload.identifier} onChange={(e) => setUpload({ ...upload, identifier: e.target.value })} className="docid-input w-full">
+                <option value="">Pesquisar por ID, Proprietário ou Setor...</option>
+                {identifiers.filter((i) => i.status === "active").map((i: any) => (
+                  <option key={i.id} value={i.identifier}>{i.identifier} — {i.issuedTo || i.categoryId}</option>
+                ))}
+              </select>
+            </label>
+
+            <button type="button" onClick={() => fileRef.current?.click()} className="rounded-xl border border-dashed border-docid-border bg-docid-surface-lowest p-8 text-center transition hover:border-docid-primary">
+              <UploadCloud className="mx-auto h-9 w-9 text-docid-primary-soft" />
+              <p className="mt-3 font-semibold">{upload.file?.name || "Upload do Ficheiro"}</p>
+              <p className="mt-1 text-sm text-docid-muted">ou procure no computador</p>
+            </button>
+            <input ref={fileRef} type="file" onChange={(e) => setUpload({ ...upload, file: e.target.files?.[0] || null })} className="hidden" />
+
+            <label className="flex items-center gap-2 text-sm text-docid-muted">
+              <input type="checkbox" checked={offlineMode} onChange={(e) => setOfflineMode(e.target.checked)} className="rounded border-docid-border bg-docid-surface-low text-docid-primary focus:ring-docid-primary" />
+              Guardar na fila offline
+            </label>
+
+            {upload.identifier && (
+              <div className="rounded-lg border border-docid-primary/30 bg-docid-primary/10 p-3 text-sm text-docid-muted">
+                O ficheiro deve conter o texto do identificador: <span className="font-mono text-docid-primary-soft">{upload.identifier}</span>
+              </div>
+            )}
+          </div>
+        </Modal>
       )}
 
+      {shareId && <ShareDocumentModal identifier={shareId} onClose={() => setShareId(null)} onShared={() => {}} />}
+
       {sharesId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/30" onClick={() => setSharesId(null)} />
-          <div className="relative w-full max-w-lg rounded-xl bg-white p-6 shadow-xl">
-            <h2 className="text-lg font-semibold mb-4">Histórico de partilhas — {sharesId}</h2>
-            {shares.length === 0 ? (
-              <p className="text-sm text-gray-400">Nenhuma partilha registada.</p>
-            ) : (
-              <ul className="space-y-2">
-                {shares.map((s) => {
-                  const revoked = !!s.revokedAt;
-                  return (
-                    <li key={s.id} className={`flex items-center justify-between rounded-lg border px-3 py-2 text-sm ${revoked ? "bg-gray-50 opacity-60" : ""}`}>
-                      <span className={revoked ? "line-through text-gray-400" : ""}>
-                        {s.sector ? `Sector: ${s.sector.name}` : s.user ? `Utilizador: ${s.user.fullName}` : "—"}
-                      </span>
-                      <div className="flex items-center gap-2">
-                        {revoked ? (
-                          <span className="text-xs text-gray-400">Revogada</span>
-                        ) : (
-                          <button onClick={() => revokeShare(sharesId, s.id)} className="text-xs text-red-600 hover:underline">Revogar</button>
-                        )}
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-            <button onClick={() => setSharesId(null)} className="mt-4 rounded-lg bg-gray-100 px-4 py-2 text-sm hover:bg-gray-200">
-              Fechar
-            </button>
-          </div>
-        </div>
+        <Modal title={`Histórico de partilhas — ${sharesId}`} onClose={() => setSharesId(null)} maxWidth="max-w-lg">
+          {shares.length === 0 ? (
+            <p className="text-sm text-docid-muted">Nenhuma partilha registada.</p>
+          ) : (
+            <ul className="space-y-2">
+              {shares.map((s) => {
+                const revoked = !!s.revokedAt;
+                return (
+                  <li key={s.id} className={`flex items-center justify-between rounded-lg border border-docid-border px-3 py-2 text-sm ${revoked ? "opacity-60" : ""}`}>
+                    <span>{s.sector ? `Sector: ${s.sector.name}` : s.user ? `Utilizador: ${s.user.fullName}` : "—"}</span>
+                    {revoked ? <StatusChip>Revogada</StatusChip> : <button onClick={() => revokeShare(sharesId, s.id)} className="text-docid-error hover:underline">Revogar</button>}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </Modal>
       )}
     </div>
   );

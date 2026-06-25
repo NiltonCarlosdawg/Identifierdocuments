@@ -7,7 +7,26 @@ import { verifyDocumentContainsIdentifier } from "./document.service";
 import type { AuthPayload } from "../middleware/auth";
 
 const UPLOAD_DIR = process.env.UPLOAD_DIR || "./uploads";
+const THUMBNAIL_DIR = process.env.THUMBNAIL_DIR || "./thumbnails";
+const THUMBNAIL_SCRIPT = process.env.THUMBNAIL_SCRIPT || "./scripts/generate_thumbnail.py";
+
 if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+if (!fs.existsSync(THUMBNAIL_DIR)) fs.mkdirSync(THUMBNAIL_DIR, { recursive: true });
+
+export function generateThumbnailAsync(filePath: string, docId: string) {
+  const supported = [".pdf", ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".doc", ".docx", ".odt", ".xls", ".xlsx", ".ppt", ".pptx"];
+  const ext = path.extname(filePath).toLowerCase();
+  if (!supported.includes(ext)) return;
+
+  const thumbPath = path.join(THUMBNAIL_DIR, `${docId}.png`);
+  const scriptPath = path.resolve(THUMBNAIL_SCRIPT);
+
+  const child = Bun.spawn(["python3", scriptPath, filePath, thumbPath], {
+    stdio: ["ignore", "ignore", "ignore"],
+    detached: true,
+  });
+  child.unref();
+}
 
 function sanitizeFilename(name: string): string {
   return path.basename(name).replace(/[<>:"/\\|?*\x00-\x1F]/g, "_").slice(0, 255);
@@ -69,6 +88,8 @@ export async function attachDocument(
   }).returning();
 
   await db.update(identifiers).set({ status: "attached" }).where(eq(identifiers.id, idRow.id));
+
+  generateThumbnailAsync(finalPath, doc.id);
 
   await db.insert(auditLogs).values({
     tenantId: auth.tenantId, userId: auth.userId, action: "ATTACH",

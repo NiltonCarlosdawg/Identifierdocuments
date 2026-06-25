@@ -20,7 +20,7 @@ export default function NotificationBell() {
           {toasts.map((toast) => (
             <div
               key={toast.id}
-              className="rounded-lg bg-verano-800 px-4 py-3 text-sm text-white shadow-lg animate-in fade-in slide-in-from-right"
+              className="rounded-lg bg-docid-primary px-4 py-3 text-sm text-white shadow-lg animate-in fade-in slide-in-from-right"
             >
               {toast.message}
             </div>
@@ -31,9 +31,9 @@ export default function NotificationBell() {
       <div className="relative">
         <button
           onClick={() => { setOpen(!open); if (!open) loadNotifications(); }}
-          className="relative rounded-lg p-2 hover:bg-gray-100 transition-colors"
+          className="relative rounded-lg p-2 hover:bg-docid-surface-low transition-colors"
         >
-          <Bell className="h-4 w-4 text-gray-600" />
+          <Bell className="h-4 w-4 text-docid-muted" />
           {unreadCount > 0 && (
             <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
               {unreadCount}
@@ -44,28 +44,28 @@ export default function NotificationBell() {
         {open && (
           <>
             <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-            <div className="absolute right-0 top-full z-50 mt-2 w-80 rounded-xl border border-gray-100 bg-white shadow-xl">
-              <div className="flex items-center justify-between border-b px-4 py-3">
-                <h3 className="text-sm font-semibold">Notificações</h3>
-                <button onClick={() => setOpen(false)} className="rounded p-1 hover:bg-gray-100">
-                  <X className="h-4 w-4 text-gray-400" />
+            <div className="absolute right-0 top-full z-50 mt-2 w-80 docid-panel shadow-xl">
+              <div className="flex items-center justify-between border-b border-docid-border px-4 py-3">
+                <h3 className="text-sm font-semibold text-docid-text">Notificações</h3>
+                <button onClick={() => setOpen(false)} className="rounded p-1 hover:bg-docid-surface-low text-docid-muted">
+                  <X className="h-4 w-4" />
                 </button>
               </div>
               <div className="max-h-80 overflow-y-auto">
                 {notifications.length === 0 && (
-                  <p className="px-4 py-6 text-center text-sm text-gray-400">Sem notificações.</p>
+                  <p className="px-4 py-6 text-center text-sm text-docid-muted">Sem notificações.</p>
                 )}
                 {notifications.map((n) => (
                   <button
                     key={n.id}
                     onClick={() => markRead(n.id)}
-                    className={`w-full border-b px-4 py-3 text-left text-sm hover:bg-gray-50 ${!n.isRead ? "bg-blue-50" : ""}`}
+                    className={`w-full border-b border-docid-border px-4 py-3 text-left text-sm hover:bg-docid-surface-low ${!n.isRead ? "bg-docid-primary/10" : ""}`}
                   >
-                    <p className="font-medium text-gray-900">{typeLabel[n.type] || n.type}</p>
+                    <p className="font-medium text-docid-text">{typeLabel[n.type] || n.type}</p>
                     {typeof n.payload.identifier === "string" && (
-                      <p className="font-mono text-xs text-gray-500">{n.payload.identifier}</p>
+                      <p className="font-mono text-xs text-docid-muted">{n.payload.identifier}</p>
                     )}
-                    <p className="mt-1 text-xs text-gray-400">
+                    <p className="mt-1 text-xs text-docid-outline">
                       {new Date(n.createdAt).toLocaleString("pt-AO")}
                     </p>
                   </button>

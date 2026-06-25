@@ -38,6 +38,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             sync::set_sync_credentials,
+            sync::set_api_base_url,
+            sync::get_api_base_url,
             sync::clear_sync_credentials,
             sync::is_online,
             sync::enqueue_upload,

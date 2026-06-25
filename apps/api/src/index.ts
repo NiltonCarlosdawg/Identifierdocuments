@@ -23,8 +23,8 @@ const app = new Elysia()
   .use(swagger({
     documentation: {
       info: {
-        title: "Verano Labs — DocID API v2",
-        version: "2.0.0",
+        title: "Verano Labs — DocID API",
+        version: "1.0.0",
         description: "API multi-tenant de gestão de documentos empresariais com autenticação JWT, RBAC e RLS.",
         contact: { name: "Verano Labs", email: "geralverano@verano.sbs" },
       },
@@ -94,7 +94,7 @@ const app = new Elysia()
 
 console.log(`
   ╔═══════════════════════════════════════════╗
-  ║    Verano Labs — DocID API v2.0.0         ║
+  ║    Verano Labs — DocID API v1.0.0         ║
   ║    http://localhost:3000                  ║
   ║    Swagger: http://localhost:3000/docs    ║
   ╚═══════════════════════════════════════════╝

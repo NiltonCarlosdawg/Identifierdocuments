@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { useAppConfigStore } from "../stores/config";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 export interface QueueItem {
@@ -29,10 +30,25 @@ export const syncService = {
     await invoke("clear_sync_credentials");
   },
 
+  async getApiBaseUrl(): Promise<string> {
+    if (!isTauri()) return useAppConfigStore.getState().apiBaseUrl || "http://localhost:3000";
+    try {
+      return await invoke<string>("get_api_base_url");
+    } catch {
+      return useAppConfigStore.getState().apiBaseUrl || "http://localhost:3000";
+    }
+  },
+
+  async setApiBaseUrl(url: string) {
+    if (!isTauri()) return;
+    await invoke("set_api_base_url", { url });
+  },
+
   async isOnline(): Promise<boolean> {
     if (!isTauri()) {
       try {
-        const res = await fetch("http://localhost:3000/", { method: "GET" });
+        const url = useAppConfigStore.getState().apiBaseUrl || "http://localhost:3000";
+        const res = await fetch(`${url}/`, { method: "GET" });
         return res.ok;
       } catch {
         return false;

@@ -1,5 +1,114 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap");
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-body { font-family: system-ui, -apple-system, sans-serif; }
+:root {
+  --docid-bg: #f8f9fa;
+  --docid-surface: #ffffff;
+  --docid-surface-low: #f1f3f5;
+  --docid-surface-lowest: #e9ecef;
+  --docid-surface-high: #f8f9fa;
+  --docid-surface-highest: #dee2e6;
+  --docid-border: #ced4da;
+  --docid-outline: #868e96;
+  --docid-text: #212529;
+  --docid-muted: #6c757d;
+  --docid-primary: #2563eb;
+  --docid-primary-soft: #4d6fd9;
+  --docid-secondary: #2da44e;
+  --docid-secondary-container: #daf0d8;
+  --docid-tertiary: #c07020;
+  --docid-error: #c9302c;
+}
+
+html.dark {
+  --docid-bg: #111319;
+  --docid-surface: #1e1f26;
+  --docid-surface-low: #191b22;
+  --docid-surface-lowest: #0c0e14;
+  --docid-surface-high: #282a30;
+  --docid-surface-highest: #33343b;
+  --docid-border: #434655;
+  --docid-outline: #8d90a0;
+  --docid-text: #e2e2eb;
+  --docid-muted: #c3c6d7;
+  --docid-primary: #2563eb;
+  --docid-primary-soft: #b4c5ff;
+  --docid-secondary: #62df7d;
+  --docid-secondary-container: #1ca64d;
+  --docid-tertiary: #ffb77d;
+  --docid-error: #ffb4ab;
+}
+
+@layer base {
+  html {
+    min-height: 100vh;
+    background-color: var(--docid-bg);
+    color: var(--docid-text);
+  }
+
+  body {
+    margin: 0;
+    font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+    background-color: var(--docid-bg);
+    color: var(--docid-text);
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--docid-border) var(--docid-surface-low);
+  }
+
+  ::selection {
+    background: rgba(37, 99, 235, 0.3);
+    color: #fff;
+  }
+}
+
+@layer components {
+  .docid-panel {
+    @apply rounded-xl border border-docid-border bg-docid-surface;
+  }
+
+  .docid-panel-low {
+    @apply rounded-xl border border-docid-border bg-docid-surface-low;
+  }
+
+  .docid-input {
+    @apply rounded-lg border border-docid-border bg-docid-surface-lowest px-3 py-2 text-sm text-docid-text outline-none transition focus:border-docid-primary focus:ring-1 placeholder:text-docid-outline;
+  }
+
+  .docid-button-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg bg-docid-primary px-4 py-2 text-sm font-semibold text-white transition hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .docid-button-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg border border-docid-border px-4 py-2 text-sm font-medium text-docid-text transition hover:bg-docid-surface-high active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .docid-table {
+    @apply w-full border-collapse text-left text-sm;
+  }
+
+  .docid-table thead {
+    @apply bg-docid-surface-lowest text-xs uppercase tracking-wider text-docid-muted;
+  }
+
+  .docid-table th {
+    @apply px-4 py-3 font-semibold;
+  }
+
+  .docid-table td {
+    @apply px-4 py-3 text-docid-text;
+  }
+
+  .docid-table tbody {
+    @apply divide-y divide-docid-border;
+  }
+
+  .docid-table tbody tr {
+    @apply transition hover:bg-docid-surface-high;
+  }
+}
