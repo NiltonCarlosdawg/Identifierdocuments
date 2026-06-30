@@ -32,9 +32,10 @@ pub fn run() {
             start_background_sync(app.handle().clone());
 
             #[cfg(debug_assertions)]
-            {
-                let window = app.get_webview_window("main").unwrap();
-                window.open_devtools();
+            if std::env::var("DOCID_DEVTOOLS").as_deref() != Ok("0") {
+                if let Some(window) = app.get_webview_window("main") {
+                    window.open_devtools();
+                }
             }
             Ok(())
         })
