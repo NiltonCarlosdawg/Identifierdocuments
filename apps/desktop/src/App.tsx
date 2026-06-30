@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
-import { useAuthStore } from "./stores/auth";
+import { useAuthStore, decodeJwtUser } from "./stores/auth";
 import { useAppConfigStore } from "./stores/config";
 import { syncService } from "./services/sync";
 import Layout from "./components/Layout";
@@ -52,6 +52,24 @@ function ThemeInit() {
 
 export default function App() {
   const token = useAuthStore((s) => s.token);
+  const user = useAuthStore((s) => s.user);
+  const setUser = useAuthStore((s) => s.setUser);
+  useEffect(() => {
+    if (token && !user) {
+      const decoded = decodeJwtUser(token);
+      if (decoded) {
+        setUser({
+          id: decoded.userId,
+          email: "",
+          fullName: "",
+          tenantId: decoded.tenantId,
+          sectorId: decoded.sectorId,
+          roles: decoded.roles,
+          organization: null,
+        });
+      }
+    }
+  }, [token, user, setUser]);
 
   return (
     <>

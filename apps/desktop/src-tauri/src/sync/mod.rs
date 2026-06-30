@@ -1,6 +1,7 @@
 use crate::db;
 use chrono::Utc;
 use reqwest::multipart;
+use reqwest::tls::TlsVersion;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -100,11 +101,21 @@ fn insert_item(
     })
 }
 
-pub async fn check_online(api_base_url: &str) -> bool {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(5))
+fn build_tls_client(timeout_secs: u64) -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(timeout_secs))
+        .use_rustls_tls()
+        .min_tls_version(TlsVersion::TLS_1_2)
         .build()
-        .unwrap_or_default();
+        .map_err(|e| format!("Erro ao criar cliente HTTP: {e}"))
+}
+
+fn build_tls_client_default(timeout_secs: u64) -> reqwest::Client {
+    build_tls_client(timeout_secs).unwrap_or_default()
+}
+
+pub async fn check_online(api_base_url: &str) -> bool {
+    let client = build_tls_client_default(5);
     client
         .get(format!("{api_base_url}/"))
         .send()
@@ -129,10 +140,7 @@ async fn upload_item(
         .text("uploadSource", "sync")
         .part("file", part);
 
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(120))
-        .build()
-        .map_err(|e| e.to_string())?;
+    let client = build_tls_client(120)?;
 
     let res = client
         .post(format!("{api_base_url}/documents/attach"))

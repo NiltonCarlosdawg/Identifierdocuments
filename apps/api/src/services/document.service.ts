@@ -52,8 +52,7 @@ export async function verifyDocumentContainsIdentifier(
       text = extractPlainText(filePath);
       method = "plain-text";
     } else {
-      text = extractPlainText(filePath);
-      method = "fallback-plain-text";
+      throw new Error(`Tipo de ficheiro não suportado: ${mimeType || ext}. Formatos aceites: PDF, DOCX, DOC, TXT, MD, CSV.`);
     }
   } catch (err: any) {
     throw new Error(`Falha ao extrair texto do documento: ${err.message}`);

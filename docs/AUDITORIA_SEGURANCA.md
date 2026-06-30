@@ -13,7 +13,7 @@
 | **CRÍTICA** | 4 | 4 ✅ | Corrigir imediatamente |
 | **ALTA** | 18 | 18 ✅ | Corrigir urgente (próximo ciclo) |
 | **MÉDIA** | 18 | 18 ✅ | Corrigir planeado |
-| **BAIXA** | 12 | 0 | Monitorizar |
+| **BAIXA** | 12 | 12 | ✅ Todas concluídas |
 
 **Total de falhas encontradas: 51**
 
@@ -336,10 +336,9 @@
 | Estado | Fase | Itens |
 |--------|------|-------|
 | ✅ Concluída | Fase 1 — CRÍTICAS | C1, C2, C3, C4 |
-| ✅ Concluída | Fase 2 — ALTAS (parcial) | A1, A2, A3, A5, A6, A7, A8, A9, A11, A12, A14, A15 |
-| ✅ Concluída | Fase 2 — ALTAS (completada) | A4 (Redis), A10 (Groq opt-in), A13 (encrypted store), A16 (HTTPS), A17 (watcher canonicalize), A18 (SQLite perms) |
-| ✅ Concluída | Fase 3 — MÉDIAS (completada) | M1 a M18 (18/18) |
-| ⏳ Pendente | Fase 4 — BAIXAS | B1-B12 |
+| ✅ Concluída | Fase 2 — ALTAS | A1 a A18 (18/18) |
+| ✅ Concluída | Fase 3 — MÉDIAS | M1 a M18 (18/18) |
+| ✅ Concluída | Fase 4 — BAIXAS | B1 a B12 (12/12) |
 
 ## Plano de Correção por Prioridade
 
@@ -398,13 +397,29 @@
 | M17 | `.env.example:9`, `auth.ts:8` | `JWT_EXPIRES_IN` alterado de `7d` para `15m` |
 | M18 | `identifiers.module.ts:10-16` | Rate limit de 20 pedidos/min na geração de identificadores |
 
-### Fase 4 — Pendente (BAIXAS)
+### Fase 4 — Concluída (BAIXAS) ✅ FINALIZADA
+
+| ID | Ficheiro | O quê foi feito |
+|----|----------|-----------------|
+| B1 | `auth.ts:42` | Silent catch substituído por `console.warn` com mensagem de erro |
+| B2 | `auth.ts:8-13` | Adicionados `iss` (docid-api) e `aud` (docid-desktop) ao JWT |
+| B3 | `audit.module.ts` / `auth.ts` / `documents.module.ts` | `clientIp` derivado de `x-forwarded-for`; passado nos audit logs |
+| B4 | `tenants.module.ts` | Rate limit de 3 pedidos/hora no onboarding público |
+| B5 | `identifier.service.ts:62-63` | `||` substituído por `CONCAT()` na advisory lock key |
+| B6 | `lib.rs:32-36` | DevTools controlados por `DOCID_DEVTOOLS` env var |
+| B7 | `.gitignore` | `src-tauri/gen/` adicionado ao .gitignore e removido do tracking |
+| B8 | `attachment.service.ts:9-14` | `UPLOAD_DIR`/`THUMBNAIL_DIR` resolvidos de `import.meta.dir` |
+| B9 | `document.service.ts:55-57` | Fallback `extractPlainText` substituído por erro para tipos não suportados |
+| B10 | `auth.ts:6-15` + `App.tsx` | User object removido da persistência; apenas token persistido; `user` populado de JWT ao iniciar |
+| B11 | `sync.ts:72` | Size check (50MB max) adicionado antes de `arrayBuffer()` |
+| B12 | `sync/mod.rs:132-135` | TLS 1.2 mínimo + rustls explícito; `build_tls_client()` partilhado |
 
 ```
 CRÍTICAS: ✅ TODAS CORRIGIDAS (4/4)
 ALTAS: ✅ TODAS CORRIGIDAS (18/18)
 MÉDIAS: ✅ TODAS CORRIGIDAS (18/18)
-BAIXAS restantes: B1-B12
+BAIXAS: ✅ TODAS CORRIGIDAS (12/12)
+TOTAL: ✅ 52/52 FALHAS CORRIGIDAS
 ```
 
 ---

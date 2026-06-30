@@ -69,6 +69,10 @@ export const syncService = {
     userId: string,
   ): Promise<QueueItem | null> {
     if (!isTauri()) return null;
+    const MAX_IPC_SIZE = 52_428_800;
+    if (file.size > MAX_IPC_SIZE) {
+      throw new Error(`Ficheiro demasiado grande. Máximo: 50MB.`);
+    }
     const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
     return invoke<QueueItem>("enqueue_upload_bytes", {
       filename: file.name,
