@@ -102,7 +102,7 @@ export async function generateIdentifier(auth: AuthPayload, opts: {
     resource: "identifiers",
     resourceId: id.id,
     metadata: JSON.stringify({ identifier: identifierStr, category: cat.name, visibility }),
-    ip: null,
+    ip: "unknown",
   });
 
   return id;
@@ -161,7 +161,7 @@ export async function getIdentifier(auth: AuthPayload, identifierStr: string) {
     resource: "identifiers",
     resourceId: row.id,
     metadata: JSON.stringify({ identifier: identifierStr }),
-    ip: null,
+    ip: "unknown",
   });
 
   return { ...row, restricted };
@@ -187,7 +187,7 @@ export async function cancelIdentifier(auth: AuthPayload, identifierStr: string,
     resource: "identifiers",
     resourceId: row.id,
     metadata: JSON.stringify({ identifier: identifierStr, reason }),
-    ip: null,
+    ip: "unknown",
   });
 
   return db.query.identifiers.findFirst({ where: eq(identifiers.id, row.id) });

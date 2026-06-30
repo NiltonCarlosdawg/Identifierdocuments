@@ -47,17 +47,21 @@ export function verifyTokenWithGrace(token: string, graceSeconds = 60): Promise<
 }
 
 export const authMiddleware = new Elysia()
-  .derive({ as: "global" }, async ({ headers }): Promise<{ auth: AuthPayload | null }> => {
+  .derive({ as: "global" }, async ({ headers, request }): Promise<{ auth: AuthPayload | null; clientIp: string }> => {
+    const clientIp = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
+      || request.headers.get("x-real-ip")
+      || "unknown";
+
     const authHeader = headers.authorization;
     if (!authHeader?.startsWith("Bearer ")) {
-      return { auth: null };
+      return { auth: null, clientIp };
     }
     try {
       const payload = await verifyToken(authHeader.slice(7));
-      return { auth: payload };
+      return { auth: payload, clientIp };
     } catch (err) {
       console.warn("[AUTH] Token verification failed:", err instanceof Error ? err.message : err);
-      return { auth: null };
+      return { auth: null, clientIp };
     }
   });
 

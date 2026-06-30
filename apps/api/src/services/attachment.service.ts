@@ -74,7 +74,7 @@ export async function attachDocument(
     await db.insert(auditLogs).values({
       tenantId: auth.tenantId, userId: auth.userId, action: "ATTACH_FAILED",
       resource: "documents", resourceId: idRow.id,
-      metadata: JSON.stringify({ filename: file.name, reason: "identifier_not_found" }), ip: null,
+      metadata: JSON.stringify({ filename: file.name, reason: "identifier_not_found" }), ip: "unknown",
     });
     return { success: false, message: `O documento não contém o identificador '${identifier}'.`, verification };
   }
@@ -98,7 +98,7 @@ export async function attachDocument(
   await db.insert(auditLogs).values({
     tenantId: auth.tenantId, userId: auth.userId, action: "ATTACH",
     resource: "documents", resourceId: doc.id,
-    metadata: JSON.stringify({ identifier, filename: safeName, method: verification.method }), ip: null,
+    metadata: JSON.stringify({ identifier, filename: safeName, method: verification.method }), ip: "unknown",
   });
 
   const fullDoc = await db.query.documents.findFirst({

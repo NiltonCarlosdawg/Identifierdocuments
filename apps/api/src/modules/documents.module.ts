@@ -146,7 +146,7 @@ export const documentsModule = new Elysia({ prefix: "/documents" })
     detail: { summary: "Thumbnail do documento", tags: ["Documentos"] },
   })
 
-  .post("/:id/share", async ({ auth, params, body, set }) => {
+  .post("/:id/share", async ({ auth, params, body, set, clientIp }: { auth: any; params: any; body: any; set: any; clientIp: string }) => {
     try {
       if (!body.sectorId && !body.userId) {
         set.status = 422;
@@ -226,7 +226,7 @@ export const documentsModule = new Elysia({ prefix: "/documents" })
         tenantId: auth!.tenantId, userId: auth!.userId, action: "SHARE",
         resource: "documents", resourceId: docId,
         metadata: JSON.stringify({ sharedWithSector: body.sectorId, sharedWithUser: body.userId }),
-        ip: null,
+        ip: clientIp,
       });
 
       return { data: share };
@@ -243,7 +243,7 @@ export const documentsModule = new Elysia({ prefix: "/documents" })
     detail: { summary: "Partilhar documento", tags: ["Partilha"] },
   })
 
-  .get("/:id/shares", async ({ auth, params, set }) => {
+  .get("/:id/shares", async ({ auth, params, set, clientIp }: { auth: any; params: any; set: any; clientIp: string }) => {
     const idRow = await db.query.identifiers.findFirst({
       where: and(eq(identifiers.identifier, params.id), eq(identifiers.tenantId, auth!.tenantId)),
       with: { document: true },
@@ -261,7 +261,7 @@ export const documentsModule = new Elysia({ prefix: "/documents" })
     detail: { summary: "Listar partilhas", tags: ["Partilha"] },
   })
 
-  .post("/:id/request-access", async ({ auth, params, body, set }) => {
+  .post("/:id/request-access", async ({ auth, params, body, set, clientIp }: { auth: any; params: any; body: any; set: any; clientIp: string }) => {
     try {
       const idRow = await db.query.identifiers.findFirst({
         where: and(eq(identifiers.identifier, params.id), eq(identifiers.tenantId, auth!.tenantId)),
@@ -309,7 +309,7 @@ export const documentsModule = new Elysia({ prefix: "/documents" })
         tenantId: auth!.tenantId, userId: auth!.userId, action: "REQUEST_ACCESS",
         resource: "documents", resourceId: idRow.document.id,
         metadata: JSON.stringify({ identifier: params.id, approvalId: approval.id }),
-        ip: null,
+        ip: clientIp,
       });
 
       return { data: approval };
@@ -322,7 +322,7 @@ export const documentsModule = new Elysia({ prefix: "/documents" })
     detail: { summary: "Solicitar acesso a documento sector_only", tags: ["Documentos"] },
   })
 
-  .patch("/:id/shares/:shareId/revoke", async ({ auth, params, set }) => {
+  .patch("/:id/shares/:shareId/revoke", async ({ auth, params, set, clientIp }: { auth: any; params: any; set: any; clientIp: string }) => {
     try {
       const idRow = await db.query.identifiers.findFirst({
         where: and(eq(identifiers.identifier, params.id), eq(identifiers.tenantId, auth!.tenantId)),
@@ -346,7 +346,7 @@ export const documentsModule = new Elysia({ prefix: "/documents" })
       await db.insert(auditLogs).values({
         tenantId: auth!.tenantId, userId: auth!.userId, action: "REVOKE_SHARE",
         resource: "documents", resourceId: idRow.document.id,
-        metadata: JSON.stringify({ shareId: params.shareId }), ip: null,
+        metadata: JSON.stringify({ shareId: params.shareId }), ip: clientIp,
       });
       return { data: { id: share.id, revokedAt: share.revokedAt } };
     } catch (err: any) {
