@@ -3,10 +3,16 @@ import { db } from "../db";
 import { organizations, sectors, users, roles, userRoles } from "../db/schema";
 import { eq, and, isNull } from "drizzle-orm";
 import { requireAuth, requireRole } from "../middleware/auth";
+import { checkRateLimit } from "../middleware/rateLimit";
 
 export const tenantsModule = new Elysia({ prefix: "/tenants" })
 
-  .post("/", async ({ body, set }) => {
+  .post("/", async ({ body, set, request }) => {
+    const ip = request.headers.get("x-forwarded-for") || "unknown";
+    if (!(await checkRateLimit(`onboarding:${ip}`, 3, 3600_000))) {
+      set.status = 429;
+      return { error: { code: "RATE_LIMITED", message: "Muitas tentativas de registo. Tente novamente em 1 hora." } };
+    }
     try {
       const slug = body.slug ?? body.name.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 63);
 
