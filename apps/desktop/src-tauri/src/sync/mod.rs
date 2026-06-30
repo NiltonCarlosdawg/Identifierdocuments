@@ -1,7 +1,7 @@
 use crate::db;
 use chrono::Utc;
 use reqwest::multipart;
-use reqwest::tls::TlsVersion;
+use reqwest::tls::Version;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -105,7 +105,7 @@ fn build_tls_client(timeout_secs: u64) -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
         .timeout(Duration::from_secs(timeout_secs))
         .use_rustls_tls()
-        .min_tls_version(TlsVersion::TLS_1_2)
+        .min_tls_version(Version::TLS_1_2)
         .build()
         .map_err(|e| format!("Erro ao criar cliente HTTP: {e}"))
 }
