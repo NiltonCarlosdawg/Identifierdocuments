@@ -5,7 +5,9 @@ import { notifications } from "../db/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { requireAuth } from "../middleware/auth";
 
-const redis = new Redis(process.env.REDIS_URL || "redis://localhost:6379");
+const redisUrl = process.env.REDIS_URL || "redis://localhost:6379";
+const redisPassword = process.env.REDIS_PASSWORD;
+const redis = new Redis(redisUrl, redisPassword ? { password: redisPassword } : {});
 
 export interface NotificationEvent {
   type: string;

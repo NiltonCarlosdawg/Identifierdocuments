@@ -25,7 +25,7 @@ async function getUserPermissions(auth: AuthPayload): Promise<string[]> {
   return rows.map((r) => `${r.permResource}:${r.permAction}`);
 }
 
-export function rbac(requiredPermission: string) {
+export function rbac(requiredPermission: string, sectorScoped = false) {
   return (app: any) => app
     .guard({
       as: "scoped",
@@ -38,6 +38,10 @@ export function rbac(requiredPermission: string) {
         if (!permissions.includes(requiredPermission)) {
           ctx.set.status = 403;
           return { error: { code: "FORBIDDEN", message: "Permissão insuficiente." } };
+        }
+        if (sectorScoped && ctx.auth.sectorId && ctx.params?.sectorId && ctx.params.sectorId !== ctx.auth.sectorId) {
+          ctx.set.status = 403;
+          return { error: { code: "FORBIDDEN", message: "Acesso restrito ao seu sector." } };
         }
       },
     });

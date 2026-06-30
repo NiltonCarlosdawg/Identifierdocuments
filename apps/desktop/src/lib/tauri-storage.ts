@@ -13,32 +13,32 @@ async function getTauriStore() {
 
 const tauriStorage: StateStorage = {
   getItem: async (name: string): Promise<string | null> => {
-    if (!isTauri()) return localStorage.getItem(name);
+    if (!isTauri()) return null;
     try {
       const store = await getTauriStore();
       return (await store.get<string>(name)) ?? null;
     } catch {
-      return localStorage.getItem(name);
+      return null;
     }
   },
   setItem: async (name: string, value: string): Promise<void> => {
-    if (!isTauri()) { localStorage.setItem(name, value); return; }
+    if (!isTauri()) return;
     try {
       const store = await getTauriStore();
       await store.set(name, value);
       await store.save();
     } catch {
-      localStorage.setItem(name, value);
+      /* silent fail — auth state will be lost on restart */
     }
   },
   removeItem: async (name: string): Promise<void> => {
-    if (!isTauri()) { localStorage.removeItem(name); return; }
+    if (!isTauri()) return;
     try {
       const store = await getTauriStore();
       await store.delete(name);
       await store.save();
     } catch {
-      localStorage.removeItem(name);
+      /* silent fail */
     }
   },
 };

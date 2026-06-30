@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { tauriJsonStorage } from "../lib/tauri-storage";
+import { secureJsonStorage } from "../lib/secure-storage";
 
 interface AuthState {
   token: string | null;
@@ -25,6 +25,6 @@ export const useAuthStore = create<AuthState>()(
       login: (token, user) => set({ token, user }),
       logout: () => set({ token: null, user: null }),
     }),
-    { name: "docid-auth", storage: tauriJsonStorage },
+    { name: "docid-auth", storage: secureJsonStorage },
   ),
 );

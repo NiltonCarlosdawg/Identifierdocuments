@@ -1,16 +1,29 @@
 import { Elysia, t } from "elysia";
 import { generateIdentifier, listIdentifiers, getIdentifier, cancelIdentifier } from "../services/identifier.service";
 import { requireAuth } from "../middleware/auth";
+import { checkRateLimit } from "../middleware/rateLimit";
 
 export const identifiersModule = new Elysia({ prefix: "/identifiers" })
   .use(requireAuth())
 
-  .post("/generate", async ({ auth, body, set }) => {
+  .post("/generate", async ({ auth, body, set, request }) => {
     try {
+      const ip = request.headers.get("x-forwarded-for") || "unknown";
+      if (!(await checkRateLimit(`generate:${ip}:${auth!.userId}`, 20, 60_000))) {
+        set.status = 429;
+        return { error: { code: "RATE_LIMITED", message: "Muitos pedidos. Tente novamente em 1 minuto." } };
+      }
+      const targetSectorId = body.sectorId ?? auth!.sectorId;
+      if (!targetSectorId) {
+        set.status = 422; return { error: { code: "VALIDATION_ERROR", message: "Sector não definido." } };
+      }
+      if (targetSectorId !== auth!.sectorId && !auth!.roles.includes("ORG_ADMIN")) {
+        set.status = 403; return { error: { code: "FORBIDDEN", message: "Não pode gerar identificadores para outro sector." } };
+      }
       const result = await generateIdentifier(auth!, {
         categoryId: body.categoryId, issuedTo: body.issuedTo,
         description: body.description, origin: body.origin,
-        visibility: body.visibility, sectorId: body.sectorId,
+        visibility: body.visibility, sectorId: targetSectorId,
       });
       return { data: result };
     } catch (err: any) {

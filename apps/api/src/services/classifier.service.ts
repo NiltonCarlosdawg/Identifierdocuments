@@ -56,14 +56,21 @@ export interface ClassificationResult {
 
 export async function suggestCategory(text: string, filename?: string): Promise<ClassificationResult> {
   const apiKey = process.env.GROQ_API_KEY;
-  if (!apiKey) {
-    return { categoryId: "UNKNOWN", confidence: 0, reasoning: "GROQ_API_KEY não configurada." };
+  const enabled = process.env.CLASSIFIER_ENABLED === "true";
+  if (!apiKey || !enabled) {
+    return {
+      categoryId: "UNKNOWN",
+      confidence: 0,
+      reasoning: !apiKey ? "GROQ_API_KEY não configurada." : "Classificador IA desativado. Active CLASSIFIER_ENABLED=true nas variáveis de ambiente.",
+    };
   }
 
   const userContent = filename
     ? `Nome do ficheiro: ${filename}\n\nConteúdo do documento:\n${text.slice(0, 4000)}`
     : `Conteúdo do documento:\n${text.slice(0, 4000)}`;
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15_000);
   const res = await fetch(GROQ_API_URL, {
     method: "POST",
     headers: {
@@ -79,7 +86,9 @@ export async function suggestCategory(text: string, filename?: string): Promise<
       temperature: 0.1,
       max_tokens: 200,
     }),
+    signal: controller.signal,
   });
+  clearTimeout(timeoutId);
 
   if (!res.ok) {
     const err = await res.text();

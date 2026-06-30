@@ -8,6 +8,14 @@ import { documents, documentShares, approvals, sectors, auditLogs, identifiers, 
 import { eq, and, isNull, or, desc } from "drizzle-orm";
 import { notify } from "../services/notification.service";
 
+async function canShareDocument(auth: any, docSectorId: string | null, docUploadedBy: string | null): Promise<boolean> {
+  if (auth.userId === docUploadedBy) return true;
+  if (auth.roles.includes("ORG_ADMIN")) return true;
+  const sector = await db.query.sectors.findFirst({ where: eq(sectors.id, docSectorId) });
+  if (sector?.supervisorId === auth.userId) return true;
+  return false;
+}
+
 export const documentsModule = new Elysia({ prefix: "/documents" })
   .use(requireAuth())
 
@@ -109,6 +117,20 @@ export const documentsModule = new Elysia({ prefix: "/documents" })
   })
 
   .get("/:id/thumbnail", async ({ auth, params, set }: { auth: any; params: { id: string }; set: any }) => {
+    const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!UUID_REGEX.test(params.id)) {
+      set.status = 404;
+      return { error: { code: "NOT_FOUND", message: "Thumbnail não encontrado." } };
+    }
+
+    const doc = await db.query.documents.findFirst({
+      where: and(eq(documents.id, params.id), eq(documents.tenantId, auth!.tenantId)),
+    });
+    if (!doc) {
+      set.status = 404;
+      return { error: { code: "NOT_FOUND", message: "Documento não encontrado." } };
+    }
+
     const THUMBNAIL_DIR = process.env.THUMBNAIL_DIR || "./thumbnails";
     const thumbPath = path.join(THUMBNAIL_DIR, `${params.id}.png`);
     if (fs.existsSync(thumbPath)) {
@@ -137,6 +159,9 @@ export const documentsModule = new Elysia({ prefix: "/documents" })
       });
       if (!idRow || !idRow.document) {
         set.status = 404; return { error: { code: "NOT_FOUND", message: "Documento não encontrado." } };
+      }
+      if (!(await canShareDocument(auth!, idRow.sectorId, idRow.document.uploadedBy))) {
+        set.status = 403; return { error: { code: "FORBIDDEN", message: "Não tem permissão para partilhar este documento." } };
       }
       const docId = idRow.document.id;
 
@@ -218,12 +243,15 @@ export const documentsModule = new Elysia({ prefix: "/documents" })
     detail: { summary: "Partilhar documento", tags: ["Partilha"] },
   })
 
-  .get("/:id/shares", async ({ auth, params }) => {
+  .get("/:id/shares", async ({ auth, params, set }) => {
     const idRow = await db.query.identifiers.findFirst({
       where: and(eq(identifiers.identifier, params.id), eq(identifiers.tenantId, auth!.tenantId)),
       with: { document: true },
     });
     if (!idRow?.document) return { data: [] };
+    if (!(await canShareDocument(auth!, idRow.sectorId, idRow.document.uploadedBy))) {
+      set.status = 403; return { error: { code: "FORBIDDEN", message: "Não tem permissão para ver partilhas deste documento." } };
+    }
     const shares = await db.query.documentShares.findMany({
       where: eq(documentShares.documentId, idRow.document.id),
       with: { sector: true, user: true, sharer: true },
@@ -302,6 +330,9 @@ export const documentsModule = new Elysia({ prefix: "/documents" })
       });
       if (!idRow?.document) {
         set.status = 404; return { error: { code: "NOT_FOUND", message: "Documento não encontrado." } };
+      }
+      if (!(await canShareDocument(auth!, idRow.sectorId, idRow.document.uploadedBy))) {
+        set.status = 403; return { error: { code: "FORBIDDEN", message: "Não tem permissão para revogar partilhas." } };
       }
       const [share] = await db.update(documentShares)
         .set({ revokedAt: new Date() })

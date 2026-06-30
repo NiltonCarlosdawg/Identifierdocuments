@@ -19,7 +19,10 @@ import { classifierModule } from "./modules/classifier.module";
 import { notificationSSEModule } from "./services/notification.service";
 
 const app = new Elysia()
-  .use(cors())
+  .use(cors({
+    origin: ["http://localhost:1420", "tauri://localhost", "https://tauri.localhost"],
+    credentials: true,
+  }))
   .use(swagger({
     documentation: {
       info: {
@@ -84,7 +87,7 @@ const app = new Elysia()
     }
     if (code === "VALIDATION") {
       set.status = 422;
-      return { error: { code: "VALIDATION_ERROR", message: "Dados inválidos.", details: error.message } };
+      return { error: { code: "VALIDATION_ERROR", message: "Dados inválidos." } };
     }
     set.status = 500;
     console.error("[ERROR]", error);

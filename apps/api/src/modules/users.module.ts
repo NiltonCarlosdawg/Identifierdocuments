@@ -2,28 +2,10 @@ import { Elysia, t } from "elysia";
 import { db } from "../db";
 import { users, userRoles } from "../db/schema";
 import { eq, and } from "drizzle-orm";
-import { requireAuth } from "../middleware/auth";
+import { requireAuth, requireRole } from "../middleware/auth";
 
 export const usersModule = new Elysia({ prefix: "/users" })
   .use(requireAuth())
-
-  .post("/", async ({ auth, body, set }) => {
-    try {
-      const passwordHash = await Bun.password.hash(body.password);
-      const [user] = await db.insert(users).values({
-        tenantId: auth!.tenantId, sectorId: body.sectorId,
-        email: body.email, passwordHash, fullName: body.fullName,
-      }).returning();
-      const { passwordHash: _, ...safeUser } = user;
-      return { data: safeUser };
-    } catch (err: any) {
-      set.status = 400;
-      return { error: { code: "USER_ERROR", message: err.message } };
-    }
-  }, {
-    body: t.Object({ email: t.String({ format: "email" }), password: t.String({ minLength: 6 }), fullName: t.String(), sectorId: t.String() }),
-    detail: { summary: "Criar utilizador", tags: ["Utilizadores"] },
-  })
 
   .get("/", async ({ auth, query }) => {
     const conditions = [eq(users.tenantId, auth!.tenantId)];
@@ -50,6 +32,25 @@ export const usersModule = new Elysia({ prefix: "/users" })
   }, {
     params: t.Object({ id: t.String() }),
     detail: { summary: "Detalhe do utilizador", tags: ["Utilizadores"] },
+  })
+
+  .use(requireRole("ORG_ADMIN"))
+  .post("/", async ({ auth, body, set }) => {
+    try {
+      const passwordHash = await Bun.password.hash(body.password);
+      const [user] = await db.insert(users).values({
+        tenantId: auth!.tenantId, sectorId: body.sectorId,
+        email: body.email, passwordHash, fullName: body.fullName,
+      }).returning();
+      const { passwordHash: _, ...safeUser } = user;
+      return { data: safeUser };
+    } catch (err: any) {
+      set.status = 400;
+      return { error: { code: "USER_ERROR", message: err.message } };
+    }
+  }, {
+    body: t.Object({ email: t.String({ format: "email" }), password: t.String({ minLength: 6 }), fullName: t.String(), sectorId: t.String() }),
+    detail: { summary: "Criar utilizador", tags: ["Utilizadores"] },
   })
 
   .patch("/:id", async ({ auth, params, body, set }) => {

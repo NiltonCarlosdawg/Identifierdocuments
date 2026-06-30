@@ -2,11 +2,43 @@ import { Elysia, t } from "elysia";
 import { db } from "../db";
 import { sectors, users } from "../db/schema";
 import { eq, and } from "drizzle-orm";
-import { requireAuth } from "../middleware/auth";
+import { requireAuth, requireRole } from "../middleware/auth";
 
 export const sectorsModule = new Elysia({ prefix: "/sectors" })
   .use(requireAuth())
 
+  .get("/", async ({ auth }) => {
+    const rows = await db.query.sectors.findMany({
+      where: eq(sectors.tenantId, auth!.tenantId),
+      with: { supervisor: true },
+    });
+    return { data: rows };
+  }, { detail: { summary: "Listar sectores", tags: ["Sectores"] } })
+
+  .get("/:id", async ({ auth, params, set }) => {
+    const sector = await db.query.sectors.findFirst({
+      where: and(eq(sectors.id, params.id), eq(sectors.tenantId, auth!.tenantId)),
+      with: { supervisor: true },
+    });
+    if (!sector) { set.status = 404; return { error: { code: "NOT_FOUND", message: "Sector não encontrado." } }; }
+    return { data: sector };
+  }, {
+    params: t.Object({ id: t.String() }),
+    detail: { summary: "Detalhe do sector", tags: ["Sectores"] },
+  })
+
+  .get("/:id/members", async ({ auth, params }) => {
+    const members = await db.query.users.findMany({
+      where: and(eq(users.tenantId, auth!.tenantId), eq(users.sectorId, params.id)),
+      columns: { passwordHash: false },
+    });
+    return { data: members };
+  }, {
+    params: t.Object({ id: t.String() }),
+    detail: { summary: "Listar membros do sector", tags: ["Sectores"] },
+  })
+
+  .use(requireRole("ORG_ADMIN"))
   .post("/", async ({ auth, body, set }) => {
     try {
       const [sector] = await db.insert(sectors).values({
@@ -20,26 +52,6 @@ export const sectorsModule = new Elysia({ prefix: "/sectors" })
   }, {
     body: t.Object({ name: t.String(), code: t.String() }),
     detail: { summary: "Criar sector", tags: ["Sectores"] },
-  })
-
-  .get("/", async ({ auth }) => {
-    const rows = await db.query.sectors.findMany({
-      where: eq(sectors.tenantId, auth!.tenantId),
-      with: { supervisor: true },
-    });
-    return { data: rows };
-  }, { detail: { summary: "Listar sectores", tags: ["Sectores"] } })
-
-  .get("/:id", async ({ auth, params, set }) => {
-    const sector = await db.query.sectors.findFirst({
-      where: and(eq(sectors.id, params.id), eq(sectors.tenantId, auth!.tenantId)),
-      with: { supervisor: true, members: true },
-    });
-    if (!sector) { set.status = 404; return { error: { code: "NOT_FOUND", message: "Sector não encontrado." } }; }
-    return { data: sector };
-  }, {
-    params: t.Object({ id: t.String() }),
-    detail: { summary: "Detalhe do sector", tags: ["Sectores"] },
   })
 
   .patch("/:id", async ({ auth, params, body, set }) => {
@@ -87,13 +99,4 @@ export const sectorsModule = new Elysia({ prefix: "/sectors" })
   }, {
     params: t.Object({ id: t.String() }),
     detail: { summary: "Remover sector", tags: ["Sectores"] },
-  })
-  .get("/:id/members", async ({ auth, params }) => {
-    const members = await db.query.users.findMany({
-      where: and(eq(users.tenantId, auth!.tenantId), eq(users.sectorId, params.id)),
-    });
-    return { data: members };
-  }, {
-    params: t.Object({ id: t.String() }),
-    detail: { summary: "Listar membros do sector", tags: ["Sectores"] },
   });

@@ -23,7 +23,16 @@ export const useAppConfigStore = create<AppConfigState>()(
       apiBaseUrl: DEFAULT_API_URL,
       theme: "dark",
       avatar: null,
-      setApiBaseUrl: (url) => set({ apiBaseUrl: url.trim().replace(/\/$/, "") }),
+      setApiBaseUrl: (url) => {
+        const clean = url.trim().replace(/\/$/, "");
+        if (!clean.startsWith("http://") && !clean.startsWith("https://")) {
+          return;
+        }
+        if (clean.startsWith("http://") && !clean.includes("localhost") && !clean.includes("127.0.0.1")) {
+          return;
+        }
+        set({ apiBaseUrl: clean });
+      },
       resetApiBaseUrl: () => set({ apiBaseUrl: DEFAULT_API_URL }),
       setTheme: (theme) => {
         set({ theme });

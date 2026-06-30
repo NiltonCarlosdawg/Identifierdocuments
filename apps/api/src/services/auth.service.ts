@@ -11,7 +11,7 @@ export async function login(email: string, password: string, organizationSlug?: 
     const org = await db.query.organizations.findFirst({
       where: eq(organizations.slug, organizationSlug),
     });
-    if (!org) throw new Error("Organização não encontrada.");
+    if (!org) throw new Error("Credenciais inválidas.");
     whereCondition = and(eq(users.email, email), eq(users.tenantId, org.id));
   }
 

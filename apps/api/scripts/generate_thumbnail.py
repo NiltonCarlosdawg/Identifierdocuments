@@ -57,12 +57,19 @@ def _image_to_thumbnail(input_path: str, output_path: str, width: int) -> bool:
 def _office_to_thumbnail(input_path: str, output_path: str, width: int) -> bool:
     import subprocess
     try:
+        import tempfile
         with tempfile.TemporaryDirectory() as tmpdir:
+            os.chmod(tmpdir, 0o700)
             basename = os.path.splitext(os.path.basename(input_path))[0]
             pdf_path = os.path.join(tmpdir, basename + ".pdf")
 
+            sandbox_cmd = os.environ.get("LIBREOFFICE_SANDBOX")
+            cmd = [sandbox_cmd] + ["libreoffice", "--headless", "--convert-to", "pdf",
+                 "--outdir", tmpdir, input_path] if sandbox_cmd else \
+                  ["libreoffice", "--headless", "--convert-to", "pdf",
+                 "--outdir", tmpdir, input_path]
             result = subprocess.run(
-                ["libreoffice", "--headless", "--convert-to", "pdf",
+                cmd if not sandbox_cmd else [sandbox_cmd, "libreoffice", "--headless", "--convert-to", "pdf",
                  "--outdir", tmpdir, input_path],
                 capture_output=True, timeout=60
             )

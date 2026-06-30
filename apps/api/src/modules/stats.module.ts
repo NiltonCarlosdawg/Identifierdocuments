@@ -2,10 +2,11 @@ import { Elysia } from "elysia";
 import { db } from "../db";
 import { identifiers, documents, auditLogs, categories } from "../db/schema";
 import { eq, and, sql } from "drizzle-orm";
-import { requireAuth } from "../middleware/auth";
+import { requireAuth, requireRole } from "../middleware/auth";
 
 export const statsModule = new Elysia({ prefix: "/stats" })
   .use(requireAuth())
+  .use(requireRole("ORG_ADMIN"))
 
   .get("/", async ({ auth }) => {
     const tenantId = auth!.tenantId;

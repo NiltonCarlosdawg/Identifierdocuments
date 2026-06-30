@@ -34,33 +34,31 @@ function formatFileSize(bytes: number | null | undefined) {
 }
 
 function DocCard({ doc }: { doc: any }) {
+  const [imgError, setImgError] = useState(false);
+  const ext = doc.mimeType?.split("/")[1] || "ficheiro";
+
   return (
     <div className="docid-panel-low overflow-hidden rounded-xl border border-docid-border">
       <div className="relative flex h-36 items-center justify-center overflow-hidden bg-docid-surface-lowest">
-        <img
-          src={doc.thumbnailUrl}
-          alt={doc.filename}
-          className="h-full w-full object-contain"
-          onError={(e) => {
-            const target = e.target as HTMLImageElement;
-            target.style.display = "none";
-            const parent = target.parentElement;
-            if (parent) {
-              parent.innerHTML = `
-                <div class="flex flex-col items-center justify-center text-docid-outline" style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;width:100%;gap:0.5rem">
-                  <svg class="h-12 w-12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                    <polyline points="14,2 14,8 20,8"/>
-                    <line x1="16" y1="13" x2="8" y2="13"/>
-                    <line x1="16" y1="17" x2="8" y2="17"/>
-                    <polyline points="10,9 9,9 8,9"/>
-                  </svg>
-                  <span style="font-size:0.75rem;text-transform:uppercase;color:var(--docid-outline)">${doc.mimeType?.split("/")[1] || "ficheiro"}</span>
-                </div>
-              `;
-            }
-          }}
-        />
+        {imgError ? (
+          <div className="flex flex-col items-center justify-center text-docid-outline" style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", width: "100%", gap: "0.5rem" }}>
+            <svg className="h-12 w-12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+              <polyline points="14,2 14,8 20,8"/>
+              <line x1="16" y1="13" x2="8" y2="13"/>
+              <line x1="16" y1="17" x2="8" y2="17"/>
+              <polyline points="10,9 9,9 8,9"/>
+            </svg>
+            <span style={{ fontSize: "0.75rem", textTransform: "uppercase", color: "var(--docid-outline)" }}>{ext}</span>
+          </div>
+        ) : (
+          <img
+            src={doc.thumbnailUrl}
+            alt={doc.filename}
+            className="h-full w-full object-contain"
+            onError={() => setImgError(true)}
+          />
+        )}
         <div className="absolute right-2 top-2">
           <StatusChip tone={tone(doc.status)}>{formatStatus(doc.status)}</StatusChip>
         </div>

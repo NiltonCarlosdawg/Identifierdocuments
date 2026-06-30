@@ -1,4 +1,5 @@
 use rusqlite::{Connection, Result};
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 pub fn open(db_path: &Path) -> Result<Connection> {
@@ -6,6 +7,10 @@ pub fn open(db_path: &Path) -> Result<Connection> {
         std::fs::create_dir_all(parent).ok();
     }
     let conn = Connection::open(db_path)?;
+    // Restrict file permissions to owner-only (0o600)
+    if let Some(parent) = db_path.parent() {
+        std::fs::set_permissions(db_path, std::fs::Permissions::from_mode(0o600)).ok();
+    }
     init_schema(&conn)?;
     Ok(conn)
 }
@@ -58,7 +63,11 @@ mod tests {
         .unwrap();
 
         let status: String = conn
-            .query_row("SELECT status FROM upload_queue WHERE id = '1'", [], |row| row.get(0))
+            .query_row(
+                "SELECT status FROM upload_queue WHERE id = '1'",
+                [],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(status, "pending");
 

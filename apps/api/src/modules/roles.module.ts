@@ -35,8 +35,12 @@ export const rolesModule = new Elysia({ prefix: "/roles" })
   })
 
   .use(requireRole("ORG_ADMIN"))
-  .patch("/:id/permissions", async ({ params, body, set }) => {
+  .patch("/:id/permissions", async ({ auth, params, body, set }) => {
     try {
+      const role = await db.query.roles.findFirst({ where: eq(roles.id, params.id) });
+      if (!role || (role.tenantId && role.tenantId !== auth!.tenantId)) {
+        set.status = 404; return { error: { code: "NOT_FOUND", message: "Role não encontrado." } };
+      }
       await db.delete(rolePermissions).where(eq(rolePermissions.roleId, params.id));
       for (const perm of body.permissions) {
         await db.insert(rolePermissions).values({ roleId: params.id, ...perm });
@@ -53,8 +57,11 @@ export const rolesModule = new Elysia({ prefix: "/roles" })
   })
 
   .use(requireRole("ORG_ADMIN"))
-  .delete("/:id", async ({ params, set }) => {
+  .delete("/:id", async ({ auth, params, set }) => {
     const role = await db.query.roles.findFirst({ where: eq(roles.id, params.id) });
+    if (!role || (role.tenantId && role.tenantId !== auth!.tenantId)) {
+      set.status = 404; return { error: { code: "NOT_FOUND", message: "Role não encontrado." } };
+    }
     if (role?.isSystem) { set.status = 400; return { error: { code: "SYSTEM_ROLE", message: "Não é possível remover roles de sistema." } }; }
     await db.delete(roles).where(eq(roles.id, params.id));
     return { data: { deleted: true } };

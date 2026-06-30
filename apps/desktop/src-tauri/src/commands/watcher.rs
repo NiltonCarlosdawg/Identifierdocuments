@@ -99,11 +99,12 @@ pub async fn add_watched_folder(path: String, state: tauri::State<'_, WatcherSta
     if !p.exists() {
         return Err("Pasta não encontrada.".to_string());
     }
+    let canonical = p.canonicalize().map_err(|_| "Erro ao resolver caminho.".to_string())?;
     let mut folders = state.folders.lock().await;
-    if !folders.contains(&p) {
-        folders.push(p.clone());
+    if !folders.contains(&canonical) {
+        folders.push(canonical.clone());
     }
-    Ok(format!("Pasta adicionada: {}", path))
+    Ok(format!("Pasta adicionada: {}", canonical.to_string_lossy()))
 }
 
 #[tauri::command]

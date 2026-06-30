@@ -2,11 +2,19 @@ import { Elysia } from "elysia";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const NULL_TENANT = "00000000-0000-0000-0000-000000000000";
+
 export const tenantMiddleware = new Elysia()
   .onBeforeHandle({ as: "global" }, async (ctx: any) => {
-    if (ctx.auth?.tenantId) {
+    const tid = ctx.auth?.tenantId;
+    if (typeof tid === "string" && tid.length > 0 && UUID_REGEX.test(tid)) {
       await db.execute(
-        sql`SELECT set_config('app.current_tenant', ${ctx.auth.tenantId}, true)`
+        sql`SELECT set_config('app.current_tenant', ${tid}, true)`
+      );
+    } else {
+      await db.execute(
+        sql`SELECT set_config('app.current_tenant', ${NULL_TENANT}, true)`
       );
     }
   });

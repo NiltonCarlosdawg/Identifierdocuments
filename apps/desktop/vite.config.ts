@@ -4,6 +4,7 @@ import path from "path";
 
 export default defineConfig({
   plugins: [react()],
+  base: '',
   resolve: { alias: { "@": path.resolve(__dirname, "./src") } },
   clearScreen: false,
   server: { port: 1420, strictPort: true, watch: { ignored: ["**/src-tauri/**"] } },

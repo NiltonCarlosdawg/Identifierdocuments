@@ -349,8 +349,15 @@ pub fn set_sync_credentials(
     api_base_url: Option<String>,
 ) -> Result<(), String> {
     if let Some(url) = api_base_url {
+        let clean = url.trim_end_matches('/').to_string();
+        if !clean.starts_with("https://") && !clean.starts_with("http://") {
+            return Err("URL deve começar com http:// ou https://".to_string());
+        }
+        if clean.starts_with("http://") && !clean.contains("localhost") && !clean.contains("127.0.0.1") {
+            return Err("HTTP só permitido para localhost. Use HTTPS para outros endereços.".to_string());
+        }
         let mut base = state.api_base_url.lock().map_err(|e| e.to_string())?;
-        *base = url.trim_end_matches('/').to_string();
+        *base = clean;
     }
     let mut auth = state.auth_token.lock().map_err(|e| e.to_string())?;
     *auth = Some(token);
@@ -359,8 +366,15 @@ pub fn set_sync_credentials(
 
 #[tauri::command]
 pub fn set_api_base_url(state: State<'_, SyncState>, url: String) -> Result<(), String> {
+    let clean = url.trim_end_matches('/').to_string();
+    if !clean.starts_with("https://") && !clean.starts_with("http://") {
+        return Err("URL deve começar com http:// ou https://".to_string());
+    }
+    if clean.starts_with("http://") && !clean.contains("localhost") && !clean.contains("127.0.0.1") {
+        return Err("HTTP só permitido para localhost. Use HTTPS para outros endereços.".to_string());
+    }
     let mut base = state.api_base_url.lock().map_err(|e| e.to_string())?;
-    *base = url.trim_end_matches('/').to_string();
+    *base = clean;
     Ok(())
 }
 
@@ -383,6 +397,29 @@ pub async fn is_online(state: State<'_, SyncState>) -> Result<bool, String> {
     Ok(check_online(&api_base_url).await)
 }
 
+fn sanitize_filename(name: &str) -> String {
+    name.chars()
+        .filter(|&c| c.is_alphanumeric() || c == '.' || c == '-' || c == '_')
+        .collect::<String>()
+        .chars()
+        .take(255)
+        .collect()
+}
+
+fn safe_dest_path(uploads_dir: &PathBuf, filename: &str) -> Result<PathBuf, String> {
+    let safe_name = sanitize_filename(filename);
+    if safe_name.is_empty() {
+        return Err("Nome de ficheiro inválido.".to_string());
+    }
+    let dest = uploads_dir.join(format!("{}_{}", Uuid::new_v4(), safe_name));
+    let canonical = dest.canonicalize().map_err(|_| "Erro ao resolver caminho.".to_string())?;
+    let uploads_canonical = uploads_dir.canonicalize().map_err(|_| "Erro ao resolver diretório.".to_string())?;
+    if !canonical.starts_with(&uploads_canonical) {
+        return Err("Path traversal detectado.".to_string());
+    }
+    Ok(dest)
+}
+
 #[tauri::command]
 pub fn enqueue_upload(
     state: State<'_, SyncState>,
@@ -396,18 +433,21 @@ pub fn enqueue_upload(
         return Err("Ficheiro não encontrado.".to_string());
     }
 
-    let filename = source
+    let source_canonical = source.canonicalize().map_err(|_| "Caminho inválido.".to_string())?;
+
+    let filename = source_canonical
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("documento")
         .to_string();
 
     std::fs::create_dir_all(&state.uploads_dir).map_err(|e| e.to_string())?;
-    let dest = state.uploads_dir.join(format!("{}_{}", Uuid::new_v4(), filename));
-    std::fs::copy(&source, &dest).map_err(|e| e.to_string())?;
+    let dest = safe_dest_path(&state.uploads_dir, &filename)?;
+    std::fs::copy(&source_canonical, &dest).map_err(|e| e.to_string())?;
 
     let conn = state.conn()?;
-    insert_item(&conn, &dest, &filename, &identifier, &tenant_id, &user_id)
+    let safe_name = sanitize_filename(&filename);
+    insert_item(&conn, &dest, &safe_name, &identifier, &tenant_id, &user_id)
 }
 
 #[tauri::command]
@@ -420,17 +460,32 @@ pub fn enqueue_upload_bytes(
     user_id: String,
 ) -> Result<QueueItem, String> {
     std::fs::create_dir_all(&state.uploads_dir).map_err(|e| e.to_string())?;
-    let dest = state.uploads_dir.join(format!("{}_{}", Uuid::new_v4(), filename));
+    let dest = safe_dest_path(&state.uploads_dir, &filename)?;
+
+    if bytes.len() > 52_428_800 {
+        return Err("Ficheiro demasiado grande. Máximo: 50MB.".to_string());
+    }
     std::fs::write(&dest, &bytes).map_err(|e| e.to_string())?;
 
     let conn = state.conn()?;
-    insert_item(&conn, &dest, &filename, &identifier, &tenant_id, &user_id)
+    let safe_name = sanitize_filename(&filename);
+    insert_item(&conn, &dest, &safe_name, &identifier, &tenant_id, &user_id)
 }
 
 #[tauri::command]
 pub fn get_queue(state: State<'_, SyncState>) -> Result<Vec<QueueItem>, String> {
     let conn = state.conn()?;
     fetch_all(&conn)
+}
+
+fn is_safe_path(uploads_dir: &PathBuf, path: &str) -> bool {
+    if let (Ok(canonical), Ok(uploads_canonical)) =
+        (std::fs::canonicalize(path), uploads_dir.canonicalize())
+    {
+        canonical.starts_with(&uploads_canonical)
+    } else {
+        false
+    }
 }
 
 #[tauri::command]
@@ -445,7 +500,9 @@ pub fn clear_uploaded(state: State<'_, SyncState>) -> Result<usize, String> {
         .map_err(|e| e.to_string())?;
 
     for (_, path) in &items {
-        std::fs::remove_file(path).ok();
+        if is_safe_path(&state.uploads_dir, &path) {
+            std::fs::remove_file(&path).ok();
+        }
     }
 
     let count = conn
@@ -469,7 +526,9 @@ pub fn remove_queue_item(state: State<'_, SyncState>, id: String) -> Result<(), 
         .map_err(|e| e.to_string())?;
 
     if let Some(p) = path {
-        std::fs::remove_file(p).ok();
+        if is_safe_path(&state.uploads_dir, &p) {
+            std::fs::remove_file(p).ok();
+        }
     }
     Ok(())
 }
