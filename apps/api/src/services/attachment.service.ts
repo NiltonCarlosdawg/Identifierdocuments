@@ -6,9 +6,10 @@ import { eq, and, or, isNull } from "drizzle-orm";
 import { verifyDocumentContainsIdentifier } from "./document.service";
 import type { AuthPayload } from "../middleware/auth";
 
-const UPLOAD_DIR = process.env.UPLOAD_DIR || "./uploads";
-const THUMBNAIL_DIR = process.env.THUMBNAIL_DIR || "./thumbnails";
-const THUMBNAIL_SCRIPT = process.env.THUMBNAIL_SCRIPT || "./scripts/generate_thumbnail.py";
+const APP_ROOT = path.resolve(import.meta.dir, "../..");
+const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(APP_ROOT, "uploads");
+const THUMBNAIL_DIR = process.env.THUMBNAIL_DIR || path.join(APP_ROOT, "thumbnails");
+const THUMBNAIL_SCRIPT = process.env.THUMBNAIL_SCRIPT || path.join(APP_ROOT, "scripts", "generate_thumbnail.py");
 const MAX_FILE_SIZE = Number(process.env.MAX_FILE_SIZE) || 52_428_800;
 
 const RESOLVED_UPLOAD_DIR = path.resolve(UPLOAD_DIR);
