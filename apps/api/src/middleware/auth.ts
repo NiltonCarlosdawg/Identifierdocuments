@@ -51,7 +51,8 @@ export const authMiddleware = new Elysia()
     try {
       const payload = await verifyToken(authHeader.slice(7));
       return { auth: payload };
-    } catch {
+    } catch (err) {
+      console.warn("[AUTH] Token verification failed:", err instanceof Error ? err.message : err);
       return { auth: null };
     }
   });
