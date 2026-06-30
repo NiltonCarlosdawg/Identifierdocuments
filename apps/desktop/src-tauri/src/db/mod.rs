@@ -8,7 +8,7 @@ pub fn open(db_path: &Path) -> Result<Connection> {
     }
     let conn = Connection::open(db_path)?;
     // Restrict file permissions to owner-only (0o600)
-    if let Some(parent) = db_path.parent() {
+    if db_path.parent().is_some() {
         std::fs::set_permissions(db_path, std::fs::Permissions::from_mode(0o600)).ok();
     }
     init_schema(&conn)?;
