@@ -21,6 +21,8 @@ export function signToken(payload: AuthPayload): Promise<string> {
   return new SignJWT({ ...payload })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
+    .setIssuer("docid-api")
+    .setAudience("docid-desktop")
     .setExpirationTime(JWT_EXPIRES_IN)
     .sign(JWT_SECRET);
 }
@@ -33,12 +35,14 @@ function validateAuthPayload(raw: unknown): AuthPayload {
   return { userId: p.userId, tenantId: p.tenantId, sectorId: typeof p.sectorId === "string" ? p.sectorId : null, roles: p.roles as string[] };
 }
 
+const JWT_VERIFY_OPTS = { issuer: "docid-api", audience: "docid-desktop" };
+
 export function verifyToken(token: string): Promise<AuthPayload> {
-  return jwtVerify(token, JWT_SECRET).then(({ payload }) => validateAuthPayload(payload));
+  return jwtVerify(token, JWT_SECRET, JWT_VERIFY_OPTS).then(({ payload }) => validateAuthPayload(payload));
 }
 
 export function verifyTokenWithGrace(token: string, graceSeconds = 60): Promise<AuthPayload> {
-  return jwtVerify(token, JWT_SECRET, { clockTolerance: `${graceSeconds}s` })
+  return jwtVerify(token, JWT_SECRET, { ...JWT_VERIFY_OPTS, clockTolerance: `${graceSeconds}s` })
     .then(({ payload }) => validateAuthPayload(payload));
 }
 
