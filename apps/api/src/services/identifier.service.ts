@@ -59,7 +59,7 @@ export async function generateIdentifier(auth: AuthPayload, opts: {
   const orgPrefix = org?.identifierPrefix || "VL";
 
   const seqResult = await db.transaction(async (tx) => {
-    const lockKey = sql`hashtext(${auth.tenantId || ''} || '-' || ${opts.categoryId})`;
+    const lockKey = sql`hashtext(CONCAT(${auth.tenantId}, '-', ${opts.categoryId}))`;
     await tx.execute(sql`SELECT pg_advisory_xact_lock(${lockKey})`);
     const [row] = await tx
       .select({ next: sql<number>`COALESCE(MAX(sequence), 0) + 1` })
