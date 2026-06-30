@@ -5,17 +5,7 @@
   "permissions": [
     "core:default",
     "store:default",
-    {
-      "identifier": "sql:scope",
-      "allow": [
-        "SELECT * FROM upload_queue WHERE status = 'pending'",
-        "SELECT * FROM upload_queue",
-        "INSERT INTO upload_queue (file_path, identifier, tenant_id, user_id, status) VALUES ($1, $2, $3, $4, 'pending')",
-        "UPDATE upload_queue SET status = $1, attempts = attempts + 1, last_error = $2 WHERE id = $3",
-        "DELETE FROM upload_queue WHERE id = $1",
-        "DELETE FROM upload_queue WHERE status = 'uploaded'"
-      ]
-    },
+    "sql:default",
     {
       "identifier": "fs:scope",
       "allow": [
