@@ -36,6 +36,20 @@
       "when": 1782171062656,
       "tag": "0004_furry_big_bertha",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1782897364331,
+      "tag": "0005_outgoing_tattoo",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1783000000000,
+      "tag": "0006_rls_policies",
+      "breakpoints": true
     }
   ]
 }
