@@ -38,13 +38,18 @@ export const rolesModule = new Elysia({ prefix: "/roles" })
   .patch("/:id/permissions", async ({ auth, params, body, set }) => {
     try {
       const role = await db.query.roles.findFirst({ where: eq(roles.id, params.id) });
-      if (!role || (role.tenantId && role.tenantId !== auth!.tenantId)) {
+      if (!role || role.tenantId !== auth!.tenantId) {
         set.status = 404; return { error: { code: "NOT_FOUND", message: "Role não encontrado." } };
       }
-      await db.delete(rolePermissions).where(eq(rolePermissions.roleId, params.id));
-      for (const perm of body.permissions) {
-        await db.insert(rolePermissions).values({ roleId: params.id, ...perm });
+      if (role.isSystem) {
+        set.status = 400; return { error: { code: "SYSTEM_ROLE", message: "Não é possível alterar permissões de roles de sistema." } };
       }
+      await db.transaction(async (tx) => {
+        await tx.delete(rolePermissions).where(eq(rolePermissions.roleId, params.id));
+        for (const perm of body.permissions) {
+          await tx.insert(rolePermissions).values({ roleId: params.id, ...perm });
+        }
+      });
       return { data: { updated: true } };
     } catch (err: any) {
       set.status = 400;
@@ -59,7 +64,7 @@ export const rolesModule = new Elysia({ prefix: "/roles" })
   .use(requireRole("ORG_ADMIN"))
   .delete("/:id", async ({ auth, params, set }) => {
     const role = await db.query.roles.findFirst({ where: eq(roles.id, params.id) });
-    if (!role || (role.tenantId && role.tenantId !== auth!.tenantId)) {
+    if (!role || role.tenantId !== auth!.tenantId) {
       set.status = 404; return { error: { code: "NOT_FOUND", message: "Role não encontrado." } };
     }
     if (role?.isSystem) { set.status = 400; return { error: { code: "SYSTEM_ROLE", message: "Não é possível remover roles de sistema." } }; }
