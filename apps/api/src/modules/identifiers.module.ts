@@ -45,8 +45,9 @@ export const identifiersModule = new Elysia({ prefix: "/identifiers" })
   .get("/", async ({ auth, query }) => {
     return listIdentifiers(auth!, {
       categoryId: query.categoryId, status: query.status,
-      origin: query.origin, page: query.page ? Number(query.page) : 1,
-      limit: query.limit ? Number(query.limit) : 20,
+      origin: query.origin,
+      page: query.page ? (Number.isFinite(parseInt(query.page, 10)) ? Math.max(1, parseInt(query.page, 10)) : 1) : 1,
+      limit: query.limit ? (Number.isFinite(parseInt(query.limit, 10)) ? Math.min(Math.max(1, parseInt(query.limit, 10)), 100) : 20) : 20,
     });
   }, {
     query: t.Object({

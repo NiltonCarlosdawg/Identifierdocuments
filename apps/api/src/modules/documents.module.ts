@@ -50,8 +50,10 @@ export const documentsModule = new Elysia({ prefix: "/documents" })
   })
 
   .get("/", async ({ auth, query }: { auth: any; query: { limit?: string; page?: string; identifierId?: string } }) => {
-    const limit = Math.min(parseInt(query.limit || "20", 10), 100);
-    const page = parseInt(query.page || "1", 10);
+    const parsedLimit = parseInt(query.limit || "20", 10);
+    const limit = Math.min(Math.max(Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : 20, 1), 100);
+    const parsedPage = parseInt(query.page || "1", 10);
+    const page = Math.max(1, Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : 1);
     const offset = (page - 1) * limit;
 
     const conditions = [eq(documents.tenantId, auth!.tenantId)];

@@ -13,8 +13,10 @@ export const auditModule = new Elysia({ prefix: "/audit" })
     if (query.action) conditions.push(eq(auditLogs.action, query.action));
     if (query.resource) conditions.push(eq(auditLogs.resource, query.resource));
 
-    const page = Math.max(1, query.page ? Number(query.page) : 1);
-    const limit = Math.min(100, query.limit ? Number(query.limit) : 50);
+    const parsedPage = query.page ? parseInt(query.page, 10) : 1;
+    const page = Math.max(1, Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : 1);
+    const parsedLimit = query.limit ? parseInt(query.limit, 10) : 50;
+    const limit = Math.min(Math.max(Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : 50, 1), 100);
     const offset = (page - 1) * limit;
 
     const rows = await db.query.auditLogs.findMany({
