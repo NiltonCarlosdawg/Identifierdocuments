@@ -1,5 +1,6 @@
 import { Elysia, t } from "elysia";
 import { requireAuth } from "../middleware/auth";
+import { checkRateLimit } from "../middleware/rateLimit";
 import { suggestCategory } from "../services/classifier.service";
 import { db } from "../db";
 import { categories } from "../db/schema";
@@ -9,6 +10,11 @@ export const classifierModule = new Elysia({ prefix: "/classifier" })
 
   .post("/suggest", async ({ auth, body, set }) => {
     try {
+      const allowed = await checkRateLimit(`classifier:${auth!.userId}`, 10, 60_000);
+      if (!allowed) {
+        set.status = 429;
+        return { error: { code: "RATE_LIMITED", message: "Muitos pedidos ao classificador. Tente novamente dentro de 1 minuto." } };
+      }
       const result = await suggestCategory(body.text, body.filename);
 
       if (result.categoryId === "UNKNOWN") {
