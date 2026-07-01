@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../services/api";
-import { AlertTriangle, Ban, Check, Download, FileText, Fingerprint, Plus, X } from "lucide-react";
+import { AlertTriangle, Ban, Check, Download, FileSpreadsheet, FileText, Fingerprint, Plus, Presentation, X } from "lucide-react";
 import { MetricCard, PageHeader, StatusChip } from "../components/docid-ui";
 
 function tone(status: string) {
@@ -26,54 +26,169 @@ function formatStatus(status: string) {
   return map[status] ?? status;
 }
 
-function formatFileSize(bytes: number | null | undefined) {
-  if (!bytes) return "";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+/**
+ * CORREÇÃO — causa raiz da pré-visualização não funcionar:
+ *
+ * `doc.thumbnailUrl` aponta para uma rota protegida por requireAuth() no backend
+ * (GET /documents/:id/thumbnail). Uma tag <img src="..."> faz um pedido GET puro do
+ * browser/webview, sem cabeçalho Authorization — ao contrário de `api.get(...)`, que
+ * injecta o token guardado em useAuthStore. Sem token, o backend devolve 401, a
+ * imagem falha a carregar, o onError dispara e cai sempre no ícone de fallback.
+ *
+ * Correcção final (após confirmar api.ts, config.ts e auth.ts):
+ * 1. Usa `api.getBlob()` — novo método em services/api.ts que reutiliza exactamente o
+ *    mesmo token (useAuthStore) e o mesmo fluxo de refresh-e-retry em 401 que o resto
+ *    da app já usa, em vez de duplicar essa lógica aqui (a minha tentativa anterior
+ *    assumiu incorrectamente localStorage — o token vive num store Zustand com
+ *    storage seguro, daí continuar a falhar).
+ * 2. Ignora por completo o host embutido em `doc.thumbnailUrl` (construído no
+ *    servidor a partir de process.env.API_BASE_URL) e constrói o pedido a partir de
+ *    `doc.id` + o `apiBaseUrl` configurado no cliente (useAppConfigStore, via
+ *    getBaseUrl() dentro de api.ts). Este é um desktop app com apiBaseUrl
+ *    configurável pelo utilizador (ex.: apontar para um domínio em cPanel) — se o
+ *    API_BASE_URL do servidor não estiver correctamente definido, o URL absoluto que
+ *    ele devolve pode nunca corresponder ao host que o cliente deve realmente usar.
+ *    Usar sempre o path relativo elimina essa fonte de discrepância.
+ */
+function useThumbnail(docId: string | undefined) {
+  const [objectUrl, setObjectUrl] = useState<string | null>(null);
+  // "loading" | "ready" | "empty" (sem thumbnail gerada, ex. 204) | "error" (falha real)
+  const [state, setState] = useState<"loading" | "ready" | "empty" | "error">("loading");
+
+  useEffect(() => {
+    if (!docId) { setState("empty"); return; }
+
+    let cancelled = false;
+    let currentObjectUrl: string | null = null;
+    setState("loading");
+
+    api.getBlob(`/documents/${docId}/thumbnail`)
+      .then((blob) => {
+        if (cancelled) return;
+        if (!blob) { setState("empty"); return; }
+        currentObjectUrl = URL.createObjectURL(blob);
+        setObjectUrl(currentObjectUrl);
+        setState("ready");
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        // CORREÇÃO: antes "sem thumbnail" (204, normal) e "falhou a buscar" (erro real,
+        // ex. rede, 500) resultavam exactamente no mesmo ícone de fallback, sem
+        // distinção nenhuma — impossível perceber, olhando para o ecrã, se é preciso
+        // investigar o backend ou se é apenas um documento que ainda não gerou
+        // thumbnail. Agora o erro fica registado na consola do browser com o docId,
+        // e o estado "error" é visualmente distinto (ver DocRow).
+        console.error(`[thumbnail] Falha ao buscar pré-visualização para documento ${docId}:`, err);
+        setState("error");
+      });
+
+    return () => {
+      cancelled = true;
+      if (currentObjectUrl) URL.revokeObjectURL(currentObjectUrl);
+    };
+  }, [docId]);
+
+  return { objectUrl, state };
 }
 
-function DocCard({ doc }: { doc: any }) {
-  const [imgError, setImgError] = useState(false);
-  const ext = doc.mimeType?.split("/")[1] || "ficheiro";
+// CORREÇÃO (menor, à parte do bug de auth): `doc.mimeType.split("/")[1]` para tipos
+// Office devolve strings como "vnd.openxmlformats-officedocument.wordprocessingml.document"
+// — exactamente o que aparecia ilegível no ecrã de fallback. Preferimos a extensão do
+// nome do ficheiro (mais curta e já familiar ao utilizador); só caímos no mimeType
+// como último recurso, e nesse caso mostramos um rótulo curto conhecido em vez do
+// mimeType inteiro.
+const MIME_LABELS: Record<string, string> = {
+  "vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+  "msword": "doc",
+  "vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+  "vnd.ms-excel": "xls",
+  "vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
+  "vnd.ms-powerpoint": "ppt",
+  pdf: "pdf",
+  plain: "txt",
+};
+
+function fileExtLabel(doc: any): string {
+  const fromName = doc.filename?.split(".").pop();
+  if (fromName && fromName.length <= 5) return fromName.toLowerCase();
+  const mimeSub = doc.mimeType?.split("/")[1];
+  return (mimeSub && MIME_LABELS[mimeSub]) || "ficheiro";
+}
+
+// Ícone + cor por tipo de ficheiro, ao estilo Word/Excel/PowerPoint — usado como
+// fallback quando ainda não há thumbnail real gerada (ou como ícone único, já que o
+// formato de lista pedido pelo utilizador usa sempre um ícone de tipo, não uma
+// pré-visualização de conteúdo — só a vista em cartões grandes do Word mostra
+// conteúdo real; a lista mostra sempre o ícone do tipo).
+const FILE_TYPE_META: Record<string, { Icon: typeof FileText; bg: string }> = {
+  docx: { Icon: FileText, bg: "#2B579A" },
+  doc: { Icon: FileText, bg: "#2B579A" },
+  xlsx: { Icon: FileSpreadsheet, bg: "#217346" },
+  xls: { Icon: FileSpreadsheet, bg: "#217346" },
+  pptx: { Icon: Presentation, bg: "#B7472A" },
+  ppt: { Icon: Presentation, bg: "#B7472A" },
+  pdf: { Icon: FileText, bg: "#DC3B27" },
+};
+const DEFAULT_FILE_TYPE_META = { Icon: FileText, bg: "var(--docid-surface-lowest)" };
+
+function fileTypeMeta(doc: any) {
+  return FILE_TYPE_META[fileExtLabel(doc)] || DEFAULT_FILE_TYPE_META;
+}
+
+// Formata a data ao estilo do Word Online: relativo nas últimas 24h ("Há 9 h"),
+// dia+mês abreviado depois disso ("8 de mai."). Usa createdAt (data de anexação),
+// já que a API não regista "última abertura" — se isso vier a existir, é só trocar
+// o campo de origem aqui.
+function formatOpened(dateStr: string | undefined): string {
+  if (!dateStr) return "—";
+  const date = new Date(dateStr);
+  const diffMin = (Date.now() - date.getTime()) / 60000;
+  if (diffMin < 1) return "Agora mesmo";
+  if (diffMin < 60) return `Há ${Math.round(diffMin)} m`;
+  const diffH = diffMin / 60;
+  if (diffH < 24) return `Há ${Math.round(diffH)} h`;
+  const diffDays = diffH / 24;
+  if (diffDays < 7) return `Há ${Math.round(diffDays)} d`;
+  return date.toLocaleDateString("pt-AO", { day: "numeric", month: "short" });
+}
+
+function DocRow({ doc }: { doc: any }) {
+  const { Icon, bg } = fileTypeMeta(doc);
+  const { objectUrl, state } = useThumbnail(doc.id);
+  const hasThumbnail = state === "ready" && !!objectUrl;
 
   return (
-    <div className="docid-panel-low overflow-hidden rounded-xl border border-docid-border">
-      <div className="relative flex h-36 items-center justify-center overflow-hidden bg-docid-surface-lowest">
-        {imgError ? (
-          <div className="flex flex-col items-center justify-center text-docid-outline" style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", width: "100%", gap: "0.5rem" }}>
-            <svg className="h-12 w-12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-              <polyline points="14,2 14,8 20,8"/>
-              <line x1="16" y1="13" x2="8" y2="13"/>
-              <line x1="16" y1="17" x2="8" y2="17"/>
-              <polyline points="10,9 9,9 8,9"/>
-            </svg>
-            <span style={{ fontSize: "0.75rem", textTransform: "uppercase", color: "var(--docid-outline)" }}>{ext}</span>
-          </div>
+    <div className="flex items-center gap-4 border-b border-docid-border px-5 py-3 last:border-b-0 hover:bg-docid-surface-lowest/60 transition-colors">
+      <div
+        className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded"
+        style={{ backgroundColor: hasThumbnail ? "transparent" : bg }}
+      >
+        {hasThumbnail ? (
+          <img src={objectUrl!} alt={doc.filename} className="h-full w-full object-cover" />
         ) : (
-          <img
-            src={doc.thumbnailUrl}
-            alt={doc.filename}
-            className="h-full w-full object-contain"
-            onError={() => setImgError(true)}
-          />
+          <Icon className="h-5 w-5 text-white" />
         )}
-        <div className="absolute right-2 top-2">
-          <StatusChip tone={tone(doc.status)}>{formatStatus(doc.status)}</StatusChip>
-        </div>
       </div>
-      <div className="p-3">
-        <p className="truncate font-mono text-sm font-semibold text-docid-primary-soft">
-          {doc.identifier?.identifier ?? "—"}
-        </p>
-        <p className="mt-0.5 truncate text-xs text-docid-muted">
+
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium text-docid-text">
           {doc.filename ?? "Documento sem nome"}
         </p>
-        <div className="mt-2 flex items-center justify-between text-xs text-docid-muted">
-          <span>{formatFileSize(doc.fileSize)}</span>
-          <span>{doc.createdAt ? new Date(doc.createdAt).toLocaleDateString("pt-AO") : "—"}</span>
-        </div>
+        <p className="truncate font-mono text-xs text-docid-muted">
+          {doc.identifier?.identifier ?? "—"}
+        </p>
+      </div>
+
+      <div className="hidden w-28 shrink-0 sm:block">
+        <StatusChip tone={tone(doc.status)}>{formatStatus(doc.status)}</StatusChip>
+      </div>
+
+      <div className="w-20 shrink-0 text-right text-xs text-docid-muted sm:w-24 sm:text-left">
+        {formatOpened(doc.createdAt)}
+      </div>
+
+      <div className="hidden w-32 shrink-0 truncate text-xs text-docid-muted md:block">
+        {doc.uploadedBy ?? "—"}
       </div>
     </div>
   );
@@ -138,8 +253,15 @@ export default function Dashboard() {
               <p className="text-sm">Nenhum documento ainda.</p>
             </div>
           ) : (
-            <div className="grid gap-4 p-5 sm:grid-cols-2 lg:grid-cols-3">
-              {recentDocs.map((doc: any) => <DocCard key={doc.id} doc={doc} />)}
+            <div>
+              <div className="hidden items-center gap-4 border-b border-docid-border px-5 py-2 text-xs font-medium uppercase tracking-wide text-docid-muted sm:flex">
+                <div className="h-10 w-10 shrink-0" />
+                <div className="min-w-0 flex-1">Nome</div>
+                <div className="hidden w-28 shrink-0 sm:block">Estado</div>
+                <div className="w-20 shrink-0 sm:w-24">Aberto</div>
+                <div className="hidden w-32 shrink-0 md:block">Proprietário</div>
+              </div>
+              {recentDocs.map((doc: any) => <DocRow key={doc.id} doc={doc} />)}
             </div>
           )}
         </section>

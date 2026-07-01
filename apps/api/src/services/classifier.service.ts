@@ -54,6 +54,20 @@ export interface ClassificationResult {
   reasoning: string;
 }
 
+// Lista derivada dos IDs anunciados no SYSTEM_PROMPT acima. Mantém-se em sincronia
+// manual com esse texto — se adicionares/removeres categorias ali, actualiza aqui
+// também (idealmente isto viria da tabela `categories` da BD; deixei como constante
+// simples para não introduzir uma dependência de DB neste ficheiro sem confirmar
+// que é desejado).
+const VALID_CATEGORY_IDS = new Set([
+  "PROP", "FAT", "REC", "NOT", "NDB", "ORD", "GUE", "COT",
+  "REL", "EXT", "ORC", "AUT", "TRF",
+  "CTR", "TER", "FLC", "DEC", "MAP", "ADM",
+  "CPS", "CPF", "NDA", "SLA", "MOU", "POW", "ACO", "LIC", "CLA", "GAR", "TIT",
+  "ATA", "MEM", "CIR", "REQ", "POL", "PRO", "DEL",
+  "ESP", "MAN", "REP", "TAS", "PLN",
+]);
+
 export async function suggestCategory(text: string, filename?: string): Promise<ClassificationResult> {
   const apiKey = process.env.GROQ_API_KEY;
   const enabled = process.env.CLASSIFIER_ENABLED === "true";
@@ -84,7 +98,10 @@ export async function suggestCategory(text: string, filename?: string): Promise<
         { role: "user", content: userContent },
       ],
       temperature: 0.1,
-      max_tokens: 200,
+      // CORREÇÃO: 200 tokens é uma margem apertada para { categoryId, confidence,
+      // reasoning } — um "reasoning" um pouco mais longo pode cortar o JSON a meio e
+      // partir o JSON.parse abaixo. Aumentado para dar folga sem custo relevante.
+      max_tokens: 300,
     }),
     signal: controller.signal,
   });
@@ -102,5 +119,33 @@ export async function suggestCategory(text: string, filename?: string): Promise<
   const jsonMatch = content.match(/\{[\s\S]*\}/);
   if (!jsonMatch) throw new Error("Formato inesperado da Groq API.");
 
-  return JSON.parse(jsonMatch[0]) as ClassificationResult;
+  // CORREÇÃO: antes fazia-se `JSON.parse(...)` e devolvia-se directamente o resultado,
+  // confiando cegamente em (a) o parse não rebentar com uma resposta truncada/malformada
+  // e (b) o categoryId devolvido pela IA corresponder de facto a uma categoria real do
+  // sistema. Uma alucinação do modelo (ex.: inventar "FATU" em vez de "FAT") passava
+  // directamente para o resto da aplicação, que só descobriria o problema mais tarde
+  // ao tentar usar esse categoryId (ex.: em generateIdentifier, que lançaria erro só
+  // nesse ponto). Agora validamos aqui e devolvemos um resultado seguro em caso de
+  // parse inválido ou categoria desconhecida.
+  let parsed: any;
+  try {
+    parsed = JSON.parse(jsonMatch[0]);
+  } catch {
+    return { categoryId: "UNKNOWN", confidence: 0, reasoning: "Resposta da IA não era JSON válido." };
+  }
+
+  const categoryId = typeof parsed.categoryId === "string" ? parsed.categoryId.toUpperCase().trim() : "";
+  if (!VALID_CATEGORY_IDS.has(categoryId)) {
+    return { categoryId: "UNKNOWN", confidence: 0, reasoning: `IA sugeriu categoria desconhecida ("${parsed.categoryId ?? "?"}").` };
+  }
+
+  const confidence = typeof parsed.confidence === "number" && parsed.confidence >= 0 && parsed.confidence <= 1
+    ? parsed.confidence
+    : 0;
+
+  return {
+    categoryId,
+    confidence,
+    reasoning: typeof parsed.reasoning === "string" ? parsed.reasoning : "",
+  };
 }

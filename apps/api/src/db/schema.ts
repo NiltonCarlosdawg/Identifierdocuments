@@ -16,7 +16,7 @@ export const sectors = pgTable("sectors", {
   tenantId: uuid("tenant_id").notNull().references(() => organizations.id),
   name: text("name").notNull(),
   code: text("code").notNull(),
-  supervisorId: uuid("supervisor_id"),
+  supervisorId: uuid("supervisor_id").references(() => users.id),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [
   uniqueIndex("sectors_tenant_code_idx").on(t.tenantId, t.code),
@@ -118,14 +118,25 @@ export const documentShares = pgTable("document_shares", {
   sharedBy: uuid("shared_by").notNull().references(() => users.id),
   sharedWithSectorId: uuid("shared_with_sector_id").references(() => sectors.id),
   sharedWithUserId: uuid("shared_with_user_id").references(() => users.id),
+  // "pending_approval": partilha cross-sector criada mas ainda sem aprovação do
+  // supervisor do sector destino — não deve conceder acesso enquanto não passar a "active".
+  status: text("status", { enum: ["pending_approval", "active"] }).notNull().default("active"),
   revokedAt: timestamp("revoked_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+}, (t) => [
+  index("document_shares_document_idx").on(t.documentId),
+  index("document_shares_user_idx").on(t.sharedWithUserId),
+  index("document_shares_sector_idx").on(t.sharedWithSectorId),
+  index("document_shares_status_idx").on(t.status),
+]);
 
 export const approvals = pgTable("approvals", {
   id: uuid("id").primaryKey().defaultRandom(),
   tenantId: uuid("tenant_id").notNull().references(() => organizations.id),
   documentId: uuid("document_id").notNull().references(() => documents.id),
+  // Preenchido apenas para type="cross_sector": identifica a documentShares que esta
+  // approval deve activar (status -> "active") quando for aprovada.
+  shareId: uuid("share_id").references(() => documentShares.id),
   sectorId: uuid("sector_id").notNull().references(() => sectors.id),
   supervisorId: uuid("supervisor_id").references(() => users.id),
   requesterId: uuid("requester_id").references(() => users.id),
@@ -137,6 +148,7 @@ export const approvals = pgTable("approvals", {
 }, (t) => [
   index("approvals_tenant_idx").on(t.tenantId),
   index("approvals_status_idx").on(t.status),
+  index("approvals_document_idx").on(t.documentId),
 ]);
 
 export const auditLogs = pgTable("audit_logs", {
@@ -235,6 +247,7 @@ export const documentShareRelations = relations(documentShares, ({ one }) => ({
 export const approvalRelations = relations(approvals, ({ one }) => ({
   organization: one(organizations, { fields: [approvals.tenantId], references: [organizations.id] }),
   document: one(documents, { fields: [approvals.documentId], references: [documents.id] }),
+  share: one(documentShares, { fields: [approvals.shareId], references: [documentShares.id] }),
   sector: one(sectors, { fields: [approvals.sectorId], references: [sectors.id] }),
   supervisor: one(users, { fields: [approvals.supervisorId], references: [users.id] }),
 }));

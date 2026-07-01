@@ -8,3 +8,5 @@ uploads/
 bun.lockb
 apps/desktop/src-tauri/target/
 apps/desktop/src-tauri/gen/
+dump.rdb
+tsconfig.tsbuildinfo

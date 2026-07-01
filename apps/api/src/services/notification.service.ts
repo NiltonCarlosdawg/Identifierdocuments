@@ -36,7 +36,21 @@ export async function notify(event: NotificationEvent & { tenantId: string }) {
 
   const userSubs = subscribers.get(event.userId);
   if (userSubs) userSubs.forEach((cb) => cb(fullEvent));
-  await redis.publish(`notifications:${event.userId}`, JSON.stringify(fullEvent));
+
+  // CORREÇÃO: notify() é chamado a meio de fluxos de negócio importantes (ex.: criar
+  // uma partilha em documents.module.ts). Antes, se o Redis estivesse em baixo ou a
+  // publicação falhasse por qualquer razão, a excepção subia até ao handler chamador,
+  // cujo try/catch devolvia um erro 400/500 ao cliente — mesmo que a operação principal
+  // (ex.: a partilha) já tivesse sido gravada com sucesso na base de dados. A entrega
+  // em tempo real é um "nice to have"; a sua falha não deve mascarar nem reverter o
+  // sucesso da operação que a originou. A notificação já ficou persistida em
+  // `notifications` acima e será visível em GET /notifications mesmo que o push em
+  // directo falhe.
+  try {
+    await redis.publish(`notifications:${event.userId}`, JSON.stringify(fullEvent));
+  } catch (err) {
+    console.error("[NOTIFY] Falha ao publicar no Redis (notificação já persistida em BD):", err);
+  }
 }
 
 export const notificationSSEModule = new Elysia()
@@ -70,11 +84,20 @@ export const notificationSSEModule = new Elysia()
 
     const encoder = new TextEncoder();
     const streamUserId = userId;
+    // CORREÇÃO CRÍTICA: a Streams API não trata o valor devolvido por start() como
+    // callback de cancelamento — isso é o papel exclusivo de cancel(). O código
+    // anterior devolvia a função de limpeza dentro de start(), que nunca era invocada
+    // quando o cliente desligava. Resultado: a cada reconexão SSE ficava um
+    // subscritor "morto" acumulado em `subscribers` (memory leak num processo de
+    // longa duração) e o heartbeat correspondente continuava a correr indefinidamente.
+    // Agora heartbeat/unsub são geridos fora do start() e libertados em cancel().
+    let active = true;
+    let heartbeat: ReturnType<typeof setInterval> | undefined;
+    let unsub: (() => void) | undefined;
+
     const stream = new ReadableStream({
       start(controller) {
-        let active = true;
-
-        const heartbeat = setInterval(() => {
+        heartbeat = setInterval(() => {
           if (!active) { clearInterval(heartbeat); return; }
           try {
             controller.enqueue(encoder.encode(`:heartbeat\n\n`));
@@ -84,23 +107,22 @@ export const notificationSSEModule = new Elysia()
           }
         }, 30000);
 
-        const unsub = subscribe(streamUserId, (event) => {
+        unsub = subscribe(streamUserId, (event) => {
           if (!active) return;
           try {
             controller.enqueue(encoder.encode(`event: ${event.type}\ndata: ${JSON.stringify(event.payload)}\n\n`));
           } catch {
             active = false;
-            clearInterval(heartbeat);
+            if (heartbeat) clearInterval(heartbeat);
           }
         });
 
         controller.enqueue(encoder.encode(`event: connected\ndata: {}\n\n`));
-
-        return () => {
-          active = false;
-          clearInterval(heartbeat);
-          unsub();
-        };
+      },
+      cancel() {
+        active = false;
+        if (heartbeat) clearInterval(heartbeat);
+        unsub?.();
       },
     });
 
@@ -120,10 +142,17 @@ export const notificationSSEModule = new Elysia()
       conditions.push(eq(notifications.isRead, false));
     }
 
+    // CORREÇÃO: `Number(query.limit)` sem validação permitia NaN (query.limit inválido,
+    // ex. "abc") passar directamente para a query, e não havia tecto máximo — ao
+    // contrário de GET /documents, que já limita a 100. Um cliente podia pedir
+    // limit=999999 e forçar a devolução de todo o histórico de notificações de uma vez.
+    const parsedLimit = query.limit ? parseInt(query.limit, 10) : 50;
+    const limit = Math.min(Math.max(Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : 50, 1), 100);
+
     const rows = await db.query.notifications.findMany({
       where: and(...conditions),
       orderBy: [desc(notifications.createdAt)],
-      limit: query.limit ? Number(query.limit) : 50,
+      limit,
     });
 
     return {

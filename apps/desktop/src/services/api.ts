@@ -72,6 +72,31 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return res as unknown as T;
 }
 
+async function requestBlob(path: string): Promise<Blob | null> {
+  const token = useAuthStore.getState().token;
+  const headers: Record<string, string> = {};
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  let res = await fetch(`${getBaseUrl()}${path}`, { headers });
+
+  if (res.status === 401) {
+    const refreshed = await refreshCurrentToken();
+    if (!refreshed) {
+      useAuthStore.getState().logout();
+      throw new Error("Sessão expirada");
+    }
+    const newToken = useAuthStore.getState().token;
+    headers["Authorization"] = `Bearer ${newToken}`;
+    res = await fetch(`${getBaseUrl()}${path}`, { headers });
+  }
+
+  // 204 = pedido válido mas sem conteúdo ainda (ex.: thumbnail não gerada). Distinto
+  // de um erro real — o chamador deve tratar isto como "sem imagem", não como falha.
+  if (res.status === 204) return null;
+  if (!res.ok) throw new Error(`Erro ${res.status}`);
+  return res.blob();
+}
+
 export const api = {
   get: <T>(path: string) => request<T>(path),
   post: <T>(path: string, body?: unknown) =>
@@ -79,6 +104,14 @@ export const api = {
   patch: <T>(path: string, body: unknown) =>
     request<T>(path, { method: "PATCH", body: JSON.stringify(body) }),
   delete: <T>(path: string) => request<T>(path, { method: "DELETE" }),
+  // CORREÇÃO: novo método dedicado para recursos binários protegidos (ex.: thumbnails,
+  // downloads de ficheiros). Antes, componentes como <img src={doc.thumbnailUrl}>
+  // pediam estes recursos directamente do browser/webview, sem passar pelo cliente
+  // `api` — logo sem Authorization e sem o fluxo de refresh de token, resultando em
+  // 401 permanente e pré-visualizações que nunca carregavam. Centralizado aqui em vez
+  // de duplicado nos componentes, para manter uma única fonte de verdade sobre como
+  // autenticar pedidos.
+  getBlob: (path: string) => requestBlob(path),
 };
 
 export async function getMe() {

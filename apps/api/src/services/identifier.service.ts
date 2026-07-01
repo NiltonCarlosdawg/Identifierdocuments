@@ -9,15 +9,26 @@ function buildIdentifier(orgPrefix: string, catPrefix: string, year: number, mon
 }
 
 async function getSharedDocIds(auth: AuthPayload): Promise<Set<string>> {
-  if (!auth.sectorId) return new Set();
+  // CORREÇÃO: antes, um utilizador sem sectorId definido saía aqui com um Set vazio,
+  // o que também ignorava partilhas feitas directamente a ele (sharedWithUserId) —
+  // não só as partilhas de sector, que de facto não se aplicam sem sector.
+  const condition = auth.sectorId
+    ? or(
+        eq(documentShares.sharedWithSectorId, auth.sectorId),
+        eq(documentShares.sharedWithUserId, auth.userId),
+      )
+    : eq(documentShares.sharedWithUserId, auth.userId);
+
   const rows = await db.select({ documentId: documentShares.documentId })
     .from(documentShares)
     .where(and(
-      or(
-        eq(documentShares.sharedWithSectorId, auth.sectorId),
-        eq(documentShares.sharedWithUserId, auth.userId),
-      ),
+      condition,
       isNull(documentShares.revokedAt),
+      // CORREÇÃO CRÍTICA: mesmo problema do attachment.service.ts — faltava filtrar
+      // por status "active". Sem isto, uma partilha cross-sector ainda pendente de
+      // aprovação já tornava o documento "visível" nas listagens, contornando o fluxo
+      // de aprovação do supervisor.
+      eq(documentShares.status, "active"),
     ));
   return new Set(rows.map(r => r.documentId));
 }
@@ -46,7 +57,7 @@ export async function generateIdentifier(auth: AuthPayload, opts: {
   categoryId: string; issuedTo?: string; description?: string;
   origin?: "digital" | "physical"; visibility?: "public" | "sector_only";
   sectorId?: string;
-}) {
+}, ip: string = "unknown") {
   const cat = await db.query.categories.findFirst({ where: eq(categories.id, opts.categoryId) });
   if (!cat) throw new Error(`Categoria '${opts.categoryId}' não encontrada.`);
 
@@ -102,7 +113,7 @@ export async function generateIdentifier(auth: AuthPayload, opts: {
     resource: "identifiers",
     resourceId: id.id,
     metadata: JSON.stringify({ identifier: identifierStr, category: cat.name, visibility }),
-    ip: "unknown",
+    ip,
   });
 
   return id;
@@ -142,7 +153,7 @@ export async function listIdentifiers(auth: AuthPayload, filters: {
   return { data: paginated, meta: { total: data.length, page, limit } };
 }
 
-export async function getIdentifier(auth: AuthPayload, identifierStr: string) {
+export async function getIdentifier(auth: AuthPayload, identifierStr: string, ip: string = "unknown") {
   const row = await db.query.identifiers.findFirst({
     where: and(eq(identifiers.identifier, identifierStr), eq(identifiers.tenantId, auth.tenantId)),
     with: { category: true, document: true, sector: true, createdByUser: true },
@@ -161,13 +172,13 @@ export async function getIdentifier(auth: AuthPayload, identifierStr: string) {
     resource: "identifiers",
     resourceId: row.id,
     metadata: JSON.stringify({ identifier: identifierStr }),
-    ip: "unknown",
+    ip,
   });
 
   return { ...row, restricted };
 }
 
-export async function cancelIdentifier(auth: AuthPayload, identifierStr: string, reason: string) {
+export async function cancelIdentifier(auth: AuthPayload, identifierStr: string, reason: string, ip: string = "unknown") {
   const row = await db.query.identifiers.findFirst({
     where: and(eq(identifiers.identifier, identifierStr), eq(identifiers.tenantId, auth.tenantId)),
   });
@@ -187,7 +198,7 @@ export async function cancelIdentifier(auth: AuthPayload, identifierStr: string,
     resource: "identifiers",
     resourceId: row.id,
     metadata: JSON.stringify({ identifier: identifierStr, reason }),
-    ip: "unknown",
+    ip,
   });
 
   return db.query.identifiers.findFirst({ where: eq(identifiers.id, row.id) });

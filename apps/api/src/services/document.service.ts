@@ -46,13 +46,34 @@ export async function verifyDocumentContainsIdentifier(
       text = await extractDocxText(filePath);
       method = "mammoth";
     } else if (mimeType === "application/msword" || ext === ".doc") {
-      text = await extractDocxText(filePath);
-      method = "mammoth (doc)";
+      // CORREÇÃO: mammoth só lê o formato OOXML (.docx); o .doc binário antigo
+      // (formato OLE/CFB) não é suportado pela biblioteca e a chamada anterior
+      // (`extractDocxText`, que usa mammoth) ia falhar ou devolver texto vazio/lixo,
+      // apesar do "method" indicar "mammoth (doc)" como se tivesse funcionado.
+      // Em vez de fingir suporte, devolvemos um erro claro até existir extracção
+      // real para .doc (ex.: via uma biblioteca dedicada a OLE/CFB, ou conversão
+      // prévia para .docx/.pdf no servidor).
+      throw new Error(".doc (formato binário antigo do Word) ainda não é suportado para verificação automática. Converta para .docx ou .pdf antes de anexar.");
     } else if (["text/plain", "text/markdown", "text/csv"].includes(mimeType) || [".txt", ".md", ".csv"].includes(ext)) {
       text = extractPlainText(filePath);
       method = "plain-text";
     } else {
-      throw new Error(`Tipo de ficheiro não suportado: ${mimeType || ext}. Formatos aceites: PDF, DOCX, DOC, TXT, MD, CSV.`);
+      // NOTA 1: .xls/.xlsx/.ppt/.pptx ainda não têm extracção de texto implementada
+      // aqui, apesar de generateThumbnailAsync (attachment.service.ts) os listar como
+      // "suportados" para geração de thumbnail. Na prática nunca chegam a essa fase,
+      // porque falham sempre aqui primeiro. Alinhei a lista de extensões aceites em
+      // generateThumbnailAsync para deixar de anunciar suporte que não existe — ver
+      // esse ficheiro. Para suportar de facto, é necessário adicionar extracção via
+      // biblioteca própria (ex. SheetJS/xlsx para folhas de cálculo).
+      //
+      // NOTA 2 (maior): imagens (.png/.jpg/.gif/.bmp/.webp) também caem aqui — não há
+      // OCR implementado. Visto o schema ter identifiers.origin = "physical" e
+      // documents.uploadSource = "scanner", o fluxo de digitalizar um documento físico
+      // (foto/scan) e confirmar o identificador automaticamente parece ser intenção de
+      // produto, mas está incompleto: hoje, anexar uma imagem falha sempre na
+      // verificação. Implementar OCR (ex. tesseract.js) é um trabalho maior, fora do
+      // âmbito desta correcção — mas vale a pena confirmar se é um gap conhecido.
+      throw new Error(`Tipo de ficheiro não suportado: ${mimeType || ext}. Formatos aceites: PDF, DOCX, TXT, MD, CSV.`);
     }
   } catch (err: any) {
     throw new Error(`Falha ao extrair texto do documento: ${err.message}`);

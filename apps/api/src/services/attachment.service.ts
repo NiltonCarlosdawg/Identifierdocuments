@@ -19,18 +19,58 @@ if (!fs.existsSync(RESOLVED_UPLOAD_DIR)) fs.mkdirSync(RESOLVED_UPLOAD_DIR, { rec
 if (!fs.existsSync(RESOLVED_THUMBNAIL_DIR)) fs.mkdirSync(RESOLVED_THUMBNAIL_DIR, { recursive: true });
 
 export function generateThumbnailAsync(filePath: string, docId: string) {
-  const supported = [".pdf", ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".doc", ".docx", ".odt", ".xls", ".xlsx", ".ppt", ".pptx"];
+  // CORREÇÃO: lista alinhada com o que verifyDocumentContainsIdentifier (document.service.ts)
+  // consegue extrair como TEXTO hoje (.pdf, .docx, e os tipos de texto puro). .doc,
+  // .xls/.xlsx, .ppt/.pptx e .odt foram removidos — estavam aqui mas nunca chegavam a
+  // esta função, porque a verificação falhava sempre antes (código morto que sugeria
+  // suporte inexistente).
+  // As extensões de imagem ficam por agora, mas atenção: também elas falham sempre na
+  // verificação (não há OCR implementado em document.service.ts) — ver nota lá. Não as
+  // removi porque, ao contrário dos formatos de escritório, gerar thumbnail de uma
+  // imagem não depende de extracção de texto; mas o anexo desse ficheiro vai falhar de
+  // qualquer forma na verificação antes de chegar aqui, até existir OCR.
+  const supported = [".pdf", ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".docx"];
   const ext = path.extname(filePath).toLowerCase();
   if (!supported.includes(ext)) return;
 
   const thumbPath = path.join(THUMBNAIL_DIR, `${docId}.png`);
   const scriptPath = path.resolve(THUMBNAIL_SCRIPT);
 
+  // CORREÇÃO CRÍTICA: antes, stdio era totalmente ignorado ("ignore" nos 3 canais) e o
+  // processo era "detached + unref" sem qualquer acompanhamento — qualquer falha
+  // (script em falta, dependência Python ausente, erro de conversão) desaparecia sem
+  // deixar rasto nenhum. O sintoma visível era sempre o mesmo: thumbnail nunca
+  // aparece, endpoint /thumbnail devolve 204 para sempre, e não há forma de saber
+  // porquê. Agora verificamos primeiro se o script existe (falha mais comum e mais
+  // fácil de diagnosticar) e capturamos stderr/exit code do processo, para que uma
+  // falha real apareça nos logs do servidor em vez de desaparecer silenciosamente.
+  // Continua "fire and forget" do ponto de vista de quem chama (attachDocument não
+  // espera por isto), mas deixa de ser uma caixa preta.
+  if (!fs.existsSync(scriptPath)) {
+    console.error(`[THUMBNAIL] Script não encontrado em ${scriptPath}. Verifique THUMBNAIL_SCRIPT. docId=${docId}`);
+    return;
+  }
+
   const child = Bun.spawn(["python3", scriptPath, filePath, thumbPath], {
-    stdio: ["ignore", "ignore", "ignore"],
-    detached: true,
+    stdio: ["ignore", "ignore", "pipe"],
   });
-  child.unref();
+
+  (async () => {
+    const stderrText = await new Response(child.stderr).text().catch(() => "");
+    const exitCode = await child.exited;
+    if (exitCode !== 0) {
+      console.error(
+        `[THUMBNAIL] Falha ao gerar thumbnail para docId=${docId} (exit code ${exitCode}).` +
+        (stderrText ? ` stderr: ${stderrText.slice(0, 2000)}` : " Sem output em stderr — verifique se python3 e as dependências do script estão instaladas neste ambiente."),
+      );
+      return;
+    }
+    if (!fs.existsSync(thumbPath)) {
+      console.error(`[THUMBNAIL] Script terminou com sucesso (exit 0) mas não criou ${thumbPath}. docId=${docId}`);
+    }
+  })().catch((err) => {
+    console.error(`[THUMBNAIL] Erro inesperado ao acompanhar geração de thumbnail para docId=${docId}:`, err);
+  });
 }
 
 function sanitizeFilename(name: string): string {
@@ -39,7 +79,8 @@ function sanitizeFilename(name: string): string {
 
 export async function attachDocument(
   auth: AuthPayload,
-  opts: { identifier: string; file: File; uploadSource?: "manual" | "scanner" | "sync" }
+  opts: { identifier: string; file: File; uploadSource?: "manual" | "scanner" | "sync" },
+  ip: string = "unknown",
 ) {
   const { identifier, file, uploadSource = "manual" } = opts;
   const safeName = sanitizeFilename(file.name);
@@ -75,31 +116,52 @@ export async function attachDocument(
     await db.insert(auditLogs).values({
       tenantId: auth.tenantId, userId: auth.userId, action: "ATTACH_FAILED",
       resource: "documents", resourceId: idRow.id,
-      metadata: JSON.stringify({ filename: file.name, reason: "identifier_not_found" }), ip: "unknown",
+      metadata: JSON.stringify({ filename: file.name, reason: "identifier_not_found" }), ip,
     });
     return { success: false, message: `O documento não contém o identificador '${identifier}'.`, verification };
   }
 
-  const [doc] = await db.insert(documents).values({
-    tenantId: auth.tenantId,
-    identifierId: idRow.id,
-    filename: safeName,
-    mimeType: file.type || "application/octet-stream",
-    filePath: finalPath,
-    fileSize: file.size,
-    extractedText: verification.excerpt ?? null,
-    uploadedBy: auth.userId,
-    uploadSource,
-  }).returning();
-
-  await db.update(identifiers).set({ status: "attached" }).where(eq(identifiers.id, idRow.id));
+  // CORREÇÃO: insere o documento e marca o identificador como "attached" numa única
+  // transacção. Antes, entre a verificação de `idRow.status === "attached"` e este
+  // insert havia uma janela de corrida: dois attaches concorrentes para o mesmo
+  // identificador podiam ambos passar a verificação e colidir na FK única
+  // documents.identifierId, deixando o segundo pedido rebentar com uma excepção não
+  // tratada e o ficheiro já escrito em disco a ficar órfão (nunca seria apagado).
+  // Com a transacção, se o insert falhar (ex.: corrida), apanhamos o erro aqui,
+  // limpamos o ficheiro e devolvemos uma mensagem clara em vez de deixar lixo em disco.
+  let doc: typeof documents.$inferSelect;
+  try {
+    [doc] = await db.transaction(async (tx) => {
+      const inserted = await tx.insert(documents).values({
+        tenantId: auth.tenantId,
+        identifierId: idRow.id,
+        filename: safeName,
+        mimeType: file.type || "application/octet-stream",
+        filePath: finalPath,
+        fileSize: file.size,
+        extractedText: verification.excerpt ?? null,
+        uploadedBy: auth.userId,
+        uploadSource,
+      }).returning();
+      await tx.update(identifiers).set({ status: "attached" }).where(eq(identifiers.id, idRow.id));
+      return inserted;
+    });
+  } catch (err: any) {
+    fs.unlinkSync(finalPath);
+    await db.insert(auditLogs).values({
+      tenantId: auth.tenantId, userId: auth.userId, action: "ATTACH_FAILED",
+      resource: "documents", resourceId: idRow.id,
+      metadata: JSON.stringify({ filename: file.name, reason: "concurrent_attach_or_db_error" }), ip,
+    });
+    throw new Error("Este identificador já foi associado a um documento entretanto. Tente novamente.");
+  }
 
   generateThumbnailAsync(finalPath, doc.id);
 
   await db.insert(auditLogs).values({
     tenantId: auth.tenantId, userId: auth.userId, action: "ATTACH",
     resource: "documents", resourceId: doc.id,
-    metadata: JSON.stringify({ identifier, filename: safeName, method: verification.method }), ip: "unknown",
+    metadata: JSON.stringify({ identifier, filename: safeName, method: verification.method }), ip,
   });
 
   const fullDoc = await db.query.documents.findFirst({
@@ -110,8 +172,15 @@ export async function attachDocument(
   return { success: true, message: "Documento associado com sucesso.", document: fullDoc, verification };
 }
 
-async function canAccessDocument(auth: AuthPayload, identifierId: string, sectorId: string | null, visibility: string | null, docId: string | null): Promise<{ allowed: boolean; restricted: boolean }> {
+export async function canAccessDocument(auth: AuthPayload, sectorId: string | null, visibility: string | null, docId: string | null, uploadedBy: string | null = null): Promise<{ allowed: boolean; restricted: boolean }> {
   const v = visibility ?? "public";
+
+  // Nível 0 — dono do documento tem sempre acesso, independentemente de sector ou
+  // visibilidade actuais. CORREÇÃO: esta verificação faltava aqui, apesar de já
+  // existir tanto em canShareDocument como na antiga canViewDocument do módulo de
+  // rotas — inconsistência que podia deixar o próprio uploader sem acesso ao seu
+  // documento (ex.: se for movido de sector depois de o ter enviado).
+  if (uploadedBy && auth.userId === uploadedBy) return { allowed: true, restricted: false };
 
   // Nível 1 — público
   if (v === "public") return { allowed: true, restricted: false };
@@ -126,6 +195,10 @@ async function canAccessDocument(auth: AuthPayload, identifierId: string, sector
     const shareConditions = [
       eq(documentShares.documentId, docId),
       isNull(documentShares.revokedAt),
+      // CORREÇÃO CRÍTICA: faltava este filtro. Sem ele, uma partilha cross-sector
+      // ainda "pending_approval" (à espera do supervisor aprovar) já concedia acesso
+      // total ao download e à metadata, contornando por completo o fluxo de aprovação.
+      eq(documentShares.status, "active"),
     ];
 
     const userShareConditions = auth.sectorId
@@ -151,38 +224,45 @@ async function canAccessDocument(auth: AuthPayload, identifierId: string, sector
   return { allowed: false, restricted: false };
 }
 
-export async function getDocumentMeta(auth: AuthPayload, identifier: string) {
-  const idRow = await db.query.identifiers.findFirst({
-    where: and(eq(identifiers.identifier, identifier), eq(identifiers.tenantId, auth.tenantId)),
-    with: { document: { with: { identifier: { with: { category: true } } } } },
+// CORREÇÃO: ambas as funções abaixo recebiam "identifier" (o código legível,
+// identifiers.identifier) e resolviam o documento a partir daí. Mas o resto da API
+// (GET /documents, thumbnail) já trabalha com documents.id (UUID) — e era exactamente
+// esse UUID que o módulo de rotas estava a passar para aqui, o que fazia o lookup por
+// identifiers.identifier nunca dar match. Resultado: /:id e /:id/download devolviam
+// sempre 404, mesmo para documentos existentes e acessíveis. Agora ambas resolvem
+// directamente por documents.id, alinhado com o resto da API.
+export async function getDocumentMeta(auth: AuthPayload, docId: string) {
+  const doc = await db.query.documents.findFirst({
+    where: and(eq(documents.id, docId), eq(documents.tenantId, auth.tenantId)),
+    with: { identifier: { with: { category: true } } },
   });
-  if (!idRow?.document) return null;
+  if (!doc) return null;
 
   const { allowed, restricted } = await canAccessDocument(
-    auth, idRow.id, idRow.sectorId, idRow.visibility, idRow.document.id,
+    auth, doc.identifier?.sectorId ?? null, doc.identifier?.visibility ?? null, doc.id, doc.uploadedBy,
   );
   if (!allowed && !restricted) return null;
 
-  return { ...idRow.document, restricted };
+  return { ...doc, restricted };
 }
 
-export async function downloadDocument(auth: AuthPayload, identifier: string): Promise<{ filePath: string; fileName: string } | { error: "NOT_FOUND" | "ACCESS_REQUIRED" }> {
-  const idRow = await db.query.identifiers.findFirst({
-    where: and(eq(identifiers.identifier, identifier), eq(identifiers.tenantId, auth.tenantId)),
-    with: { document: true },
+export async function downloadDocument(auth: AuthPayload, docId: string): Promise<{ filePath: string; fileName: string } | { error: "NOT_FOUND" | "ACCESS_REQUIRED" }> {
+  const doc = await db.query.documents.findFirst({
+    where: and(eq(documents.id, docId), eq(documents.tenantId, auth.tenantId)),
+    with: { identifier: true },
   });
-  if (!idRow?.document || !fs.existsSync(idRow.document.filePath)) return { error: "NOT_FOUND" };
+  if (!doc || !fs.existsSync(doc.filePath)) return { error: "NOT_FOUND" };
 
   const { allowed, restricted } = await canAccessDocument(
-    auth, idRow.id, idRow.sectorId, idRow.visibility, idRow.document.id,
+    auth, doc.identifier?.sectorId ?? null, doc.identifier?.visibility ?? null, doc.id, doc.uploadedBy,
   );
   if (!allowed && restricted) return { error: "ACCESS_REQUIRED" };
   if (!allowed) return { error: "NOT_FOUND" };
 
-  const resolvedPath = path.resolve(idRow.document.filePath);
+  const resolvedPath = path.resolve(doc.filePath);
   if (!resolvedPath.startsWith(RESOLVED_UPLOAD_DIR)) {
     return { error: "NOT_FOUND" };
   }
 
-  return { filePath: resolvedPath, fileName: idRow.document.filename };
+  return { filePath: resolvedPath, fileName: doc.filename };
 }

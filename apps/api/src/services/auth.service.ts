@@ -13,6 +13,18 @@ export async function login(email: string, password: string, organizationSlug?: 
     });
     if (!org) throw new Error("Credenciais inválidas.");
     whereCondition = and(eq(users.email, email), eq(users.tenantId, org.id));
+  } else {
+    // CORREÇÃO: users.email só é único por tenant (ver uniqueIndex composto no
+    // schema), não globalmente. Sem organizationSlug, o findFirst anterior podia
+    // devolver qualquer uma das contas com o mesmo email em tenants diferentes, de
+    // forma não-determinística (a BD não garante ordem sem ORDER BY) — um risco real
+    // de login entrar na conta errada quando duas organizações distintas têm
+    // utilizadores com o mesmo email. Detectamos esse caso aqui e pedimos ao cliente
+    // para especificar a organização, em vez de adivinhar.
+    const matches = await db.query.users.findMany({ where: eq(users.email, email) });
+    if (matches.length > 1) {
+      throw new Error("Este email está associado a mais do que uma organização. Indique a organização para continuar.");
+    }
   }
 
   const user = await db.query.users.findFirst({
@@ -90,7 +102,7 @@ export async function refreshToken(token: string) {
   const payload = await verifyTokenWithGrace(token);
   const user = await db.query.users.findFirst({
     where: eq(users.id, payload.userId),
-    with: { userRoles: { with: { role: true } } },
+    with: { organization: true, userRoles: { with: { role: true } } },
   });
   if (!user || !user.isActive) throw new Error("Utilizador não encontrado ou inactivo.");
 
@@ -111,7 +123,10 @@ export async function refreshToken(token: string) {
       tenantId: user.tenantId,
       sectorId: user.sectorId,
       roles: userRolesList,
-      organization: null,
+      // CORREÇÃO: antes era sempre `null`, inconsistente com login() que devolve o
+      // nome real da organização. Um cliente que confiasse neste campo após um
+      // refresh via este endpoint via a organização "desaparecer" da resposta.
+      organization: user.organization?.name ?? null,
     },
   };
 }
