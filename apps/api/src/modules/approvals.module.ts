@@ -83,33 +83,47 @@ export const approvalsModule = new Elysia({ prefix: "/approvals" })
       const doc = existing.document;
       const identifierStr = doc?.identifier?.identifier;
 
-      if (body.status === "approved" && existing.type === "access_request" && existing.requesterId) {
-        await db.insert(documentShares).values({
-          documentId: approval.documentId, sharedBy: auth!.userId,
-          sharedWithUserId: existing.requesterId,
-        });
-        await notify({
-          type: "access:granted",
-          userId: existing.requesterId,
-          tenantId: auth!.tenantId,
-          payload: {
-            documentId: approval.documentId,
-            identifier: identifierStr,
-          },
-        });
+      if (body.status === "approved") {
+        if (existing.type === "access_request" && existing.requesterId) {
+          await db.insert(documentShares).values({
+            documentId: approval.documentId, sharedBy: auth!.userId,
+            sharedWithUserId: existing.requesterId,
+          });
+          await notify({
+            type: "access:granted",
+            userId: existing.requesterId,
+            tenantId: auth!.tenantId,
+            payload: {
+              documentId: approval.documentId,
+              identifier: identifierStr,
+            },
+          });
+        }
+        if (existing.type === "cross_sector" && existing.shareId) {
+          await db.update(documentShares)
+            .set({ status: "active" })
+            .where(eq(documentShares.id, existing.shareId));
+        }
       }
 
-      if (body.status === "rejected" && existing.requesterId) {
-        await notify({
-          type: "access:rejected",
-          userId: existing.requesterId,
-          tenantId: auth!.tenantId,
-          payload: {
-            documentId: approval.documentId,
-            identifier: identifierStr,
-            notes: body.notes,
-          },
-        });
+      if (body.status === "rejected") {
+        if (existing.type === "cross_sector" && existing.shareId) {
+          await db.update(documentShares)
+            .set({ revokedAt: now })
+            .where(eq(documentShares.id, existing.shareId));
+        }
+        if (existing.requesterId) {
+          await notify({
+            type: "access:rejected",
+            userId: existing.requesterId,
+            tenantId: auth!.tenantId,
+            payload: {
+              documentId: approval.documentId,
+              identifier: identifierStr,
+              notes: body.notes,
+            },
+          });
+        }
       }
 
       if (doc?.uploadedBy) {
