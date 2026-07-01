@@ -74,6 +74,15 @@ export const sectorsModule = new Elysia({ prefix: "/sectors" })
 
   .patch("/:id/supervisor", async ({ auth, params, body, set }) => {
     try {
+      if (body.supervisorId) {
+        const supervisor = await db.query.users.findFirst({
+          where: eq(users.id, body.supervisorId),
+          columns: { tenantId: true },
+        });
+        if (!supervisor || supervisor.tenantId !== auth!.tenantId) {
+          set.status = 400; return { error: { code: "VALIDATION_ERROR", message: "Supervisor não encontrado." } };
+        }
+      }
       const [sector] = await db.update(sectors)
         .set({ supervisorId: body.supervisorId })
         .where(and(eq(sectors.id, params.id), eq(sectors.tenantId, auth!.tenantId)))

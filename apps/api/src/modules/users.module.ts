@@ -1,6 +1,6 @@
 import { Elysia, t } from "elysia";
 import { db } from "../db";
-import { users, userRoles } from "../db/schema";
+import { users, userRoles, sectors, roles } from "../db/schema";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, requireRole } from "../middleware/auth";
 
@@ -37,6 +37,13 @@ export const usersModule = new Elysia({ prefix: "/users" })
   .use(requireRole("ORG_ADMIN"))
   .post("/", async ({ auth, body, set }) => {
     try {
+      const sector = body.sectorId ? await db.query.sectors.findFirst({
+        where: eq(sectors.id, body.sectorId),
+        columns: { tenantId: true },
+      }) : null;
+      if (body.sectorId && (!sector || sector.tenantId !== auth!.tenantId)) {
+        set.status = 400; return { error: { code: "VALIDATION_ERROR", message: "Sector não encontrado." } };
+      }
       const passwordHash = await Bun.password.hash(body.password);
       const [user] = await db.insert(users).values({
         tenantId: auth!.tenantId, sectorId: body.sectorId,
@@ -71,6 +78,13 @@ export const usersModule = new Elysia({ prefix: "/users" })
 
   .patch("/:id/sector", async ({ auth, params, body, set }) => {
     try {
+      const sector = await db.query.sectors.findFirst({
+        where: eq(sectors.id, body.sectorId),
+        columns: { tenantId: true },
+      });
+      if (!sector || sector.tenantId !== auth!.tenantId) {
+        set.status = 400; return { error: { code: "VALIDATION_ERROR", message: "Sector não encontrado." } };
+      }
       const [user] = await db.update(users).set({ sectorId: body.sectorId })
         .where(and(eq(users.id, params.id), eq(users.tenantId, auth!.tenantId))).returning();
       const { passwordHash: _, ...safeUser } = user;
@@ -101,6 +115,22 @@ export const usersModule = new Elysia({ prefix: "/users" })
 
   .post("/:id/roles", async ({ auth, params, body, set }) => {
     try {
+      const role = await db.query.roles.findFirst({
+        where: eq(roles.id, body.roleId),
+        columns: { tenantId: true },
+      });
+      if (!role || (role.tenantId !== null && role.tenantId !== auth!.tenantId)) {
+        set.status = 400; return { error: { code: "VALIDATION_ERROR", message: "Role não encontrado." } };
+      }
+      if (body.sectorId) {
+        const sector = await db.query.sectors.findFirst({
+          where: eq(sectors.id, body.sectorId),
+          columns: { tenantId: true },
+        });
+        if (!sector || sector.tenantId !== auth!.tenantId) {
+          set.status = 400; return { error: { code: "VALIDATION_ERROR", message: "Sector não encontrado." } };
+        }
+      }
       const [ur] = await db.insert(userRoles).values({
         userId: params.id, roleId: body.roleId, sectorId: body.sectorId, grantedBy: auth!.userId,
       }).returning();
