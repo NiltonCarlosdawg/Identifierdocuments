@@ -30,7 +30,8 @@ export async function checkRateLimit(
       await r.pexpire(windowKey, windowMs);
     }
     return count <= maxAttempts;
-  } catch {
+  } catch (err) {
+    console.warn("[RATELIMIT] Redis failure — rate limiting disabled:", err);
     return true;
   }
 }
