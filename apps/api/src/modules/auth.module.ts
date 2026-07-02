@@ -2,14 +2,14 @@ import { Elysia, t } from "elysia";
 import { login, getMe, changePassword, refreshToken } from "../services/auth.service";
 import { requireAuth } from "../middleware/auth";
 import { checkRateLimit } from "../middleware/rateLimit";
-import { db } from "../db/index";
 import { users } from "../db/schema";
 import { eq } from "drizzle-orm";
+import { withTenant } from "../db/withTenant";
 
 export const authModule = new Elysia({ prefix: "/auth" })
 
   .post("/login", async ({ body, request, set }) => {
-    const ip = request.headers.get("x-forwarded-for") || "unknown";
+    const ip = request.headers.get("x-forwarded-for") || "unknown"; // TODO(security): validar/sanitizar IP; atualmente confia no header
     const rateLimitKey = `login:${ip}:${body.email}`;
     if (!(await checkRateLimit(rateLimitKey))) {
       set.status = 429;
@@ -32,7 +32,7 @@ export const authModule = new Elysia({ prefix: "/auth" })
   })
 
   .post("/refresh", async ({ body, request, set }) => {
-    const ip = request.headers.get("x-forwarded-for") || "unknown";
+    const ip = request.headers.get("x-forwarded-for") || "unknown"; // TODO(security): validar/sanitizar IP; atualmente confia no header
     const rateLimitKey = `refresh:${ip}`;
     if (!(await checkRateLimit(rateLimitKey, 10, 60000))) {
       set.status = 429;
@@ -56,17 +56,19 @@ export const authModule = new Elysia({ prefix: "/auth" })
   })
 
   .use(requireAuth())
-  .patch("/me", async ({ auth, body, set }) => {
-    try {
-      const [updated] = await db.update(users)
-        .set({ fullName: body.fullName })
-        .where(eq(users.id, auth!.userId))
-        .returning({ id: users.id, fullName: users.fullName, email: users.email });
-      return { data: updated };
-    } catch (err: any) {
-      set.status = 400;
-      return { error: { code: "UPDATE_ERROR", message: err.message } };
-    }
+  .patch("/me", async ({ auth, body, set, tenantId }) => {
+    return withTenant(tenantId, async (tx) => {
+      try {
+        const [updated] = await tx.update(users)
+          .set({ fullName: body.fullName })
+          .where(eq(users.id, auth!.userId))
+          .returning({ id: users.id, fullName: users.fullName, email: users.email });
+        return { data: updated };
+      } catch (err: any) {
+        set.status = 400;
+        return { error: { code: "UPDATE_ERROR", message: err.message } };
+      }
+    });
   }, {
     body: t.Object({ fullName: t.String() }),
     detail: { summary: "Actualizar perfil", tags: ["Autenticação"] },

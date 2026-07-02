@@ -8,7 +8,7 @@ import { checkRateLimit } from "../middleware/rateLimit";
 export const tenantsModule = new Elysia({ prefix: "/tenants" })
 
   .post("/", async ({ body, set, request }) => {
-    const ip = request.headers.get("x-forwarded-for") || "unknown";
+    const ip = request.headers.get("x-forwarded-for") || "unknown"; // TODO(security): validar/sanitizar IP; atualmente confia no header
     if (!(await checkRateLimit(`onboarding:${ip}`, 3, 3600_000))) {
       set.status = 429;
       return { error: { code: "RATE_LIMITED", message: "Muitas tentativas de registo. Tente novamente em 1 hora." } };
@@ -102,7 +102,7 @@ export const tenantsModule = new Elysia({ prefix: "/tenants" })
 
   .use(requireAuth())
 
-  .get("/me", async ({ auth, set }) => {
+  .get("/me", async ({ auth, set, db }: any) => {
     const org = await db.query.organizations.findFirst({
       where: eq(organizations.id, auth!.tenantId),
     });
@@ -117,7 +117,7 @@ export const tenantsModule = new Elysia({ prefix: "/tenants" })
 
   .use(requireRole("ORG_ADMIN"))
 
-  .patch("/me", async ({ auth, body, set }) => {
+  .patch("/me", async ({ auth, body, set, db }: any) => {
     try {
       const [org] = await db
         .update(organizations)

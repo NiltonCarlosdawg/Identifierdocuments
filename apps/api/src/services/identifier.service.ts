@@ -1,4 +1,4 @@
-import { db } from "../db";
+import type { DB } from "../db";
 import { identifiers, categories, documents, documentShares, auditLogs, organizations, sectors } from "../db/schema";
 import { eq, and, or, desc, sql, isNull } from "drizzle-orm";
 import type { AuthPayload } from "../middleware/auth";
@@ -8,10 +8,7 @@ function buildIdentifier(orgPrefix: string, catPrefix: string, year: number, mon
   return `${orgPrefix}-${catPrefix}-${year}-${mmdd}-${String(seq).padStart(3, "0")}`;
 }
 
-async function getSharedDocIds(auth: AuthPayload): Promise<Set<string>> {
-  // CORREÇÃO: antes, um utilizador sem sectorId definido saía aqui com um Set vazio,
-  // o que também ignorava partilhas feitas directamente a ele (sharedWithUserId) —
-  // não só as partilhas de sector, que de facto não se aplicam sem sector.
+async function getSharedDocIds(tx: DB, auth: AuthPayload): Promise<Set<string>> {
   const condition = auth.sectorId
     ? or(
         eq(documentShares.sharedWithSectorId, auth.sectorId),
@@ -19,15 +16,11 @@ async function getSharedDocIds(auth: AuthPayload): Promise<Set<string>> {
       )
     : eq(documentShares.sharedWithUserId, auth.userId);
 
-  const rows = await db.select({ documentId: documentShares.documentId })
+  const rows = await tx.select({ documentId: documentShares.documentId })
     .from(documentShares)
     .where(and(
       condition,
       isNull(documentShares.revokedAt),
-      // CORREÇÃO CRÍTICA: mesmo problema do attachment.service.ts — faltava filtrar
-      // por status "active". Sem isto, uma partilha cross-sector ainda pendente de
-      // aprovação já tornava o documento "visível" nas listagens, contornando o fluxo
-      // de aprovação do supervisor.
       eq(documentShares.status, "active"),
     ));
   return new Set(rows.map(r => r.documentId));
@@ -36,10 +29,12 @@ async function getSharedDocIds(auth: AuthPayload): Promise<Set<string>> {
 type VisibilityResult = { visible: boolean; restricted: boolean };
 
 function checkVisibility(
-  row: { visibility: string | null; sectorId: string | null; document?: { id: string } | null },
+  row: { visibility: string | null; sectorId: string | null; document?: { id: string } | null; createdBy?: string | null },
   auth: AuthPayload,
   sharedDocIds: Set<string>,
 ): VisibilityResult {
+  if (row.createdBy && row.createdBy === auth.userId) return { visible: true, restricted: false };
+
   const visibility = row.visibility ?? "public";
   if (visibility === "public") return { visible: true, restricted: false };
 
@@ -53,12 +48,12 @@ function checkVisibility(
   return { visible: false, restricted: false };
 }
 
-export async function generateIdentifier(auth: AuthPayload, opts: {
+export async function generateIdentifier(tx: DB, auth: AuthPayload, opts: {
   categoryId: string; issuedTo?: string; description?: string;
   origin?: "digital" | "physical"; visibility?: "public" | "sector_only";
   sectorId?: string;
 }, ip: string = "unknown") {
-  const cat = await db.query.categories.findFirst({ where: eq(categories.id, opts.categoryId) });
+  const cat = await tx.query.categories.findFirst({ where: eq(categories.id, opts.categoryId) });
   if (!cat) throw new Error(`Categoria '${opts.categoryId}' não encontrada.`);
 
   const now = new Date();
@@ -66,13 +61,18 @@ export async function generateIdentifier(auth: AuthPayload, opts: {
   const month = now.getMonth() + 1;
   const day = now.getDate();
 
-  const org = await db.query.organizations.findFirst({ where: eq(organizations.id, auth.tenantId) });
+  const org = await tx.query.organizations.findFirst({ where: eq(organizations.id, auth.tenantId) });
   const orgPrefix = org?.identifierPrefix || "VL";
 
-  const seqResult = await db.transaction(async (tx) => {
+  const resolvedSectorId = opts.sectorId ?? auth.sectorId;
+  if (!resolvedSectorId) {
+    throw new Error("Sector não definido. Indique sectorId no body ou associe o utilizador a um sector.");
+  }
+
+  const [id] = await tx.transaction(async (tx2) => {
     const lockKey = sql`hashtext(CONCAT(${auth.tenantId}, '-', ${opts.categoryId}))`;
-    await tx.execute(sql`SELECT pg_advisory_xact_lock(${lockKey})`);
-    const [row] = await tx
+    await tx2.execute(sql`SELECT pg_advisory_xact_lock(${lockKey})`);
+    const [row] = await tx2
       .select({ next: sql<number>`COALESCE(MAX(sequence), 0) + 1` })
       .from(identifiers)
       .where(
@@ -81,45 +81,40 @@ export async function generateIdentifier(auth: AuthPayload, opts: {
           eq(identifiers.categoryId, opts.categoryId)
         )
       );
-    return Number(row.next);
+    const seqResult = Number(row.next);
+
+    const identifierStr = buildIdentifier(orgPrefix, cat.prefix, year, month, day, seqResult);
+    const visibility = opts.visibility ?? cat.defaultVisibility ?? "public";
+
+    return tx2.insert(identifiers).values({
+      tenantId: auth.tenantId,
+      sectorId: resolvedSectorId,
+      categoryId: opts.categoryId,
+      identifier: identifierStr,
+      sequence: seqResult,
+      visibility,
+      issuedTo: opts.issuedTo ?? null,
+      description: opts.description ?? null,
+      status: "active",
+      origin: opts.origin ?? "digital",
+      createdBy: auth.userId,
+    }).returning();
   });
 
-  const identifierStr = buildIdentifier(orgPrefix, cat.prefix, year, month, day, seqResult);
-  const visibility = opts.visibility ?? cat.defaultVisibility ?? "public";
-
-  const resolvedSectorId = opts.sectorId ?? auth.sectorId;
-  if (!resolvedSectorId) {
-    throw new Error("Sector não definido. Indique sectorId no body ou associe o utilizador a um sector.");
-  }
-
-  const [id] = await db.insert(identifiers).values({
-    tenantId: auth.tenantId,
-    sectorId: resolvedSectorId,
-    categoryId: opts.categoryId,
-    identifier: identifierStr,
-    sequence: seqResult,
-    visibility,
-    issuedTo: opts.issuedTo ?? null,
-    description: opts.description ?? null,
-    status: "active",
-    origin: opts.origin ?? "digital",
-    createdBy: auth.userId,
-  }).returning();
-
-  await db.insert(auditLogs).values({
+  await tx.insert(auditLogs).values({
     tenantId: auth.tenantId,
     userId: auth.userId,
     action: "GENERATE",
     resource: "identifiers",
     resourceId: id.id,
-    metadata: JSON.stringify({ identifier: identifierStr, category: cat.name, visibility }),
+    metadata: JSON.stringify({ identifier: id.identifier, category: cat.name, visibility: id.visibility }),
     ip,
   });
 
   return id;
 }
 
-export async function listIdentifiers(auth: AuthPayload, filters: {
+export async function listIdentifiers(tx: DB, auth: AuthPayload, filters: {
   categoryId?: string; status?: string; origin?: string; page?: number; limit?: number;
 }) {
   const { categoryId, status, origin, page = 1, limit = 20 } = filters;
@@ -130,13 +125,13 @@ export async function listIdentifiers(auth: AuthPayload, filters: {
   if (status) conditions.push(eq(identifiers.status, status as any));
   if (origin) conditions.push(eq(identifiers.origin, origin as any));
 
-  const allRows = await db.query.identifiers.findMany({
+  const allRows = await tx.query.identifiers.findMany({
     where: and(...conditions),
     with: { category: true, document: true, sector: true },
     orderBy: desc(identifiers.createdAt),
   });
 
-  const sharedDocIds = await getSharedDocIds(auth);
+  const sharedDocIds = await getSharedDocIds(tx, auth);
 
   const filtered = allRows.filter(row => {
     const { visible } = checkVisibility(row, auth, sharedDocIds);
@@ -153,19 +148,19 @@ export async function listIdentifiers(auth: AuthPayload, filters: {
   return { data: paginated, meta: { total: data.length, page, limit } };
 }
 
-export async function getIdentifier(auth: AuthPayload, identifierStr: string, ip: string = "unknown") {
-  const row = await db.query.identifiers.findFirst({
+export async function getIdentifier(tx: DB, auth: AuthPayload, identifierStr: string, ip: string = "unknown") {
+  const row = await tx.query.identifiers.findFirst({
     where: and(eq(identifiers.identifier, identifierStr), eq(identifiers.tenantId, auth.tenantId)),
     with: { category: true, document: true, sector: true, createdByUser: true },
   });
 
   if (!row) return null;
 
-  const sharedDocIds = await getSharedDocIds(auth);
+  const sharedDocIds = await getSharedDocIds(tx, auth);
   const { visible, restricted } = checkVisibility(row, auth, sharedDocIds);
   if (!visible) return null;
 
-  await db.insert(auditLogs).values({
+  await tx.insert(auditLogs).values({
     tenantId: auth.tenantId,
     userId: auth.userId,
     action: "QUERY",
@@ -178,8 +173,8 @@ export async function getIdentifier(auth: AuthPayload, identifierStr: string, ip
   return { ...row, restricted };
 }
 
-export async function cancelIdentifier(auth: AuthPayload, identifierStr: string, reason: string, ip: string = "unknown") {
-  const row = await db.query.identifiers.findFirst({
+export async function cancelIdentifier(tx: DB, auth: AuthPayload, identifierStr: string, reason: string, ip: string = "unknown") {
+  const row = await tx.query.identifiers.findFirst({
     where: and(eq(identifiers.identifier, identifierStr), eq(identifiers.tenantId, auth.tenantId)),
   });
 
@@ -187,11 +182,11 @@ export async function cancelIdentifier(auth: AuthPayload, identifierStr: string,
   if (row.status === "attached") throw new Error("Não é possível cancelar um identificador com documento associado.");
   if (row.status === "cancelled") throw new Error("Identificador já está cancelado.");
 
-  await db.update(identifiers)
+  await tx.update(identifiers)
     .set({ status: "cancelled" })
     .where(eq(identifiers.id, row.id));
 
-  await db.insert(auditLogs).values({
+  await tx.insert(auditLogs).values({
     tenantId: auth.tenantId,
     userId: auth.userId,
     action: "CANCEL",
@@ -201,5 +196,5 @@ export async function cancelIdentifier(auth: AuthPayload, identifierStr: string,
     ip,
   });
 
-  return db.query.identifiers.findFirst({ where: eq(identifiers.id, row.id) });
+  return tx.query.identifiers.findFirst({ where: eq(identifiers.id, row.id) });
 }

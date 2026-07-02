@@ -1,6 +1,7 @@
 import { Elysia, t } from "elysia";
 import { Redis } from "ioredis";
-import { db } from "../db";
+import { db, DB } from "../db";
+import { withTenant } from "../db/withTenant";
 import { notifications } from "../db/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { requireAuth } from "../middleware/auth";
@@ -24,8 +25,8 @@ export function subscribe(userId: string, callback: (event: NotificationEvent) =
   return () => subscribers.get(userId)?.delete(callback);
 }
 
-export async function notify(event: NotificationEvent & { tenantId: string }) {
-  const [row] = await db.insert(notifications).values({
+export async function notify(tx: DB, event: NotificationEvent & { tenantId: string }) {
+  const [row] = await tx.insert(notifications).values({
     tenantId: event.tenantId,
     userId: event.userId,
     type: event.type,
@@ -133,37 +134,35 @@ export const notificationSSEModule = new Elysia()
   })
 
   .use(requireAuth())
-  .get("/notifications", async ({ auth, query }) => {
-    const conditions = [
-      eq(notifications.tenantId, auth.tenantId),
-      eq(notifications.userId, auth.userId),
-    ];
-    if (query.unreadOnly === "true") {
-      conditions.push(eq(notifications.isRead, false));
-    }
+  .get("/notifications", async ({ tenantId, auth, query }) => {
+    return withTenant(tenantId, async (tx) => {
+      const conditions = [
+        eq(notifications.tenantId, tenantId),
+        eq(notifications.userId, auth.userId),
+      ];
+      if (query.unreadOnly === "true") {
+        conditions.push(eq(notifications.isRead, false));
+      }
 
-    // CORREÇÃO: `Number(query.limit)` sem validação permitia NaN (query.limit inválido,
-    // ex. "abc") passar directamente para a query, e não havia tecto máximo — ao
-    // contrário de GET /documents, que já limita a 100. Um cliente podia pedir
-    // limit=999999 e forçar a devolução de todo o histórico de notificações de uma vez.
-    const parsedLimit = query.limit ? parseInt(query.limit, 10) : 50;
-    const limit = Math.min(Math.max(Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : 50, 1), 100);
+      const parsedLimit = query.limit ? parseInt(query.limit, 10) : 50;
+      const limit = Math.min(Math.max(Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : 50, 1), 100);
 
-    const rows = await db.query.notifications.findMany({
-      where: and(...conditions),
-      orderBy: [desc(notifications.createdAt)],
-      limit,
+      const rows = await tx.query.notifications.findMany({
+        where: and(...conditions),
+        orderBy: [desc(notifications.createdAt)],
+        limit,
+      });
+
+      return {
+        data: rows.map((r) => ({
+          id: r.id,
+          type: r.type,
+          payload: JSON.parse(r.payload),
+          isRead: r.isRead,
+          createdAt: r.createdAt,
+        })),
+      };
     });
-
-    return {
-      data: rows.map((r) => ({
-        id: r.id,
-        type: r.type,
-        payload: JSON.parse(r.payload),
-        isRead: r.isRead,
-        createdAt: r.createdAt,
-      })),
-    };
   }, {
     query: t.Object({
       unreadOnly: t.Optional(t.String()),
@@ -172,18 +171,20 @@ export const notificationSSEModule = new Elysia()
     detail: { summary: "Histórico de notificações", tags: ["Notificações"] },
   })
 
-  .patch("/notifications/:id/read", async ({ auth, params, set }) => {
-    const [row] = await db.update(notifications)
-      .set({ isRead: true })
-      .where(and(
-        eq(notifications.id, params.id),
-        eq(notifications.userId, auth.userId),
-        eq(notifications.tenantId, auth.tenantId),
-      ))
-      .returning();
+  .patch("/notifications/:id/read", async ({ tenantId, auth, params, set }) => {
+    return withTenant(tenantId, async (tx) => {
+      const [row] = await tx.update(notifications)
+        .set({ isRead: true })
+        .where(and(
+          eq(notifications.id, params.id),
+          eq(notifications.userId, auth.userId),
+          eq(notifications.tenantId, tenantId),
+        ))
+        .returning();
 
-    if (!row) { set.status = 404; return { error: { code: "NOT_FOUND", message: "Notificação não encontrada." } }; }
-    return { data: { id: row.id, isRead: true } };
+      if (!row) { set.status = 404; return { error: { code: "NOT_FOUND", message: "Notificação não encontrada." } }; }
+      return { data: { id: row.id, isRead: true } };
+    });
   }, {
     params: t.Object({ id: t.String() }),
     detail: { summary: "Marcar notificação como lida", tags: ["Notificações"] },

@@ -25,7 +25,7 @@ describe("notification.service", () => {
       fullName: "Test User",
     }).returning({ id: users.id });
 
-    await notify({
+    await notify(db, {
       type: "test:event",
       userId: user.id,
       tenantId: org.id,

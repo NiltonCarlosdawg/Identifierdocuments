@@ -48,7 +48,7 @@ export function verifyTokenWithGrace(token: string, graceSeconds = 60): Promise<
 
 export const authMiddleware = new Elysia()
   .derive({ as: "global" }, async ({ headers, request }): Promise<{ auth: AuthPayload | null; clientIp: string }> => {
-    const clientIp = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
+    const clientIp = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() // TODO(security): validar/sanitizar IP; atualmente confia no header
       || request.headers.get("x-real-ip")
       || "unknown";
 
@@ -77,6 +77,18 @@ export function requireAuth() {
     });
 }
 
+export async function getFreshRoles(userId: string, tenantId: string): Promise<string[]> {
+  const rows = await db
+    .select({ roleName: roles.name })
+    .from(userRoles)
+    .innerJoin(roles, eq(userRoles.roleId, roles.id))
+    .where(and(
+      eq(userRoles.userId, userId),
+      eq(roles.tenantId, tenantId),
+    ));
+  return rows.map((r) => r.roleName);
+}
+
 export function requireRole(...requiredRoles: string[]) {
   return (app: Elysia) => app
     .guard({
@@ -85,15 +97,7 @@ export function requireRole(...requiredRoles: string[]) {
           ctx.set.status = 401;
           return { error: { code: "UNAUTHORIZED", message: "Autenticação necessária." } };
         }
-        const currentRoles = await db
-          .select({ roleName: roles.name })
-          .from(userRoles)
-          .innerJoin(roles, eq(userRoles.roleId, roles.id))
-          .where(and(
-            eq(userRoles.userId, ctx.auth.userId),
-            eq(roles.tenantId, ctx.auth.tenantId),
-          ));
-        const roleNames = currentRoles.map((r) => r.roleName);
+        const roleNames = await getFreshRoles(ctx.auth.userId, ctx.auth.tenantId);
         if (!requiredRoles.some((r) => roleNames.includes(r))) {
           ctx.set.status = 403;
           return { error: { code: "FORBIDDEN", message: "Permissão insuficiente." } };
