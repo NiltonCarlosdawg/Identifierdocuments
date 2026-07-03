@@ -70,7 +70,7 @@ export async function generateIdentifier(tx: DB, auth: AuthPayload, opts: {
   }
 
   const [id] = await tx.transaction(async (tx2) => {
-    const lockKey = sql`hashtext(CONCAT(${auth.tenantId}, '-', ${opts.categoryId}))`;
+    const lockKey = sql`hashtext(CONCAT(${auth.tenantId}::text, '-', ${opts.categoryId}::text))`;
     await tx2.execute(sql`SELECT pg_advisory_xact_lock(${lockKey})`);
     const [row] = await tx2
       .select({ next: sql<number>`COALESCE(MAX(sequence), 0) + 1` })

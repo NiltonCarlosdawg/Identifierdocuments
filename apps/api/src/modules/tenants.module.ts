@@ -102,7 +102,7 @@ export const tenantsModule = new Elysia({ prefix: "/tenants" })
 
   .use(requireAuth())
 
-  .get("/me", async ({ auth, set, db }: any) => {
+  .get("/me", async ({ auth, set }) => {
     const org = await db.query.organizations.findFirst({
       where: eq(organizations.id, auth!.tenantId),
     });
@@ -117,7 +117,7 @@ export const tenantsModule = new Elysia({ prefix: "/tenants" })
 
   .use(requireRole("ORG_ADMIN"))
 
-  .patch("/me", async ({ auth, body, set, db }: any) => {
+  .patch("/me", async ({ auth, body, set }) => {
     try {
       const [org] = await db
         .update(organizations)

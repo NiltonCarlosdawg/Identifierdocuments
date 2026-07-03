@@ -3,6 +3,7 @@ import { generateIdentifier, listIdentifiers, getIdentifier, cancelIdentifier } 
 import { requireAuth } from "../middleware/auth";
 import { checkRateLimit } from "../middleware/rateLimit";
 import { withTenant } from "../db/withTenant";
+import { safeError } from "../lib/errors";
 
 export const identifiersModule = new Elysia({ prefix: "/identifiers" })
   .use(requireAuth())
@@ -30,7 +31,7 @@ export const identifiersModule = new Elysia({ prefix: "/identifiers" })
         return { data: result };
       } catch (err: any) {
         set.status = 400;
-        return { error: { code: "IDENTIFIER_ERROR", message: err.message } };
+        return { error: { code: "IDENTIFIER_ERROR", message: safeError(err) } };
       }
     });
   }, {
@@ -45,15 +46,20 @@ export const identifiersModule = new Elysia({ prefix: "/identifiers" })
     detail: { summary: "Gerar identificador", tags: ["Identificadores"] },
   })
 
-  .get("/", async ({ auth, query, tenantId }) => {
-    return withTenant(tenantId, async (tx) => {
-      return listIdentifiers(tx, auth!, {
-        categoryId: query.categoryId, status: query.status,
-        origin: query.origin,
-        page: query.page ? (Number.isFinite(parseInt(query.page, 10)) ? Math.max(1, parseInt(query.page, 10)) : 1) : 1,
-        limit: query.limit ? (Number.isFinite(parseInt(query.limit, 10)) ? Math.min(Math.max(1, parseInt(query.limit, 10)), 100) : 20) : 20,
+  .get("/", async ({ auth, query, set, tenantId }) => {
+    try {
+      return await withTenant(tenantId, async (tx) => {
+        return listIdentifiers(tx, auth!, {
+          categoryId: query.categoryId, status: query.status,
+          origin: query.origin,
+          page: query.page ? (Number.isFinite(parseInt(query.page, 10)) ? Math.max(1, parseInt(query.page, 10)) : 1) : 1,
+          limit: query.limit ? (Number.isFinite(parseInt(query.limit, 10)) ? Math.min(Math.max(1, parseInt(query.limit, 10)), 100) : 20) : 20,
+        });
       });
-    });
+    } catch (err: any) {
+      set.status = 500;
+      return { error: { code: "INTERNAL_ERROR", message: safeError(err) } };
+    }
   }, {
     query: t.Object({
       categoryId: t.Optional(t.String()), status: t.Optional(t.String()),
@@ -81,7 +87,7 @@ export const identifiersModule = new Elysia({ prefix: "/identifiers" })
         return { data: result };
       } catch (err: any) {
         set.status = 400;
-        return { error: { code: "CANCEL_ERROR", message: err.message } };
+        return { error: { code: "CANCEL_ERROR", message: safeError(err) } };
       }
     });
   }, {
