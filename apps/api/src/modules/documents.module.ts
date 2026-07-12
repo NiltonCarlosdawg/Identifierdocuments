@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { attachDocument, getDocumentMeta, downloadDocument, canAccessDocument } from "../services/attachment.service";
 import { getSharedDocIds } from "../services/identifier.service";
-import { requireAuth } from "../middleware/auth";
+import { requireAuth, getFreshRoles } from "../middleware/auth";
 import { documents, documentShares, approvals, sectors, auditLogs, identifiers, users } from "../db/schema";
 import { eq, and, isNull, or, desc } from "drizzle-orm";
 import { notify } from "../services/notification.service";
@@ -12,7 +12,8 @@ import { safeError } from "../lib/errors";
 
 async function canShareDocument(tx: any, auth: any, docSectorId: string | null, docUploadedBy: string | null): Promise<boolean> {
   if (auth.userId === docUploadedBy) return true;
-  if (auth.roles.includes("ORG_ADMIN")) return true;
+  const roleNames = await getFreshRoles(auth.userId, auth.tenantId);
+  if (roleNames.includes("ORG_ADMIN")) return true;
   if (!docSectorId) return false;
   const sector = await tx.query.sectors.findFirst({ where: eq(sectors.id, docSectorId) });
   if (sector?.supervisorId === auth.userId) return true;
