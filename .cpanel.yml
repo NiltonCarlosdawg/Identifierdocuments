@@ -1,0 +1,9 @@
+---
+deployment:
+  tasks:
+    - export API_SRC=$HOME/repositories/Docid/apps/api
+    - export API_DEST=$HOME/didall.milvendas.ao
+    - /bin/cp -r $API_SRC/src/. $API_DEST/src/
+    - /bin/cp $API_SRC/package.json $API_DEST/package.json
+    - cd $API_DEST && ~/.bun/bin/bun install
+    - ~/.bun/bin/bun ~/.bun/bin/pm2 restart docid-api || ~/.bun/bin/bun ~/.bun/bin/pm2 start ~/.bun/bin/bun --name docid-api -- src/index.ts
