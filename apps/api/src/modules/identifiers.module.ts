@@ -9,31 +9,36 @@ export const identifiersModule = new Elysia({ prefix: "/identifiers" })
   .use(requireAuth())
 
   .post("/generate", async ({ auth, body, set, request, tenantId }) => {
-    return withTenant(tenantId, async (tx) => {
-      try {
-        const ip = request.headers.get("x-forwarded-for") || "unknown"; // TODO(security): validar/sanitizar IP; atualmente confia no header
-        if (!(await checkRateLimit(`generate:${ip}:${auth!.userId}`, 20, 60_000))) {
-          set.status = 429;
-          return { error: { code: "RATE_LIMITED", message: "Muitos pedidos. Tente novamente em 1 minuto." } };
+    try {
+      return await withTenant(tenantId, async (tx) => {
+        try {
+          const ip = request.headers.get("x-forwarded-for") || "unknown"; // TODO(security): validar/sanitizar IP; atualmente confia no header
+          if (!(await checkRateLimit(`generate:${ip}:${auth!.userId}`, 20, 60_000))) {
+            set.status = 429;
+            return { error: { code: "RATE_LIMITED", message: "Muitos pedidos. Tente novamente em 1 minuto." } };
+          }
+          const targetSectorId = body.sectorId ?? auth!.sectorId;
+          if (!targetSectorId) {
+            set.status = 422; return { error: { code: "VALIDATION_ERROR", message: "Sector não definido." } };
+          }
+          if (targetSectorId !== auth!.sectorId && !auth!.roles.includes("ORG_ADMIN")) {
+            set.status = 403; return { error: { code: "FORBIDDEN", message: "Não pode gerar identificadores para outro sector." } };
+          }
+          const result = await generateIdentifier(tx, auth!, {
+            categoryId: body.categoryId, issuedTo: body.issuedTo,
+            description: body.description, origin: body.origin,
+            visibility: body.visibility, sectorId: targetSectorId,
+          });
+          return { data: result };
+        } catch (err: any) {
+          console.error("[GENERATE_ERROR]", err);
+          throw err;
         }
-        const targetSectorId = body.sectorId ?? auth!.sectorId;
-        if (!targetSectorId) {
-          set.status = 422; return { error: { code: "VALIDATION_ERROR", message: "Sector não definido." } };
-        }
-        if (targetSectorId !== auth!.sectorId && !auth!.roles.includes("ORG_ADMIN")) {
-          set.status = 403; return { error: { code: "FORBIDDEN", message: "Não pode gerar identificadores para outro sector." } };
-        }
-        const result = await generateIdentifier(tx, auth!, {
-          categoryId: body.categoryId, issuedTo: body.issuedTo,
-          description: body.description, origin: body.origin,
-          visibility: body.visibility, sectorId: targetSectorId,
-        });
-        return { data: result };
-      } catch (err: any) {
-        set.status = 400;
-        return { error: { code: "IDENTIFIER_ERROR", message: safeError(err) } };
-      }
-    });
+      });
+    } catch (err: any) {
+      set.status = 400;
+      return { error: { code: "IDENTIFIER_ERROR", message: safeError(err) } };
+    }
   }, {
     body: t.Object({
       categoryId: t.String(),
@@ -81,15 +86,20 @@ export const identifiersModule = new Elysia({ prefix: "/identifiers" })
   })
 
   .patch("/:identifier/cancel", async ({ auth, params, body, set, tenantId }) => {
-    return withTenant(tenantId, async (tx) => {
-      try {
-        const result = await cancelIdentifier(tx, auth!, params.identifier, body.reason);
-        return { data: result };
-      } catch (err: any) {
-        set.status = 400;
-        return { error: { code: "CANCEL_ERROR", message: safeError(err) } };
-      }
-    });
+    try {
+      return await withTenant(tenantId, async (tx) => {
+        try {
+          const result = await cancelIdentifier(tx, auth!, params.identifier, body.reason);
+          return { data: result };
+        } catch (err: any) {
+          console.error("[CANCEL_ERROR]", err);
+          throw err;
+        }
+      });
+    } catch (err: any) {
+      set.status = 400;
+      return { error: { code: "CANCEL_ERROR", message: safeError(err) } };
+    }
   }, {
     params: t.Object({ identifier: t.String() }),
     body: t.Object({ reason: t.String() }),

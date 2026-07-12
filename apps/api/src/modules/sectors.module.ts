@@ -4,6 +4,7 @@ import { sectors, users } from "../db/schema";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, requireRole } from "../middleware/auth";
 import { withTenant } from "../db/withTenant";
+import { safeError } from "../lib/errors";
 
 export const sectorsModule = new Elysia({ prefix: "/sectors" })
   .use(requireAuth())
@@ -47,36 +48,46 @@ export const sectorsModule = new Elysia({ prefix: "/sectors" })
 
   .use(requireRole("ORG_ADMIN"))
   .post("/", async ({ body, set, tenantId }) => {
-    return withTenant(tenantId, async (tx) => {
-      try {
-        const [sector] = await tx.insert(sectors).values({
-          tenantId, name: body.name, code: body.code,
-        }).returning();
-        return { data: sector };
-      } catch (err: any) {
-        set.status = 400;
-        return { error: { code: "SECTOR_ERROR", message: err.message } };
-      }
-    });
+    try {
+      return await withTenant(tenantId, async (tx) => {
+        try {
+          const [sector] = await tx.insert(sectors).values({
+            tenantId, name: body.name, code: body.code,
+          }).returning();
+          return { data: sector };
+        } catch (err: any) {
+          console.error("[CREATE_SECTOR_ERROR]", err);
+          throw err;
+        }
+      });
+    } catch (err: any) {
+      set.status = 400;
+      return { error: { code: "SECTOR_ERROR", message: safeError(err) } };
+    }
   }, {
     body: t.Object({ name: t.String(), code: t.String() }),
     detail: { summary: "Criar sector", tags: ["Sectores"] },
   })
 
   .patch("/:id", async ({ params, body, set, tenantId }) => {
-    return withTenant(tenantId, async (tx) => {
-      try {
-        const [sector] = await tx.update(sectors)
-          .set({ name: body.name, code: body.code })
-          .where(and(eq(sectors.id, params.id), eq(sectors.tenantId, tenantId)))
-          .returning();
-        if (!sector) { set.status = 404; return { error: { code: "NOT_FOUND", message: "Sector não encontrado." } }; }
-        return { data: sector };
-      } catch (err: any) {
-        set.status = 400;
-        return { error: { code: "UPDATE_ERROR", message: err.message } };
-      }
-    });
+    try {
+      return await withTenant(tenantId, async (tx) => {
+        try {
+          const [sector] = await tx.update(sectors)
+            .set({ name: body.name, code: body.code })
+            .where(and(eq(sectors.id, params.id), eq(sectors.tenantId, tenantId)))
+            .returning();
+          if (!sector) { set.status = 404; return { error: { code: "NOT_FOUND", message: "Sector não encontrado." } }; }
+          return { data: sector };
+        } catch (err: any) {
+          console.error("[UPDATE_SECTOR_ERROR]", err);
+          throw err;
+        }
+      });
+    } catch (err: any) {
+      set.status = 400;
+      return { error: { code: "UPDATE_ERROR", message: safeError(err) } };
+    }
   }, {
     params: t.Object({ id: t.String() }),
     body: t.Object({ name: t.Optional(t.String()), code: t.Optional(t.String()) }),
@@ -84,46 +95,56 @@ export const sectorsModule = new Elysia({ prefix: "/sectors" })
   })
 
   .patch("/:id/supervisor", async ({ params, body, set, tenantId }) => {
-    return withTenant(tenantId, async (tx) => {
-      try {
-        if (body.supervisorId) {
-          const supervisor = await tx.query.users.findFirst({
-            where: eq(users.id, body.supervisorId),
-            columns: { tenantId: true },
-          });
-          if (!supervisor || supervisor.tenantId !== tenantId) {
-            set.status = 400; return { error: { code: "VALIDATION_ERROR", message: "Supervisor não encontrado." } };
+    try {
+      return await withTenant(tenantId, async (tx) => {
+        try {
+          if (body.supervisorId) {
+            const supervisor = await tx.query.users.findFirst({
+              where: eq(users.id, body.supervisorId),
+              columns: { tenantId: true },
+            });
+            if (!supervisor || supervisor.tenantId !== tenantId) {
+              set.status = 400; return { error: { code: "VALIDATION_ERROR", message: "Supervisor não encontrado." } };
+            }
           }
+          const [sector] = await tx.update(sectors)
+            .set({ supervisorId: body.supervisorId })
+            .where(and(eq(sectors.id, params.id), eq(sectors.tenantId, tenantId)))
+            .returning();
+          return { data: sector };
+        } catch (err: any) {
+          console.error("[UPDATE_SUPERVISOR_ERROR]", err);
+          throw err;
         }
-        const [sector] = await tx.update(sectors)
-          .set({ supervisorId: body.supervisorId })
-          .where(and(eq(sectors.id, params.id), eq(sectors.tenantId, tenantId)))
-          .returning();
-        return { data: sector };
-      } catch (err: any) {
-        set.status = 400;
-        return { error: { code: "UPDATE_ERROR", message: err.message } };
-      }
-    });
+      });
+    } catch (err: any) {
+      set.status = 400;
+      return { error: { code: "UPDATE_ERROR", message: safeError(err) } };
+    }
   }, {
     params: t.Object({ id: t.String() }),
     body: t.Object({ supervisorId: t.Optional(t.String()) }),
     detail: { summary: "Atribuir supervisor", tags: ["Sectores"] },
   })
   .delete("/:id", async ({ params, set, tenantId }) => {
-    return withTenant(tenantId, async (tx) => {
-      try {
-        await tx.delete(sectors).where(and(eq(sectors.id, params.id), eq(sectors.tenantId, tenantId)));
-        return { data: { deleted: true } };
-      } catch (err: any) {
-        if (err.code === "23503") {
-          set.status = 409;
-          return { error: { code: "SECTOR_IN_USE", message: "Não é possível remover o sector: existem utilizadores ou identificadores associados a ele." } };
+    try {
+      return await withTenant(tenantId, async (tx) => {
+        try {
+          await tx.delete(sectors).where(and(eq(sectors.id, params.id), eq(sectors.tenantId, tenantId)));
+          return { data: { deleted: true } };
+        } catch (err: any) {
+          console.error("[DELETE_SECTOR_ERROR]", err);
+          throw err;
         }
-        set.status = 400;
-        return { error: { code: "DELETE_ERROR", message: err.message } };
+      });
+    } catch (err: any) {
+      if (err?.code === "23503") {
+        set.status = 409;
+        return { error: { code: "SECTOR_IN_USE", message: "Não é possível remover o sector: existem utilizadores ou identificadores associados a ele." } };
       }
-    });
+      set.status = 400;
+      return { error: { code: "DELETE_ERROR", message: safeError(err) } };
+    }
   }, {
     params: t.Object({ id: t.String() }),
     detail: { summary: "Remover sector", tags: ["Sectores"] },

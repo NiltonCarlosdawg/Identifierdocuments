@@ -4,6 +4,7 @@ import { roles, rolePermissions } from "../db/schema";
 import { eq, and, or, isNull } from "drizzle-orm";
 import { requireAuth, requireRole } from "../middleware/auth";
 import { withTenant } from "../db/withTenant";
+import { safeError } from "../lib/errors";
 
 export const rolesModule = new Elysia({ prefix: "/roles" })
   .use(requireAuth())
@@ -23,17 +24,22 @@ export const rolesModule = new Elysia({ prefix: "/roles" })
 
   .use(requireRole("ORG_ADMIN"))
   .post("/", async ({ body, set, tenantId }) => {
-    return withTenant(tenantId, async (tx) => {
-      try {
-        const [role] = await tx.insert(roles).values({
-          tenantId, name: body.name, isSystem: false,
-        }).returning();
-        return { data: role };
-      } catch (err: any) {
-        set.status = 400;
-        return { error: { code: "ROLE_ERROR", message: err.message } };
-      }
-    });
+    try {
+      return await withTenant(tenantId, async (tx) => {
+        try {
+          const [role] = await tx.insert(roles).values({
+            tenantId, name: body.name, isSystem: false,
+          }).returning();
+          return { data: role };
+        } catch (err: any) {
+          console.error("[CREATE_ROLE_ERROR]", err);
+          throw err;
+        }
+      });
+    } catch (err: any) {
+      set.status = 400;
+      return { error: { code: "ROLE_ERROR", message: safeError(err) } };
+    }
   }, {
     body: t.Object({ name: t.String() }),
     detail: { summary: "Criar role custom", tags: ["Roles"] },
@@ -41,27 +47,32 @@ export const rolesModule = new Elysia({ prefix: "/roles" })
 
   .use(requireRole("ORG_ADMIN"))
   .patch("/:id/permissions", async ({ params, body, set, tenantId }) => {
-    return withTenant(tenantId, async (tx) => {
-      try {
-        const role = await tx.query.roles.findFirst({ where: eq(roles.id, params.id) });
-        if (!role || role.tenantId !== tenantId) {
-          set.status = 404; return { error: { code: "NOT_FOUND", message: "Role não encontrado." } };
-        }
-        if (role.isSystem) {
-          set.status = 400; return { error: { code: "SYSTEM_ROLE", message: "Não é possível alterar permissões de roles de sistema." } };
-        }
-        await tx.transaction(async (tx2) => {
-          await tx2.delete(rolePermissions).where(eq(rolePermissions.roleId, params.id));
-          for (const perm of body.permissions) {
-            await tx2.insert(rolePermissions).values({ roleId: params.id, ...perm });
+    try {
+      return await withTenant(tenantId, async (tx) => {
+        try {
+          const role = await tx.query.roles.findFirst({ where: eq(roles.id, params.id) });
+          if (!role || role.tenantId !== tenantId) {
+            set.status = 404; return { error: { code: "NOT_FOUND", message: "Role não encontrado." } };
           }
-        });
-        return { data: { updated: true } };
-      } catch (err: any) {
-        set.status = 400;
-        return { error: { code: "PERMISSION_ERROR", message: err.message } };
-      }
-    });
+          if (role.isSystem) {
+            set.status = 400; return { error: { code: "SYSTEM_ROLE", message: "Não é possível alterar permissões de roles de sistema." } };
+          }
+          await tx.transaction(async (tx2) => {
+            await tx2.delete(rolePermissions).where(eq(rolePermissions.roleId, params.id));
+            for (const perm of body.permissions) {
+              await tx2.insert(rolePermissions).values({ roleId: params.id, ...perm });
+            }
+          });
+          return { data: { updated: true } };
+        } catch (err: any) {
+          console.error("[PERMISSION_ERROR]", err);
+          throw err;
+        }
+      });
+    } catch (err: any) {
+      set.status = 400;
+      return { error: { code: "PERMISSION_ERROR", message: safeError(err) } };
+    }
   }, {
     params: t.Object({ id: t.String() }),
     body: t.Object({ permissions: t.Array(t.Object({ resource: t.String(), action: t.String() })) }),
