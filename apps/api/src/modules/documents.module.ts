@@ -51,66 +51,76 @@ export const documentsModule = new Elysia({ prefix: "/documents" })
     detail: { summary: "Associar documento", tags: ["Documentos"] },
   })
 
-  .get("/", async ({ tenantId, auth, query }) => {
-    return withTenant(tenantId, async (tx) => {
-      const parsedLimit = parseInt(query.limit || "20", 10);
-      const limit = Math.min(Math.max(Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : 20, 1), 100);
-      const parsedPage = parseInt(query.page || "1", 10);
-      const page = Math.max(1, Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : 1);
-      const offset = (page - 1) * limit;
+  .get("/", async ({ tenantId, auth, query, set }) => {
+    try {
+      return await withTenant(tenantId, async (tx) => {
+        try {
+          const parsedLimit = parseInt(query.limit || "20", 10);
+          const limit = Math.min(Math.max(Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : 20, 1), 100);
+          const parsedPage = parseInt(query.page || "1", 10);
+          const page = Math.max(1, Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : 1);
+          const offset = (page - 1) * limit;
 
-      const conditions = [eq(documents.tenantId, tenantId)];
-      if (query.identifierId) conditions.push(eq(documents.identifierId, query.identifierId));
+          const conditions = [eq(documents.tenantId, tenantId)];
+          if (query.identifierId) conditions.push(eq(documents.identifierId, query.identifierId));
 
-      const allRows = await tx.query.documents.findMany({
-        where: and(...conditions),
-        with: {
-          identifier: { with: { category: true } },
-          uploader: true,
-        },
-        orderBy: [desc(documents.createdAt)],
+          const allRows = await tx.query.documents.findMany({
+            where: and(...conditions),
+            with: {
+              identifier: { with: { category: true } },
+              uploader: true,
+            },
+            orderBy: [desc(documents.createdAt)],
+          });
+
+          // CORREÇÃO: esta listagem devolvia todos os documentos do tenant sem
+          // qualquer filtro de visibilidade — um documento sector_only (ex.: Folha
+          // de Salário, Rescisão, Contrato) de outro sector aparecia aqui com
+          // filename, identifier e uploader visíveis a qualquer user autenticado do
+          // tenant, mesmo sem acesso ao ficheiro em si. Alinhado agora com o mesmo
+          // critério de visibilidade usado em listIdentifiers/canAccessDocument.
+          const sharedDocIds = await getSharedDocIds(tx, auth!);
+          const visibleRows = allRows.filter((d: any) => {
+            const visibility = d.identifier?.visibility ?? "public";
+            if (d.uploadedBy === auth!.userId) return true;
+            if (visibility === "public") return true;
+            if (d.identifier?.sectorId != null && d.identifier.sectorId === auth!.sectorId) return true;
+            if (sharedDocIds.has(d.id)) return true;
+            return false;
+          });
+
+          const total = visibleRows.length;
+          const paginated = visibleRows.slice(offset, offset + limit);
+
+          const baseUrl = process.env.API_BASE_URL || "http://localhost:3000";
+          const safe = paginated.map((d: any) => ({
+            id: d.id,
+            filename: d.filename,
+            fileSize: d.fileSize,
+            mimeType: d.mimeType,
+            status: d.identifier?.status || "active",
+            createdAt: d.createdAt,
+            fileUrl: `${baseUrl}/documents/${d.id}/download`,
+            thumbnailUrl: `${baseUrl}/documents/${d.id}/thumbnail`,
+            identifier: d.identifier ? {
+              id: d.identifier.id,
+              identifier: d.identifier.identifier,
+              categoryId: d.identifier.category?.id,
+              categoryName: d.identifier.category?.name,
+            } : null,
+            uploadedBy: d.uploader?.fullName || null,
+          }));
+
+          return { data: safe, meta: { total, page, limit } };
+        } catch (err: any) {
+          console.error("[LIST_ERROR]", err);
+          throw err;
+        }
       });
-
-      // CORREÇÃO: esta listagem devolvia todos os documentos do tenant sem
-      // qualquer filtro de visibilidade — um documento sector_only (ex.: Folha
-      // de Salário, Rescisão, Contrato) de outro sector aparecia aqui com
-      // filename, identifier e uploader visíveis a qualquer user autenticado do
-      // tenant, mesmo sem acesso ao ficheiro em si. Alinhado agora com o mesmo
-      // critério de visibilidade usado em listIdentifiers/canAccessDocument.
-      const sharedDocIds = await getSharedDocIds(tx, auth!);
-      const visibleRows = allRows.filter((d: any) => {
-        const visibility = d.identifier?.visibility ?? "public";
-        if (d.uploadedBy === auth!.userId) return true;
-        if (visibility === "public") return true;
-        if (d.identifier?.sectorId != null && d.identifier.sectorId === auth!.sectorId) return true;
-        if (sharedDocIds.has(d.id)) return true;
-        return false;
-      });
-
-      const total = visibleRows.length;
-      const paginated = visibleRows.slice(offset, offset + limit);
-
-      const baseUrl = process.env.API_BASE_URL || "http://localhost:3000";
-      const safe = paginated.map((d: any) => ({
-        id: d.id,
-        filename: d.filename,
-        fileSize: d.fileSize,
-        mimeType: d.mimeType,
-        status: d.identifier?.status || "active",
-        createdAt: d.createdAt,
-        fileUrl: `${baseUrl}/documents/${d.id}/download`,
-        thumbnailUrl: `${baseUrl}/documents/${d.id}/thumbnail`,
-        identifier: d.identifier ? {
-          id: d.identifier.id,
-          identifier: d.identifier.identifier,
-          categoryId: d.identifier.category?.id,
-          categoryName: d.identifier.category?.name,
-        } : null,
-        uploadedBy: d.uploader?.fullName || null,
-      }));
-
-      return { data: safe, meta: { total, page, limit } };
-    });
+    } catch (err: any) {
+      set.status = 500;
+      return { error: { code: "LIST_ERROR", message: safeError(err) } };
+    }
   }, {
     query: t.Object({
       limit: t.Optional(t.String()),
@@ -121,72 +131,92 @@ export const documentsModule = new Elysia({ prefix: "/documents" })
   })
 
   .get("/:param", async ({ tenantId, auth, params, set }) => {
-    return withTenant(tenantId, async (tx) => {
-      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(params.param);
+    try {
+      return await withTenant(tenantId, async (tx) => {
+        try {
+          const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(params.param);
 
-      if (isUuid) {
-        const doc = await getDocumentMeta(tx, auth!, params.param);
-        if (!doc) { set.status = 404; return { error: { code: "NOT_FOUND", message: "Documento não encontrado." } }; }
-        return { data: doc };
-      }
+          if (isUuid) {
+            const doc = await getDocumentMeta(tx, auth!, params.param);
+            if (!doc) { set.status = 404; return { error: { code: "NOT_FOUND", message: "Documento não encontrado." } }; }
+            return { data: doc };
+          }
 
-      // CORREÇÃO: este branch filtrava documents.findFirst por
-      // identifiers.identifier sem qualquer join para a tabela identifiers (SQL
-      // inválido / não filtra o que devia) e, mais grave, não passava pelo
-      // controlo de acesso (canAccessDocument/getDocumentMeta) usado no branch
-      // UUID — permitia obter metadados de qualquer documento de qualquer sector
-      // só por se saber o identifier code. Resolve-se agora sempre por
-      // identifiers.identifier + tenantId, reutilizando getDocumentMeta.
-      const idRow = await tx.query.identifiers.findFirst({
-        where: and(eq(identifiers.identifier, params.param), eq(identifiers.tenantId, tenantId)),
-        with: { document: true },
+          // CORREÇÃO: este branch filtrava documents.findFirst por
+          // identifiers.identifier sem qualquer join para a tabela identifiers (SQL
+          // inválido / não filtra o que devia) e, mais grave, não passava pelo
+          // controlo de acesso (canAccessDocument/getDocumentMeta) usado no branch
+          // UUID — permitia obter metadados de qualquer documento de qualquer sector
+          // só por se saber o identifier code. Resolve-se agora sempre por
+          // identifiers.identifier + tenantId, reutilizando getDocumentMeta.
+          const idRow = await tx.query.identifiers.findFirst({
+            where: and(eq(identifiers.identifier, params.param), eq(identifiers.tenantId, tenantId)),
+            with: { document: true },
+          });
+          if (!idRow?.document) { set.status = 404; return { error: { code: "NOT_FOUND", message: "Documento não encontrado." } }; }
+
+          const doc = await getDocumentMeta(tx, auth!, idRow.document.id);
+          if (!doc) { set.status = 404; return { error: { code: "NOT_FOUND", message: "Documento não encontrado." } }; }
+          return { data: doc };
+        } catch (err: any) {
+          console.error("[DOCUMENT_ERROR]", err);
+          throw err;
+        }
       });
-      if (!idRow?.document) { set.status = 404; return { error: { code: "NOT_FOUND", message: "Documento não encontrado." } }; }
-
-      const doc = await getDocumentMeta(tx, auth!, idRow.document.id);
-      if (!doc) { set.status = 404; return { error: { code: "NOT_FOUND", message: "Documento não encontrado." } }; }
-      return { data: doc };
-    });
+    } catch (err: any) {
+      set.status = 500;
+      return { error: { code: "DOCUMENT_ERROR", message: safeError(err) } };
+    }
   }, {
     params: t.Object({ param: t.String() }),
     detail: { summary: "Metadados do documento (UUID ou identifier code)", tags: ["Documentos"] },
   })
 
   .get("/:param/download", async ({ tenantId, auth, params, set }) => {
-    return withTenant(tenantId, async (tx) => {
-      // CORREÇÃO: o summary deste endpoint diz "UUID ou identifier code" mas só
-      // funcionava com UUID — downloadDocument() filtra por documents.id, e um
-      // identifier code nunca corresponde a esse campo, resultando sempre em
-      // NOT_FOUND. Resolve-se aqui o identifier code para o UUID do documento,
-      // tal como já era feito no endpoint de thumbnail (abaixo, inalterado).
-      const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-      let docId = params.param;
-      if (!UUID_REGEX.test(docId)) {
-        const idRow = await tx.query.identifiers.findFirst({
-          where: and(eq(identifiers.identifier, params.param), eq(identifiers.tenantId, tenantId)),
-          with: { document: true },
-        });
-        if (!idRow?.document) {
-          set.status = 404;
-          return { error: { code: "NOT_FOUND", message: "Documento não encontrado." } };
-        }
-        docId = idRow.document.id;
-      }
+    try {
+      return await withTenant(tenantId, async (tx) => {
+        try {
+          // CORREÇÃO: o summary deste endpoint diz "UUID ou identifier code" mas só
+          // funcionava com UUID — downloadDocument() filtra por documents.id, e um
+          // identifier code nunca corresponde a esse campo, resultando sempre em
+          // NOT_FOUND. Resolve-se aqui o identifier code para o UUID do documento,
+          // tal como já era feito no endpoint de thumbnail (abaixo, inalterado).
+          const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+          let docId = params.param;
+          if (!UUID_REGEX.test(docId)) {
+            const idRow = await tx.query.identifiers.findFirst({
+              where: and(eq(identifiers.identifier, params.param), eq(identifiers.tenantId, tenantId)),
+              with: { document: true },
+            });
+            if (!idRow?.document) {
+              set.status = 404;
+              return { error: { code: "NOT_FOUND", message: "Documento não encontrado." } };
+            }
+            docId = idRow.document.id;
+          }
 
-      const result = await downloadDocument(tx, auth!, docId);
-      if ("error" in result) {
-        if (result.error === "ACCESS_REQUIRED") {
-          set.status = 403;
-          return { error: { code: "ACCESS_REQUIRED", message: "Solicite acesso ao supervisor do sector emitente." } };
+          const result = await downloadDocument(tx, auth!, docId);
+          if ("error" in result) {
+            if (result.error === "ACCESS_REQUIRED") {
+              set.status = 403;
+              return { error: { code: "ACCESS_REQUIRED", message: "Solicite acesso ao supervisor do sector emitente." } };
+            }
+            set.status = 404; return { error: { code: "NOT_FOUND", message: "Ficheiro não encontrado." } };
+          }
+          const fileBuffer = fs.readFileSync(result.filePath);
+          const asciiName = result.fileName.replace(/[^\x20-\x7E]/g, "_");
+          set.headers["Content-Disposition"] = `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(result.fileName)}`;
+          set.headers["Content-Type"] = "application/octet-stream";
+          return fileBuffer;
+        } catch (err: any) {
+          console.error("[DOWNLOAD_ERROR]", err);
+          throw err;
         }
-        set.status = 404; return { error: { code: "NOT_FOUND", message: "Ficheiro não encontrado." } };
-      }
-      const fileBuffer = fs.readFileSync(result.filePath);
-      const asciiName = result.fileName.replace(/[^\x20-\x7E]/g, "_");
-      set.headers["Content-Disposition"] = `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(result.fileName)}`;
-      set.headers["Content-Type"] = "application/octet-stream";
-      return fileBuffer;
-    });
+      });
+    } catch (err: any) {
+      set.status = 500;
+      return { error: { code: "DOWNLOAD_ERROR", message: safeError(err) } };
+    }
   }, {
     params: t.Object({ param: t.String() }),
     detail: { summary: "Download do documento (UUID ou identifier code)", tags: ["Documentos"] },
@@ -409,24 +439,34 @@ export const documentsModule = new Elysia({ prefix: "/documents" })
   })
 
   .get("/:param/shares", async ({ tenantId, auth, params, set }) => {
-    return withTenant(tenantId, async (tx) => {
-      const idRow = await tx.query.identifiers.findFirst({
-        where: and(eq(identifiers.identifier, params.param), eq(identifiers.tenantId, tenantId)),
-        with: { document: true },
+    try {
+      return await withTenant(tenantId, async (tx) => {
+        try {
+          const idRow = await tx.query.identifiers.findFirst({
+            where: and(eq(identifiers.identifier, params.param), eq(identifiers.tenantId, tenantId)),
+            with: { document: true },
+          });
+          if (!idRow?.document) {
+            set.status = 404;
+            return { error: { code: "NOT_FOUND", message: "Documento não encontrado." } };
+          }
+          if (!(await canShareDocument(tx, auth!, idRow.sectorId, idRow.document.uploadedBy))) {
+            set.status = 403; return { error: { code: "FORBIDDEN", message: "Não tem permissão para ver partilhas deste documento." } };
+          }
+          const shares = await tx.query.documentShares.findMany({
+            where: eq(documentShares.documentId, idRow.document.id),
+            with: { sector: true, user: true, sharer: true },
+          });
+          return { data: shares };
+        } catch (err: any) {
+          console.error("[SHARES_ERROR]", err);
+          throw err;
+        }
       });
-      if (!idRow?.document) {
-        set.status = 404;
-        return { error: { code: "NOT_FOUND", message: "Documento não encontrado." } };
-      }
-      if (!(await canShareDocument(tx, auth!, idRow.sectorId, idRow.document.uploadedBy))) {
-        set.status = 403; return { error: { code: "FORBIDDEN", message: "Não tem permissão para ver partilhas deste documento." } };
-      }
-      const shares = await tx.query.documentShares.findMany({
-        where: eq(documentShares.documentId, idRow.document.id),
-        with: { sector: true, user: true, sharer: true },
-      });
-      return { data: shares };
-    });
+    } catch (err: any) {
+      set.status = 500;
+      return { error: { code: "SHARES_ERROR", message: safeError(err) } };
+    }
   }, {
     params: t.Object({ param: t.String() }),
     detail: { summary: "Listar partilhas", tags: ["Partilha"] },

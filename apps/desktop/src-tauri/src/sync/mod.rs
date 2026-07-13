@@ -419,12 +419,8 @@ fn safe_dest_path(uploads_dir: &PathBuf, filename: &str) -> Result<PathBuf, Stri
     if safe_name.is_empty() {
         return Err("Nome de ficheiro inválido.".to_string());
     }
-    let dest = uploads_dir.join(format!("{}_{}", Uuid::new_v4(), safe_name));
-    let canonical = dest.canonicalize().map_err(|_| "Erro ao resolver caminho.".to_string())?;
     let uploads_canonical = uploads_dir.canonicalize().map_err(|_| "Erro ao resolver diretório.".to_string())?;
-    if !canonical.starts_with(&uploads_canonical) {
-        return Err("Path traversal detectado.".to_string());
-    }
+    let dest = uploads_canonical.join(format!("{}_{}", Uuid::new_v4(), safe_name));
     Ok(dest)
 }
 
@@ -556,3 +552,59 @@ pub fn retry_queue_item(state: State<'_, SyncState>, id: String) -> Result<(), S
 pub async fn force_sync(app: AppHandle, state: State<'_, SyncState>) -> Result<usize, String> {
     run_sync_cycle(&app, &state).await
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use uuid::Uuid;
+
+    fn tmp_uploads() -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("docid_test_{}", Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn test_safe_dest_path_ok() {
+        let dir = tmp_uploads();
+        let result = safe_dest_path(&dir, "relatorio.pdf");
+        assert!(result.is_ok());
+        let path = result.unwrap();
+        assert!(path.starts_with(&dir.canonicalize().unwrap()));
+        assert!(path.to_string_lossy().ends_with("relatorio.pdf"));
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_safe_dest_path_empty_filename() {
+        let dir = tmp_uploads();
+        let result = safe_dest_path(&dir, "");
+        assert!(result.is_err());
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_safe_dest_path_nonexistent_dir() {
+        let dir = std::env::temp_dir().join(format!("docid_test_{}", Uuid::new_v4()));
+        let result = safe_dest_path(&dir, "foo.pdf");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_sanitize_filename_removes_bad_chars() {
+        assert_eq!(sanitize_filename("hello world"), "helloworld");
+        assert_eq!(sanitize_filename("a/b\\c:d"), "abcd");
+        assert_eq!(sanitize_filename("file.tar.gz"), "file.tar.gz");
+        assert_eq!(sanitize_filename(""), "");
+    }
+
+    #[test]
+    fn test_sanitize_filename_truncates() {
+        let long = "a".repeat(300);
+        let result = sanitize_filename(&long);
+        assert_eq!(result.len(), 255);
+    }
+}
+
+

@@ -177,11 +177,14 @@ export async function canAccessDocument(tx: DB, auth: AuthPayload, sectorId: str
     if (share) return { allowed: true, restricted: false };
   }
 
-  if (auth.roles.includes("ORG_ADMIN")) {
-    return { allowed: false, restricted: true };
-  }
-
-  return { allowed: false, restricted: false };
+  // CORREÇÃO: antes só ORG_ADMIN recebia { restricted: true } aqui; qualquer
+  // outro user caía sempre em { allowed:false, restricted:false } (→ 404),
+  // mesmo quando o documento existe e é apenas sector_only. Isso impedia o
+  // user de perceber que podia pedir acesso (POST /documents/:param/request-access).
+  // Qualquer user autenticado do tenant que chegue a este ponto está perante um
+  // documento que existe, não é público, não é do seu sector, e não tem
+  // partilha activa — deve ver restricted:true (→ 403 ACCESS_REQUIRED).
+  return { allowed: false, restricted: true };
 }
 
 export async function getDocumentMeta(tx: DB, auth: AuthPayload, docId: string) {
