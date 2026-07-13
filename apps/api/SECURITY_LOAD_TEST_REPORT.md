@@ -1,7 +1,7 @@
 # Security & Load Test Report — Pós-FIX 1
 
-**Data:** 2026-07-02
-**Commit:** `4e409e7` (6 correções de segurança)
+**Data:** 2026-07-02 (actualizado: 2026-07-04)
+**Commit:** `58f1a1b` (6 correções de segurança + fix A5 Caso 1)
 **API:** http://localhost:3000
 **Pool postgres.js:** 10 conexões (default)
 
@@ -51,7 +51,7 @@ Metodologia: Forçar FK violation dentro de `withTenant(tenantA)`, imediatamente
 
 | Caso | Payload | Status | Risco |
 |------|---------|--------|-------|
-| 1 | SQL injection em tenantId | 500 (BD rejeita: `invalid input syntax for type uuid`) | ⚠️ Error 500 expõe detalhe interno da BD (leak de informação, não fuga de dados) |
+| 1 | SQL injection em tenantId | 500 (sanitizado: `safeError()` → "Formato de dados inválido.") | ✅ Error sanitizado, sem leak de informação (corrigido no commit `58f1a1b`) |
 | 2 | Sem tenantId no JWT | 401 | Seguro |
 | 3 | UUID válido mas inexistente | 200, 0 resultados | Seguro (RLS filtra por tenant inexistente) |
 
@@ -110,11 +110,12 @@ Observações:
 - **Impacto:** Qualquer POST a `/identifiers/generate` retornava 400.
 - **Correcção aplicada:** `::text` cast: `${auth.tenantId}::text` e `${opts.categoryId}::text`.
 
-### 🟡 Bug 3 — A5 Caso 1 expõe detalhe interno da BD
-- **Ficheiro:** `middleware/tenant.ts` / handler do endpoint
-- **Causa:** O erro `invalid input syntax for type uuid` da BD não é sanitizado antes de ser devolvido ao cliente.
-- **Impacto:** Leve — expõe que é PostgreSQL e o tipo da coluna (`uuid`). Não expõe dados.
-- **Correcção:** Usar `safeError()` helper (presente em `lib/errors.ts` desde o FIX).
+### 🟡 Bug 3 — A5 Caso 1 expõe detalhe interno da BD (CORRIGIDO)
+- **Ficheiro:** `modules/identifiers.module.ts` (handlers GET /, POST /generate, PATCH /:identifier/cancel)
+- **Causa:** O erro `invalid input syntax for type uuid` da BD (postgres.js) não era sanitizado antes de ser devolvido ao cliente. O `onError` global estava a ser bypassado porque o erro ocorria dentro de `db.transaction()` e o handler não tinha try/catch (GET /) ou usava `err.message` cru (POST/PATCH).
+- **Impacto:** Leve — expunha que é PostgreSQL e o tipo da coluna (`uuid`). Não expunha dados.
+- **Correcção aplicada:** Adicionado try/catch em GET / com `safeError(err)`; POST /generate e PATCH /:identifier/cancel substituíram `err.message` por `safeError(err)`.
+- **Reteste (2026-07-04):** `GET /identifiers` com JWT contendo `tenantId: "'; DROP TABLE users; --"` retorna `500 {"error":{"code":"INTERNAL_ERROR","message":"Formato de dados inválido."}}`. ✅ Sem leak de PostgreSQL, uuid, ou erro cru.
 
 ---
 
@@ -148,4 +149,4 @@ Uso: `bun run scripts/loadtest/<script>.ts` (executar de `apps/api/`).
 | B2 — Latência concorrência | ✅ Pass | 0 falhas em 520 reqs |
 | B3 — Advisory lock | ✅ Pass | 0 duplicatas |
 
-**Conclusão:** Isolamento entre tenants confirmado sob concorrência real, exaustão de pool, rollback de SET LOCAL, e bypass de tenantId malformado. 2 bugs corrigidos durante a sessão de testes: (1) regressão do FIX 1 em `tenants.module.ts` (`: any` + `db` do contexto) e (2) `hashtext(CONCAT(...))` sem `::text` cast em `identifier.service.ts` (pré-existente desde `5f214a8`). 1 bug remanescente (leve): A5 Caso 1 expõe detalhe interno da BD — `safeError()` em `lib/errors.ts` já existe e pode ser aplicado.
+**Conclusão:** Isolamento entre tenants confirmado sob concorrência real, exaustão de pool, rollback de SET LOCAL, e bypass de tenantId malformado. 3 bugs corrigidos durante a sessão de testes: (1) regressão do FIX 1 em `tenants.module.ts` (`: any` + `db` do contexto), (2) `hashtext(CONCAT(...))` sem `::text` cast em `identifier.service.ts` (pré-existente desde `5f214a8`), e (3) leak de informação no A5 Caso 1 sanitizado com `safeError()` em `identifiers.module.ts`. 0 bugs remanescentes.

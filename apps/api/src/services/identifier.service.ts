@@ -8,7 +8,7 @@ function buildIdentifier(orgPrefix: string, catPrefix: string, year: number, mon
   return `${orgPrefix}-${catPrefix}-${year}-${mmdd}-${String(seq).padStart(3, "0")}`;
 }
 
-async function getSharedDocIds(tx: DB, auth: AuthPayload): Promise<Set<string>> {
+export async function getSharedDocIds(tx: DB, auth: AuthPayload): Promise<Set<string>> {
   const condition = auth.sectorId
     ? or(
         eq(documentShares.sharedWithSectorId, auth.sectorId),
