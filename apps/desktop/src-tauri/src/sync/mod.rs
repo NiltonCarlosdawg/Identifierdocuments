@@ -419,12 +419,8 @@ fn safe_dest_path(uploads_dir: &PathBuf, filename: &str) -> Result<PathBuf, Stri
     if safe_name.is_empty() {
         return Err("Nome de ficheiro inválido.".to_string());
     }
-    let dest = uploads_dir.join(format!("{}_{}", Uuid::new_v4(), safe_name));
-    let canonical = dest.canonicalize().map_err(|_| "Erro ao resolver caminho.".to_string())?;
     let uploads_canonical = uploads_dir.canonicalize().map_err(|_| "Erro ao resolver diretório.".to_string())?;
-    if !canonical.starts_with(&uploads_canonical) {
-        return Err("Path traversal detectado.".to_string());
-    }
+    let dest = uploads_canonical.join(format!("{}_{}", Uuid::new_v4(), safe_name));
     Ok(dest)
 }
 
@@ -556,3 +552,5 @@ pub fn retry_queue_item(state: State<'_, SyncState>, id: String) -> Result<(), S
 pub async fn force_sync(app: AppHandle, state: State<'_, SyncState>) -> Result<usize, String> {
     run_sync_cycle(&app, &state).await
 }
+
+
