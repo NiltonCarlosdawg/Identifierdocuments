@@ -507,7 +507,16 @@ A API base já tem implementado:
 
 ---
 
-## 17. Princípio Guia
+## 17. Pendentes de Teste Manual (verificar na app real)
+
+<!-- Marcado durante FASE D — fluxo Tauri não testado em runtime -->
+- Fluxo Tauri: diálogo nativo → `extract_text_command` → `ClassifierSuggestion` → `attach_document_native`
+  - `attach_document_native` nunca correu de facto contra o backend
+  - Verificar se `tauri-plugin-dialog` `open()` devolve o path correcto (especialmente em flatpak/snap)
+  - Verificar se o `POST /classifier/suggest` retorna resposta dentro do timeout Tauri (10s)
+- Modo browser (`sync.isAvailable() = false`): confirmar que `<input type="file">` + FormData ainda funciona
+
+## 18. Princípio Guia
 
 > O maior problema de performance raramente está no código — está na arquitectura.
 > Antes de optimizar renderizações, perguntar: onde os dados estão a ser buscados?

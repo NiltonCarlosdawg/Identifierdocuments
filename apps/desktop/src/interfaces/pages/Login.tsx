@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuthStore } from "../stores/authStore";
 import { api, sync } from "../../infrastructure/di/container";
 import { Eye, EyeOff, FileText, Lock, LogIn, Mail } from "lucide-react";
@@ -12,6 +12,8 @@ export default function Login() {
   const [showPassword, setShowPassword] = useState(false);
   const login = useAuthStore(s => s.login);
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const created = searchParams.get("created");
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault(); setError(""); setLoading(true);
@@ -36,6 +38,7 @@ export default function Login() {
           <div><label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-docid-muted">E-mail Corporativo</label><div className="relative"><Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-docid-outline" /><input type="email" value={email} onChange={e => setEmail(e.target.value)} className="docid-input w-full pl-10" placeholder="nome@empresa.com" required /></div></div>
           <div><label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-docid-muted">Palavra-passe</label><div className="relative"><Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-docid-outline" /><input type={showPassword ? "text" : "password"} value={password} onChange={e => setPassword(e.target.value)} className="docid-input w-full pl-10 pr-10" placeholder="••••••••" required /><button type="button" onClick={() => setShowPassword(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-docid-outline transition hover:text-docid-text">{showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button></div></div>
           <div className="flex items-center justify-between text-sm"><label className="flex items-center gap-2 text-docid-muted"><input type="checkbox" className="rounded border-docid-border bg-docid-surface-low text-docid-primary focus:ring-docid-primary" /> Lembrar-me</label><button type="button" className="text-docid-primary-soft hover:underline">Esqueceu a senha?</button></div>
+          {created && <p className="rounded-lg border border-docid-secondary/30 bg-docid-secondary/10 p-3 text-sm text-docid-secondary">Organização criada com sucesso! Faça login para continuar.</p>}
           {error && <p className="rounded-lg border border-docid-error/30 bg-docid-error/10 p-3 text-sm text-docid-error">{error}</p>}
           <button type="submit" disabled={loading} className="docid-button-primary w-full py-3">{loading ? "A entrar..." : "Entrar"} <LogIn className="h-4 w-4" /></button>
         </form>
