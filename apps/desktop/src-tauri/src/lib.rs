@@ -2,7 +2,7 @@ mod commands;
 mod db;
 mod sync;
 
-use commands::{scanner, watcher};
+use commands::{scanner, text_extraction, watcher};
 use sync::{start_background_sync, SyncState};
 use tauri::Manager;
 use watcher::WatcherState;
@@ -13,6 +13,7 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_sql::Builder::new().build())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(WatcherState::new())
         .setup(|app| {
             let app_data = app.path().app_data_dir().expect("app data dir");
@@ -52,6 +53,8 @@ pub fn run() {
             sync::remove_queue_item,
             sync::retry_queue_item,
             sync::force_sync,
+            sync::attach_document_native,
+            text_extraction::extract_text_command,
             watcher::start_watcher,
             watcher::stop_watcher,
             watcher::add_watched_folder,

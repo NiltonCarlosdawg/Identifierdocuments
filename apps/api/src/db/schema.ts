@@ -166,6 +166,19 @@ export const auditLogs = pgTable("audit_logs", {
   index("audit_created_idx").on(t.createdAt),
 ]);
 
+export const classifierFeedback = pgTable("classifier_feedback", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  tenantId: uuid("tenant_id").notNull().references(() => organizations.id),
+  documentId: uuid("document_id").references(() => documents.id),
+  suggestedCategoryId: text("suggested_category_id").notNull(),
+  chosenCategoryId: text("chosen_category_id").notNull(),
+  accepted: boolean("accepted").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  index("classifier_feedback_tenant_idx").on(t.tenantId),
+  index("classifier_feedback_document_idx").on(t.documentId),
+]);
+
 export const notifications = pgTable("notifications", {
   id: uuid("id").primaryKey().defaultRandom(),
   tenantId: uuid("tenant_id").notNull().references(() => organizations.id),

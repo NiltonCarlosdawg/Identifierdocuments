@@ -5,6 +5,7 @@ const connectionString = process.env.DATABASE_URL!;
 const TABLES_WITH_TENANT = [
   "sectors", "users", "roles", "identifiers",
   "documents", "approvals", "audit_logs",
+  "classifier_feedback",
 ];
 
 export async function setupRLS() {
