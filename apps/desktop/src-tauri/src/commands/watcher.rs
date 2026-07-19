@@ -1,8 +1,21 @@
+use crate::commands::text_extraction::{extract_text_from_pdf, extract_text_from_txt};
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use regex::Regex;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::OnceLock;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::Mutex;
+
+static IDENTIFIER_RE: OnceLock<Regex> = OnceLock::new();
+
+fn identifier_re() -> &'static Regex {
+    IDENTIFIER_RE.get_or_init(|| Regex::new(r"[A-Z]{1,6}-[A-Z]{2,5}-\d{4}-\d{4}-\d{3}").unwrap())
+}
+
+pub fn find_identifier(text: &str) -> Option<String> {
+    identifier_re().find(text).map(|m| m.as_str().to_string())
+}
 
 pub struct WatcherState {
     pub running: AtomicBool,
@@ -68,11 +81,43 @@ pub async fn start_watcher(app: AppHandle, state: tauri::State<'_, WatcherState>
                                 .and_then(|e| e.to_str())
                                 .unwrap_or("")
                                 .to_lowercase();
-                            if matches!(ext.as_str(), "pdf" | "docx" | "xlsx" | "png" | "jpg" | "jpeg") {
-                                let _ = app_clone.emit("watcher:file_detected", serde_json::json!({
-                                    "path": path.to_string_lossy(),
-                                    "ext": ext,
-                                }));
+                            match ext.as_str() {
+                                "pdf" | "txt" | "md" | "csv" => {
+                                    let text_result = if ext == "pdf" {
+                                        extract_text_from_pdf(path)
+                                    } else {
+                                        extract_text_from_txt(path)
+                                    };
+                                    match text_result {
+                                        Ok(text) => {
+                                            if let Some(identifier) = find_identifier(&text) {
+                                                let _ = app_clone.emit("watcher:identifier_found", serde_json::json!({
+                                                    "path": path.to_string_lossy(),
+                                                    "identifier": identifier,
+                                                    "ext": ext,
+                                                }));
+                                            } else {
+                                                let _ = app_clone.emit("watcher:file_detected", serde_json::json!({
+                                                    "path": path.to_string_lossy(),
+                                                    "ext": ext,
+                                                }));
+                                            }
+                                        }
+                                        Err(_) => {
+                                            let _ = app_clone.emit("watcher:file_detected", serde_json::json!({
+                                                "path": path.to_string_lossy(),
+                                                "ext": ext,
+                                            }));
+                                        }
+                                    }
+                                }
+                                "docx" | "xlsx" | "png" | "jpg" | "jpeg" => {
+                                    let _ = app_clone.emit("watcher:file_detected", serde_json::json!({
+                                        "path": path.to_string_lossy(),
+                                        "ext": ext,
+                                    }));
+                                }
+                                _ => {}
                             }
                         }
                     }
@@ -119,4 +164,41 @@ pub async fn remove_watched_folder(path: String, state: tauri::State<'_, Watcher
 pub async fn get_watched_folders(state: tauri::State<'_, WatcherState>) -> Result<Vec<String>, String> {
     let folders = state.folders.lock().await;
     Ok(folders.iter().map(|f| f.to_string_lossy().to_string()).collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn find_1char_prefix() {
+        assert_eq!(find_identifier("A-PROP-2026-0725-001"), Some("A-PROP-2026-0725-001".into()));
+    }
+
+    #[test]
+    fn find_6char_prefix() {
+        assert_eq!(find_identifier("VERANO-PROP-2026-0725-001"), Some("VERANO-PROP-2026-0725-001".into()));
+    }
+
+    #[test]
+    fn find_no_identifier() {
+        assert_eq!(find_identifier("texto sem identificador nenhum aqui"), None);
+    }
+
+    #[test]
+    fn find_invalid_mmdd_still_matches() {
+        assert_eq!(find_identifier("VL-PROP-2026-9999-001"), Some("VL-PROP-2026-9999-001".into()));
+    }
+
+    #[test]
+    fn find_multiple_returns_first() {
+        let text = "primeiro VL-PROP-2026-0101-001 e depois VL-NDA-2026-0202-002";
+        assert_eq!(find_identifier(text), Some("VL-PROP-2026-0101-001".into()));
+    }
+
+    #[test]
+    fn find_identifier_embedded_in_text() {
+        let text = "Documento com o id VL-FAT-2026-1231-042 anexo.";
+        assert_eq!(find_identifier(text), Some("VL-FAT-2026-1231-042".into()));
+    }
 }

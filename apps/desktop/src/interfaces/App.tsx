@@ -16,6 +16,7 @@ import Sectors from "./pages/Sectors";
 import Users from "./pages/Users";
 import Settings from "./pages/Settings";
 import Audit from "./pages/Audit";
+import Scanner from "./pages/Scanner";
 import Profile from "./pages/Profile";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -82,6 +83,7 @@ export default function App() {
           <Route path="sectores" element={<Sectors />} />
           <Route path="utilizadores" element={<Users />} />
           <Route path="auditoria" element={<Audit />} />
+          <Route path="digitalizar" element={<Scanner />} />
           <Route path="configuracoes" element={<Settings />} />
           <Route path="perfil" element={<Profile />} />
         </Route>

@@ -1,7 +1,7 @@
 import { Outlet, NavLink, useNavigate } from "react-router-dom";
 import { useAuthStore } from "../stores/authStore";
 import { useAppConfigStore } from "../stores/configStore";
-import { LayoutDashboard, FileText, Fingerprint, CheckSquare, Users, UserPlus, Cog, History, CloudOff, Search, Menu } from "lucide-react";
+import { LayoutDashboard, FileText, Fingerprint, CheckSquare, Users, UserPlus, Cog, History, Scan, CloudOff, Search, Menu } from "lucide-react";
 import OfflineQueuePanel, { OfflineQueueBadge } from "./OfflineQueuePanel";
 import NotificationBell from "./NotificationBell";
 
@@ -13,6 +13,7 @@ const navItems = [
   { to: "/sectores", label: "Sectores", icon: Users, roles: ["ORG_ADMIN"] },
   { to: "/utilizadores", label: "Utilizadores", icon: UserPlus, roles: ["ORG_ADMIN"] },
   { to: "/auditoria", label: "Auditoria", icon: History, roles: ["ORG_ADMIN"] },
+  { to: "/digitalizar", label: "Digitalizar", icon: Scan },
   { to: "/configuracoes", label: "Configurações", icon: Cog, roles: ["ORG_ADMIN"] },
 ];
 
