@@ -1,20 +1,30 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAppConfigStore } from "../stores/configStore";
+import { useWatcherStore } from "../stores/watcherStore";
 import { PageHeader } from "../components/docid-ui";
-import { Server, Sun, Moon, Save, RotateCcw } from "lucide-react";
+import { Server, Sun, Moon, Save, RotateCcw, FolderPlus, Trash2, Play, Square, Eye, RefreshCw } from "lucide-react";
 
 export default function Settings() {
-  const [tab, setTab] = useState<"server" | "appearance">("server");
+  const [tab, setTab] = useState<"server" | "appearance" | "watcher">("server");
 
   return (
     <div>
       <PageHeader title="Configurações" description="Gerir definições do servidor e preferências da aplicação" />
-      <div className="mb-4 flex gap-2">
-        <button onClick={() => setTab("server")} className={`rounded-lg px-4 py-2 text-sm font-medium transition ${tab === "server" ? "bg-docid-primary text-white" : "border border-docid-border text-docid-muted hover:bg-docid-surface-high"}`}>Servidor</button>
-        <button onClick={() => setTab("appearance")} className={`rounded-lg px-4 py-2 text-sm font-medium transition ${tab === "appearance" ? "bg-docid-primary text-white" : "border border-docid-border text-docid-muted hover:bg-docid-surface-high"}`}>Aparência</button>
+      <div className="mb-4 flex gap-2 flex-wrap">
+        <TabBtn active={tab === "server"} onClick={() => setTab("server")}>Servidor</TabBtn>
+        <TabBtn active={tab === "appearance"} onClick={() => setTab("appearance")}>Aparência</TabBtn>
+        <TabBtn active={tab === "watcher"} onClick={() => setTab("watcher")}>Pastas Vigiladas</TabBtn>
       </div>
-      {tab === "server" ? <ServerTab /> : <AppearanceTab />}
+      {tab === "server" ? <ServerTab /> : tab === "appearance" ? <AppearanceTab /> : <WatcherTab />}
     </div>
+  );
+}
+
+function TabBtn({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button onClick={onClick} className={`rounded-lg px-4 py-2 text-sm font-medium transition ${active ? "bg-docid-primary text-white" : "border border-docid-border text-docid-muted hover:bg-docid-surface-high"}`}>
+      {children}
+    </button>
   );
 }
 
@@ -91,6 +101,72 @@ function AppearanceTab() {
           <p className={`mt-1 text-xs ${isDark ? "text-[#c3c6d7]" : "text-[#6c757d]"}`}>Este é um preview do tema {isDark ? "escuro" : "claro"}.</p>
         </div>
       </div>
+    </div>
+  );
+}
+
+function WatcherTab() {
+  const { folders, running, loading, error, detectedCount, loadFolders, addFolder, removeFolder, start, stop, bumpDetected, clearDetected } = useWatcherStore();
+
+  useEffect(() => { loadFolders(); }, [loadFolders]);
+
+  useEffect(() => {
+    let unlisteners: (() => void)[] = [];
+    (async () => {
+      const { listen } = await import("@tauri-apps/api/event");
+      const f1 = await listen("watcher:file_detected", () => bumpDetected());
+      const f2 = await listen("watcher:identifier_found", () => bumpDetected());
+      unlisteners = [f1, f2];
+    })();
+    return () => unlisteners.forEach(f => f());
+  }, [bumpDetected]);
+
+  const handleAddFolder = async () => {
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const selected = await open({ directory: true, multiple: false, title: "Seleccionar pasta para vigiar" });
+      if (selected) await addFolder(selected);
+    } catch {}
+  };
+
+  return (
+    <div className="space-y-6 max-w-xl">
+      {error && <div className="rounded-lg border border-docid-error/30 bg-docid-error/10 p-3 text-sm text-docid-error">{error}</div>}
+      <div className="flex items-center gap-3">
+        {running ? (
+          <button onClick={stop} className="docid-button-secondary"><Square className="h-4 w-4" /> Parar</button>
+        ) : (
+          <button onClick={start} disabled={folders.length === 0} className="docid-button-primary"><Play className="h-4 w-4" /> Iniciar</button>
+        )}
+        <button onClick={handleAddFolder} className="docid-button-secondary"><FolderPlus className="h-4 w-4" /> Adicionar pasta</button>
+        <button onClick={loadFolders} className="docid-button-secondary"><RefreshCw className="h-4 w-4" /></button>
+        {detectedCount > 0 && (
+          <span className="flex items-center gap-1 rounded-full bg-docid-primary/15 px-3 py-1 text-xs font-medium text-docid-primary-soft">
+            <Eye className="h-3 w-3" /> {detectedCount} detectado(s)
+          </span>
+        )}
+      </div>
+      <div className="docid-panel overflow-hidden">
+        {loading ? (
+          <div className="flex items-center justify-center py-12 text-sm text-docid-muted">A carregar...</div>
+        ) : folders.length === 0 ? (
+          <div className="flex flex-col items-center gap-3 py-12 text-center">
+            <FolderPlus className="h-8 w-8 text-docid-outline" />
+            <p className="text-sm text-docid-muted">Nenhuma pasta a ser vigiada.</p>
+            <button onClick={handleAddFolder} className="docid-button-secondary text-xs"><FolderPlus className="h-3 w-3" /> Adicionar pasta</button>
+          </div>
+        ) : (
+          <ul className="divide-y divide-docid-border">
+            {folders.map(f => (
+              <li key={f} className="flex items-center justify-between px-4 py-3">
+                <span className="truncate text-sm font-mono text-docid-text" title={f}>{f}</span>
+                <button onClick={() => removeFolder(f)} className="shrink-0 rounded p-1.5 text-docid-muted hover:bg-docid-surface-high hover:text-docid-error"><Trash2 className="h-4 w-4" /></button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+      <p className="text-xs text-docid-muted">Os ficheiros detectados podem ser anexados a identificadores na página Documentos.</p>
     </div>
   );
 }
