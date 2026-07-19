@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, integer, boolean, timestamp, uniqueIndex, index, primaryKey } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, integer, boolean, timestamp, jsonb, uniqueIndex, index, primaryKey } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 
 export const organizations = pgTable("organizations", {
@@ -31,6 +31,7 @@ export const users = pgTable("users", {
   passwordHash: text("password_hash").notNull(),
   fullName: text("full_name").notNull(),
   isActive: boolean("is_active").notNull().default(true),
+  notificationPreferences: jsonb("notification_preferences").notNull().default("{}"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [
   uniqueIndex("users_tenant_email_idx").on(t.tenantId, t.email),

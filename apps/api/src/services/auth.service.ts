@@ -81,6 +81,7 @@ export async function getMe(auth: AuthPayload) {
     sectorName: user.sector?.name ?? null,
     organizationName: user.organization?.name ?? null,
     organizationSlug: user.organization?.slug ?? null,
+    notificationPreferences: user.notificationPreferences,
     roles: auth.roles,
     createdAt: user.createdAt,
   };
