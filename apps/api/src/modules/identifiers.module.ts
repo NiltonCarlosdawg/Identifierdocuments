@@ -1,7 +1,7 @@
 import { Elysia, t } from "elysia";
 import { generateIdentifier, listIdentifiers, getIdentifier, cancelIdentifier } from "../services/identifier.service";
 import { leaseIdentifiers, releaseLease, forceReleaseLease, registerOfflineIdentifiers } from "../services/lease.service";
-import { requireAuth } from "../middleware/auth";
+import { requireAuth, getFreshRoles } from "../middleware/auth";
 import { checkRateLimit } from "../middleware/rateLimit";
 import { withTenant } from "../db/withTenant";
 import { safeError } from "../lib/errors";
@@ -60,7 +60,8 @@ export const identifiersModule = new Elysia({ prefix: "/identifiers" })
   })
 
   .post("/force-release", async ({ auth, body, set, request, tenantId }) => {
-    if (!auth!.roles.includes("ORG_ADMIN")) {
+    const freshRoles = await getFreshRoles(auth!.userId, auth!.tenantId);
+    if (!freshRoles.includes("ORG_ADMIN")) {
       set.status = 403;
       return { error: { code: "FORBIDDEN", message: "Apenas administradores podem forçar libertação." } };
     }
@@ -110,7 +111,6 @@ export const identifiersModule = new Elysia({ prefix: "/identifiers" })
       leaseId: t.String(),
       identifiers: t.Array(t.Object({
         sequence: t.Integer(),
-        categoryId: t.String(),
         issuedTo: t.Optional(t.String()),
         description: t.Optional(t.String()),
         visibility: t.Optional(t.Union([t.Literal("public"), t.Literal("sector_only")])),

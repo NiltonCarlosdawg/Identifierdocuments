@@ -176,7 +176,6 @@ export async function registerOfflineIdentifiers(
     leaseId: string;
     identifiers: Array<{
       sequence: number;
-      categoryId: string;
       issuedTo?: string;
       description?: string;
       visibility?: "public" | "sector_only";
@@ -196,11 +195,12 @@ export async function registerOfflineIdentifiers(
     where: and(eq(devices.id, opts.deviceId), eq(devices.tenantId, auth.tenantId)),
   });
   if (!device) throw new Error("Dispositivo não encontrado.");
+  if (device.status !== "active") throw new Error("Dispositivo não está activo.");
 
   const org = await tx.query.organizations.findFirst({ where: eq(organizations.id, auth.tenantId) });
   const orgPrefix = org?.identifierPrefix ?? "VL";
 
-  const cat = await tx.query.categories.findFirst({ where: eq(categories.id, opts.identifiers[0]?.categoryId ?? lease.categoryId) });
+  const cat = await tx.query.categories.findFirst({ where: eq(categories.id, lease.categoryId) });
   if (!cat) throw new Error("Categoria não encontrada.");
 
   const now = new Date();
@@ -238,7 +238,7 @@ export async function registerOfflineIdentifiers(
         return {
           tenantId: auth.tenantId,
           sectorId: lease.sectorId,
-          categoryId: ident.categoryId ?? lease.categoryId,
+          categoryId: lease.categoryId,
           identifier: identifierStr,
           sequence: ident.sequence,
           issuedTo: ident.issuedTo ?? null,
