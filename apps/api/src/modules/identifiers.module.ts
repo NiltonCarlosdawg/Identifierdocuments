@@ -1,12 +1,174 @@
 import { Elysia, t } from "elysia";
 import { generateIdentifier, listIdentifiers, getIdentifier, cancelIdentifier } from "../services/identifier.service";
-import { requireAuth } from "../middleware/auth";
+import { leaseIdentifiers, releaseLease, forceReleaseLease, registerOfflineIdentifiers } from "../services/lease.service";
+import { requireAuth, getFreshRoles } from "../middleware/auth";
 import { checkRateLimit } from "../middleware/rateLimit";
 import { withTenant } from "../db/withTenant";
+import { eq, and } from "drizzle-orm";
+import { categories, devices } from "../db/schema";
 import { safeError } from "../lib/errors";
 
 export const identifiersModule = new Elysia({ prefix: "/identifiers" })
   .use(requireAuth())
+
+  .post("/lease", async ({ auth, body, set, request, tenantId }) => {
+    try {
+      return await withTenant(tenantId, async (tx) => {
+        try {
+          const ip = request.headers.get("x-forwarded-for") || "unknown";
+          const targetSectorId = body.sectorId ?? auth!.sectorId;
+          const result = await leaseIdentifiers(tx, auth!, {
+            deviceId: body.deviceId, categoryId: body.categoryId,
+            sectorId: targetSectorId ?? undefined,
+          }, ip);
+          return { data: result };
+        } catch (err: any) {
+          console.error("[LEASE_ERROR]", err);
+          throw err;
+        }
+      });
+    } catch (err: any) {
+      set.status = 400;
+      return { error: { code: "LEASE_ERROR", message: safeError(err) } };
+    }
+  }, {
+    body: t.Object({
+      deviceId: t.String(),
+      categoryId: t.String(),
+      sectorId: t.Optional(t.String()),
+    }),
+    detail: { summary: "Reservar lote de sequências (lease)", tags: ["Identificadores"] },
+  })
+
+  .post("/release", async ({ auth, body, set, request, tenantId }) => {
+    try {
+      return await withTenant(tenantId, async (tx) => {
+        try {
+          const ip = request.headers.get("x-forwarded-for") || "unknown";
+          const result = await releaseLease(tx, auth!, { leaseId: body.leaseId }, ip);
+          return { data: result };
+        } catch (err: any) {
+          console.error("[RELEASE_ERROR]", err);
+          throw err;
+        }
+      });
+    } catch (err: any) {
+      set.status = 400;
+      return { error: { code: "RELEASE_ERROR", message: safeError(err) } };
+    }
+  }, {
+    body: t.Object({ leaseId: t.String() }),
+    detail: { summary: "Libertar lease (devolver não-usados ao pool)", tags: ["Identificadores"] },
+  })
+
+  .post("/force-release", async ({ auth, body, set, request, tenantId }) => {
+    const freshRoles = await getFreshRoles(auth!.userId, auth!.tenantId);
+    if (!freshRoles.includes("ORG_ADMIN")) {
+      set.status = 403;
+      return { error: { code: "FORBIDDEN", message: "Apenas administradores podem forçar libertação." } };
+    }
+    try {
+      return await withTenant(tenantId, async (tx) => {
+        try {
+          const ip = request.headers.get("x-forwarded-for") || "unknown";
+          const result = await forceReleaseLease(tx, auth!, { leaseId: body.leaseId }, ip);
+          return { data: result };
+        } catch (err: any) {
+          console.error("[FORCE_RELEASE_ERROR]", err);
+          throw err;
+        }
+      });
+    } catch (err: any) {
+      set.status = 400;
+      return { error: { code: "FORCE_RELEASE_ERROR", message: safeError(err) } };
+    }
+  }, {
+    body: t.Object({ leaseId: t.String() }),
+    detail: { summary: "Forçar libertação de lease (admin)", tags: ["Identificadores"] },
+  })
+
+  .post("/register-offline", async ({ auth, body, set, request, tenantId }) => {
+    try {
+      return await withTenant(tenantId, async (tx) => {
+        try {
+          const ip = request.headers.get("x-forwarded-for") || "unknown";
+          const result = await registerOfflineIdentifiers(tx, auth!, {
+            deviceId: body.deviceId,
+            leaseId: body.leaseId,
+            identifiers: body.identifiers,
+          }, ip);
+          return { data: result };
+        } catch (err: any) {
+          console.error("[REGISTER_OFFLINE_ERROR]", err);
+          throw err;
+        }
+      });
+    } catch (err: any) {
+      set.status = 400;
+      return { error: { code: "REGISTER_OFFLINE_ERROR", message: safeError(err) } };
+    }
+  }, {
+    body: t.Object({
+      deviceId: t.String(),
+      leaseId: t.String(),
+      identifiers: t.Array(t.Object({
+        sequence: t.Integer(),
+        issuedTo: t.Optional(t.String()),
+        description: t.Optional(t.String()),
+        visibility: t.Optional(t.Union([t.Literal("public"), t.Literal("sector_only")])),
+        origin: t.Optional(t.Union([t.Literal("digital"), t.Literal("physical")])),
+      })),
+    }),
+    detail: { summary: "Registar identificadores gerados offline", tags: ["Identificadores"] },
+  })
+
+  .post("/register-offline-loose", async ({ auth, body, set, request, tenantId }) => {
+    try {
+      return await withTenant(tenantId, async (tx) => {
+        try {
+          const ip = request.headers.get("x-forwarded-for") || "unknown";
+
+          const device = await tx.query.devices.findFirst({
+            where: and(eq(devices.id, body.deviceId), eq(devices.tenantId, tenantId)),
+          });
+          if (!device) { set.status = 404; return { error: { code: "NOT_FOUND", message: "Dispositivo não encontrado." } }; }
+          if (device.status !== "active") { set.status = 400; return { error: { code: "DEVICE_INACTIVE", message: "Dispositivo não está activo." } }; }
+
+          const cat = await tx.query.categories.findFirst({ where: eq(categories.id, body.categoryId) });
+          if (!cat) { set.status = 404; return { error: { code: "NOT_FOUND", message: "Categoria não encontrada." } }; }
+          if (cat.requiresSequential) { set.status = 400; return { error: { code: "CATEGORY_SEQUENTIAL", message: "Categoria requer sequenciação. Use /identifiers/register-offline em vez de -loose." } }; }
+
+          const result = await generateIdentifier(tx, auth!, {
+            categoryId: body.categoryId,
+            issuedTo: body.issuedTo,
+            description: body.description,
+            origin: body.origin ?? "physical",
+            visibility: body.visibility,
+            sectorId: body.sectorId ?? auth!.sectorId ?? undefined,
+          }, ip);
+
+          return { data: result };
+        } catch (err: any) {
+          console.error("[REGISTER_OFFLINE_LOOSE_ERROR]", err);
+          throw err;
+        }
+      });
+    } catch (err: any) {
+      set.status = 400;
+      return { error: { code: "REGISTER_OFFLINE_LOOSE_ERROR", message: safeError(err) } };
+    }
+  }, {
+    body: t.Object({
+      deviceId: t.String(),
+      categoryId: t.String(),
+      issuedTo: t.Optional(t.String()),
+      description: t.Optional(t.String()),
+      visibility: t.Optional(t.Union([t.Literal("public"), t.Literal("sector_only")])),
+      origin: t.Optional(t.Union([t.Literal("digital"), t.Literal("physical")])),
+      sectorId: t.Optional(t.String()),
+    }),
+    detail: { summary: "Registar identificador offline (categoria não-sequencial)", tags: ["Identificadores"] },
+  })
 
   .post("/generate", async ({ auth, body, set, request, tenantId }) => {
     try {

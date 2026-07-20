@@ -3,8 +3,9 @@ import { login, getMe, changePassword, refreshToken } from "../services/auth.ser
 import { requireAuth } from "../middleware/auth";
 import { checkRateLimit } from "../middleware/rateLimit";
 import { users } from "../db/schema";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { withTenant } from "../db/withTenant";
+import { safeError } from "../lib/errors";
 
 export const authModule = new Elysia({ prefix: "/auth" })
 
@@ -85,4 +86,30 @@ export const authModule = new Elysia({ prefix: "/auth" })
   }, {
     body: t.Object({ currentPassword: t.String(), newPassword: t.String({ minLength: 6 }) }),
     detail: { summary: "Alterar password", tags: ["Autenticação"] },
+  })
+
+  .use(requireAuth())
+  .patch("/me/notifications-preferences", async ({ auth, body, tenantId, set }) => {
+    return withTenant(tenantId, async (tx) => {
+      try {
+        const [updated] = await tx.execute(sql`
+          UPDATE ${users} SET notification_preferences = COALESCE(notification_preferences, '{}'::jsonb) || ${JSON.stringify(body)}::jsonb
+          WHERE id = ${auth!.userId}
+          RETURNING id, notification_preferences
+        `);
+        return { data: updated };
+      } catch (err: any) {
+        set.status = 400;
+        return { error: { code: "UPDATE_ERROR", message: safeError(err) } };
+      }
+    });
+  }, {
+    body: t.Object({
+      approval_pending: t.Optional(t.Boolean()),
+      approval_resolved: t.Optional(t.Boolean()),
+      document_shared: t.Optional(t.Boolean()),
+      sync_complete: t.Optional(t.Boolean()),
+      watcher_detected: t.Optional(t.Boolean()),
+    }),
+    detail: { summary: "Actualizar preferências de notificação", tags: ["Autenticação"] },
   });

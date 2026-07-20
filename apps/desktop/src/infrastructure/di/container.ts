@@ -1,5 +1,7 @@
 import { HttpApiClient } from "../api/HttpApiClient";
 import { TauriSyncAdapter } from "../sync/TauriSyncAdapter";
+import { TauriScannerAdapter } from "../scanner/TauriScannerAdapter";
+import { TauriWatcherAdapter } from "../watcher/TauriWatcherAdapter";
 import type { IAuthRepository } from "../../domain/repositories/IAuthRepository";
 import type { StoredUser } from "../../domain/entities/User";
 import { useAuthStore } from "../../interfaces/stores/authStore";
@@ -17,3 +19,5 @@ const getBaseUrl = () => useAppConfigStore.getState().apiBaseUrl;
 
 export const api = new HttpApiClient(authRepo, getBaseUrl);
 export const sync = new TauriSyncAdapter();
+export const scanner = new TauriScannerAdapter();
+export const watcher = new TauriWatcherAdapter();

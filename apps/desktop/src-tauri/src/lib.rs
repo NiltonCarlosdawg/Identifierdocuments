@@ -57,6 +57,7 @@ pub fn run() {
             text_extraction::extract_text_command,
             watcher::start_watcher,
             watcher::stop_watcher,
+            watcher::is_watcher_running,
             watcher::add_watched_folder,
             watcher::remove_watched_folder,
             watcher::get_watched_folders,

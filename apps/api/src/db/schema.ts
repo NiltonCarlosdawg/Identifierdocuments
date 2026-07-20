@@ -1,11 +1,12 @@
-import { pgTable, uuid, text, integer, boolean, timestamp, uniqueIndex, index, primaryKey } from "drizzle-orm/pg-core";
-import { relations } from "drizzle-orm";
+import { pgTable, uuid, text, integer, boolean, timestamp, jsonb, uniqueIndex, index, primaryKey } from "drizzle-orm/pg-core";
+import { relations, sql } from "drizzle-orm";
 
 export const organizations = pgTable("organizations", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
   slug: text("slug").notNull().unique(),
   identifierPrefix: text("identifier_prefix").notNull().default("VL"),
+  identifierLeaseBatchSize: integer("identifier_lease_batch_size").notNull().default(50),
   plan: text("plan").notNull().default("starter"),
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -31,6 +32,7 @@ export const users = pgTable("users", {
   passwordHash: text("password_hash").notNull(),
   fullName: text("full_name").notNull(),
   isActive: boolean("is_active").notNull().default(true),
+  notificationPreferences: jsonb("notification_preferences").notNull().default("{}"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [
   uniqueIndex("users_tenant_email_idx").on(t.tenantId, t.email),
@@ -72,6 +74,7 @@ export const categories = pgTable("categories", {
   group: text("group").notNull(),
   prefix: text("prefix").notNull().unique(),
   defaultVisibility: text("default_visibility", { enum: ["public", "sector_only"] }).notNull().default("public"),
+  requiresSequential: boolean("requires_sequential").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -179,6 +182,52 @@ export const classifierFeedback = pgTable("classifier_feedback", {
   index("classifier_feedback_document_idx").on(t.documentId),
 ]);
 
+export const devices = pgTable("devices", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  tenantId: uuid("tenant_id").notNull().references(() => organizations.id),
+  userId: uuid("user_id").references(() => users.id),
+  name: text("name").notNull(),
+  status: text("status", { enum: ["active", "force_released"] }).notNull().default("active"),
+  lastSeenAt: timestamp("last_seen_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  index("devices_tenant_idx").on(t.tenantId),
+  index("devices_user_idx").on(t.userId),
+]);
+
+export const identifierLeases = pgTable("identifier_leases", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  tenantId: uuid("tenant_id").notNull().references(() => organizations.id),
+  categoryId: text("category_id").notNull().references(() => categories.id),
+  sectorId: uuid("sector_id").notNull().references(() => sectors.id),
+  deviceId: uuid("device_id").notNull().references(() => devices.id),
+  startSeq: integer("start_seq").notNull(),
+  endSeq: integer("end_seq").notNull(),
+  usedUpTo: integer("used_up_to"),
+  status: text("status", { enum: ["active", "released", "force_released"] }).notNull().default("active"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  releasedAt: timestamp("released_at"),
+}, (t) => [
+  index("leases_tenant_idx").on(t.tenantId),
+  index("leases_tenant_category_idx").on(t.tenantId, t.categoryId),
+  index("leases_device_idx").on(t.deviceId),
+  index("leases_status_idx").on(t.status),
+  uniqueIndex("leases_device_cat_active_idx").on(t.tenantId, t.categoryId, t.deviceId).where(sql`status = 'active'`),
+]);
+
+export const identifierReleasePool = pgTable("identifier_release_pool", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  tenantId: uuid("tenant_id").notNull().references(() => organizations.id),
+  categoryId: text("category_id").notNull().references(() => categories.id),
+  sectorId: uuid("sector_id").notNull().references(() => sectors.id),
+  rangeStart: integer("range_start").notNull(),
+  rangeEnd: integer("range_end").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  index("pool_tenant_idx").on(t.tenantId),
+  index("pool_tenant_category_idx").on(t.tenantId, t.categoryId),
+]);
+
 export const notifications = pgTable("notifications", {
   id: uuid("id").primaryKey().defaultRandom(),
   tenantId: uuid("tenant_id").notNull().references(() => organizations.id),
@@ -199,6 +248,9 @@ export const organizationRelations = relations(organizations, ({ many }) => ({
   documents: many(documents),
   approvals: many(approvals),
   auditLogs: many(auditLogs),
+  devices: many(devices),
+  identifierLeases: many(identifierLeases),
+  identifierReleasePool: many(identifierReleasePool),
 }));
 
 export const sectorRelations = relations(sectors, ({ one, many }) => ({
@@ -263,4 +315,22 @@ export const approvalRelations = relations(approvals, ({ one }) => ({
   share: one(documentShares, { fields: [approvals.shareId], references: [documentShares.id] }),
   sector: one(sectors, { fields: [approvals.sectorId], references: [sectors.id] }),
   supervisor: one(users, { fields: [approvals.supervisorId], references: [users.id] }),
+}));
+
+export const deviceRelations = relations(devices, ({ one }) => ({
+  organization: one(organizations, { fields: [devices.tenantId], references: [organizations.id] }),
+  registeredBy: one(users, { fields: [devices.userId], references: [users.id] }),
+}));
+
+export const identifierLeaseRelations = relations(identifierLeases, ({ one }) => ({
+  organization: one(organizations, { fields: [identifierLeases.tenantId], references: [organizations.id] }),
+  category: one(categories, { fields: [identifierLeases.categoryId], references: [categories.id] }),
+  sector: one(sectors, { fields: [identifierLeases.sectorId], references: [sectors.id] }),
+  device: one(devices, { fields: [identifierLeases.deviceId], references: [devices.id] }),
+}));
+
+export const identifierReleasePoolRelations = relations(identifierReleasePool, ({ one }) => ({
+  organization: one(organizations, { fields: [identifierReleasePool.tenantId], references: [organizations.id] }),
+  category: one(categories, { fields: [identifierReleasePool.categoryId], references: [categories.id] }),
+  sector: one(sectors, { fields: [identifierReleasePool.sectorId], references: [sectors.id] }),
 }));
