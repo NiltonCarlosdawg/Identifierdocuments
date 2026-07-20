@@ -4,6 +4,8 @@ import { leaseIdentifiers, releaseLease, forceReleaseLease, registerOfflineIdent
 import { requireAuth, getFreshRoles } from "../middleware/auth";
 import { checkRateLimit } from "../middleware/rateLimit";
 import { withTenant } from "../db/withTenant";
+import { eq, and } from "drizzle-orm";
+import { categories, devices } from "../db/schema";
 import { safeError } from "../lib/errors";
 
 export const identifiersModule = new Elysia({ prefix: "/identifiers" })
@@ -118,6 +120,54 @@ export const identifiersModule = new Elysia({ prefix: "/identifiers" })
       })),
     }),
     detail: { summary: "Registar identificadores gerados offline", tags: ["Identificadores"] },
+  })
+
+  .post("/register-offline-loose", async ({ auth, body, set, request, tenantId }) => {
+    try {
+      return await withTenant(tenantId, async (tx) => {
+        try {
+          const ip = request.headers.get("x-forwarded-for") || "unknown";
+
+          const device = await tx.query.devices.findFirst({
+            where: and(eq(devices.id, body.deviceId), eq(devices.tenantId, tenantId)),
+          });
+          if (!device) { set.status = 404; return { error: { code: "NOT_FOUND", message: "Dispositivo não encontrado." } }; }
+          if (device.status !== "active") { set.status = 400; return { error: { code: "DEVICE_INACTIVE", message: "Dispositivo não está activo." } }; }
+
+          const cat = await tx.query.categories.findFirst({ where: eq(categories.id, body.categoryId) });
+          if (!cat) { set.status = 404; return { error: { code: "NOT_FOUND", message: "Categoria não encontrada." } }; }
+          if (cat.requiresSequential) { set.status = 400; return { error: { code: "CATEGORY_SEQUENTIAL", message: "Categoria requer sequenciação. Use /identifiers/register-offline em vez de -loose." } }; }
+
+          const result = await generateIdentifier(tx, auth!, {
+            categoryId: body.categoryId,
+            issuedTo: body.issuedTo,
+            description: body.description,
+            origin: body.origin ?? "physical",
+            visibility: body.visibility,
+            sectorId: body.sectorId ?? auth!.sectorId ?? undefined,
+          }, ip);
+
+          return { data: result };
+        } catch (err: any) {
+          console.error("[REGISTER_OFFLINE_LOOSE_ERROR]", err);
+          throw err;
+        }
+      });
+    } catch (err: any) {
+      set.status = 400;
+      return { error: { code: "REGISTER_OFFLINE_LOOSE_ERROR", message: safeError(err) } };
+    }
+  }, {
+    body: t.Object({
+      deviceId: t.String(),
+      categoryId: t.String(),
+      issuedTo: t.Optional(t.String()),
+      description: t.Optional(t.String()),
+      visibility: t.Optional(t.Union([t.Literal("public"), t.Literal("sector_only")])),
+      origin: t.Optional(t.Union([t.Literal("digital"), t.Literal("physical")])),
+      sectorId: t.Optional(t.String()),
+    }),
+    detail: { summary: "Registar identificador offline (categoria não-sequencial)", tags: ["Identificadores"] },
   })
 
   .post("/generate", async ({ auth, body, set, request, tenantId }) => {
