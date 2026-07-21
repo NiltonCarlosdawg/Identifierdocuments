@@ -72,7 +72,7 @@ pub struct SyncState {
 }
 
 impl SyncState {
-    pub fn conn(&self) -> Result<Connection, String> {
+    pub(crate) fn conn(&self) -> Result<Connection, String> {
         db::open(&self.db_path).map_err(|e| e.to_string())
     }
 }
@@ -1014,5 +1014,4 @@ mod tests {
         fs::remove_dir_all(dir).ok();
     }
 }
-
 

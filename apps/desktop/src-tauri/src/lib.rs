@@ -2,7 +2,7 @@ mod commands;
 mod db;
 mod sync;
 
-use commands::{scanner, text_extraction, watcher};
+use commands::{identifiers, scanner, text_extraction, watcher};
 use sync::{start_background_sync, SyncState};
 use tauri::Manager;
 use watcher::WatcherState;
@@ -41,6 +41,14 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            identifiers::cache_categories,
+            identifiers::cache_tenant_state,
+            identifiers::get_pending_identifiers,
+            identifiers::clear_synced_identifier,
+            identifiers::mark_lease_remote_released,
+            identifiers::get_leases,
+            identifiers::generate_offline_identifier,
+            identifiers::request_lease,
             sync::set_sync_credentials,
             sync::set_api_base_url,
             sync::get_api_base_url,
