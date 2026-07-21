@@ -179,7 +179,7 @@ fn init_schema(conn: &Connection) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_pending_lease
             ON local_pending_identifiers(lease_id);
 
-        CREATE INDEX IF NOT EXISTS idx_pending_idempotency
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_pending_idempotency
             ON local_pending_identifiers(idempotency_key);
 
         CREATE INDEX IF NOT EXISTS idx_pending_sync
@@ -262,6 +262,8 @@ mod tests {
             ("VL", "PROP", 2026, 12, 31, 999, "VL-PROP-2026-1231-999"),
             ("VERANO", "DOC", 2026, 7, 25, 1, "VERANO-DOC-2026-0725-001"),
             ("A", "B", 2026, 7, 5, 7, "A-B-2026-0705-007"),
+            ("VL", "PROP", 2026, 7, 25, 1000, "VL-PROP-2026-0725-1000"),
+            ("VL", "PROP", 2026, 7, 25, 12345, "VL-PROP-2026-0725-12345"),
         ];
 
         for (org, cat, y, m, d, seq, expected) in cases {
