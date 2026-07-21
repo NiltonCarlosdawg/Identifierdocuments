@@ -92,10 +92,11 @@ export const identifiersModule = new Elysia({ prefix: "/identifiers" })
       return await withTenant(tenantId, async (tx) => {
         try {
           const ip = request.headers.get("x-forwarded-for") || "unknown";
-          const result = await registerOfflineIdentifiers(tx, auth!, {
+            const result = await registerOfflineIdentifiers(tx, auth!, {
             deviceId: body.deviceId,
             leaseId: body.leaseId,
             identifiers: body.identifiers,
+            idempotencyKey: body.idempotencyKey,
           }, ip);
           return { data: result };
         } catch (err: any) {
@@ -118,6 +119,7 @@ export const identifiersModule = new Elysia({ prefix: "/identifiers" })
         visibility: t.Optional(t.Union([t.Literal("public"), t.Literal("sector_only")])),
         origin: t.Optional(t.Union([t.Literal("digital"), t.Literal("physical")])),
       })),
+      idempotencyKey: t.Optional(t.String()),
     }),
     detail: { summary: "Registar identificadores gerados offline", tags: ["Identificadores"] },
   })
@@ -138,13 +140,14 @@ export const identifiersModule = new Elysia({ prefix: "/identifiers" })
           if (!cat) { set.status = 404; return { error: { code: "NOT_FOUND", message: "Categoria não encontrada." } }; }
           if (cat.requiresSequential) { set.status = 400; return { error: { code: "CATEGORY_SEQUENTIAL", message: "Categoria requer sequenciação. Use /identifiers/register-offline em vez de -loose." } }; }
 
-          const result = await generateIdentifier(tx, auth!, {
+            const result = await generateIdentifier(tx, auth!, {
             categoryId: body.categoryId,
             issuedTo: body.issuedTo,
             description: body.description,
             origin: body.origin ?? "physical",
             visibility: body.visibility,
             sectorId: body.sectorId ?? auth!.sectorId ?? undefined,
+            idempotencyKey: body.idempotencyKey,
           }, ip);
 
           return { data: result };
@@ -166,6 +169,7 @@ export const identifiersModule = new Elysia({ prefix: "/identifiers" })
       visibility: t.Optional(t.Union([t.Literal("public"), t.Literal("sector_only")])),
       origin: t.Optional(t.Union([t.Literal("digital"), t.Literal("physical")])),
       sectorId: t.Optional(t.String()),
+      idempotencyKey: t.Optional(t.String()),
     }),
     detail: { summary: "Registar identificador offline (categoria não-sequencial)", tags: ["Identificadores"] },
   })

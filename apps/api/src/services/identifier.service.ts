@@ -1,5 +1,5 @@
 import type { DB } from "../db";
-import { identifiers, categories, documents, documentShares, auditLogs, organizations, sectors } from "../db/schema";
+import { identifiers, categories, documents, documentShares, auditLogs, organizations, sectors, idempotencyRecords } from "../db/schema";
 import { eq, and, or, desc, sql, isNull } from "drizzle-orm";
 import type { AuthPayload } from "../middleware/auth";
 
@@ -52,6 +52,7 @@ export async function generateIdentifier(tx: DB, auth: AuthPayload, opts: {
   categoryId: string; issuedTo?: string; description?: string;
   origin?: "digital" | "physical"; visibility?: "public" | "sector_only";
   sectorId?: string;
+  idempotencyKey?: string;
 }, ip: string = "unknown") {
   const cat = await tx.query.categories.findFirst({ where: eq(categories.id, opts.categoryId) });
   if (!cat) throw new Error(`Categoria '${opts.categoryId}' não encontrada.`);
@@ -69,9 +70,20 @@ export async function generateIdentifier(tx: DB, auth: AuthPayload, opts: {
     throw new Error("Sector não definido. Indique sectorId no body ou associe o utilizador a um sector.");
   }
 
-  const [id] = await tx.transaction(async (tx2) => {
+    const [id] = await tx.transaction(async (tx2) => {
     const lockKey = sql`hashtext(CONCAT(${auth.tenantId}::text, '-', ${opts.categoryId}::text))`;
     await tx2.execute(sql`SELECT pg_advisory_xact_lock(${lockKey})`);
+
+    if (opts.idempotencyKey) {
+      const record = await tx2.query.idempotencyRecords.findFirst({
+        where: and(
+          eq(idempotencyRecords.tenantId, auth.tenantId),
+          eq(idempotencyRecords.idempotencyKey, opts.idempotencyKey),
+        ),
+      });
+      if (record) return [record.result as typeof id];
+    }
+
     const [row] = await tx2
       .select({ next: sql<number>`COALESCE(MAX(sequence), 0) + 1` })
       .from(identifiers)
@@ -86,7 +98,7 @@ export async function generateIdentifier(tx: DB, auth: AuthPayload, opts: {
     const identifierStr = buildIdentifier(orgPrefix, cat.prefix, year, month, day, seqResult);
     const visibility = opts.visibility ?? cat.defaultVisibility ?? "public";
 
-    return tx2.insert(identifiers).values({
+    const inserted = await tx2.insert(identifiers).values({
       tenantId: auth.tenantId,
       sectorId: resolvedSectorId,
       categoryId: opts.categoryId,
@@ -99,6 +111,26 @@ export async function generateIdentifier(tx: DB, auth: AuthPayload, opts: {
       origin: opts.origin ?? "digital",
       createdBy: auth.userId,
     }).returning();
+
+    if (opts.idempotencyKey) {
+      const [rec] = await tx2.insert(idempotencyRecords).values({
+        tenantId: auth.tenantId,
+        idempotencyKey: opts.idempotencyKey,
+        result: inserted[0] as any,
+      }).onConflictDoNothing().returning();
+
+      if (!rec) {
+        const existing = await tx2.query.idempotencyRecords.findFirst({
+          where: and(
+            eq(idempotencyRecords.tenantId, auth.tenantId),
+            eq(idempotencyRecords.idempotencyKey, opts.idempotencyKey),
+          ),
+        });
+        return [existing!.result as typeof id];
+      }
+    }
+
+    return inserted;
   });
 
   await tx.insert(auditLogs).values({

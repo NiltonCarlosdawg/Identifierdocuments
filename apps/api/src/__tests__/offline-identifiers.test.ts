@@ -3,7 +3,7 @@ import { db } from "../db";
 import { withTenant } from "../db/withTenant";
 import { getFreshRoles } from "../middleware/auth";
 import { eq, and, sql } from "drizzle-orm";
-import { organizations, sectors, users, roles, userRoles, categories, devices, identifierLeases, identifierReleasePool, identifiers, auditLogs } from "../db/schema";
+import { organizations, sectors, users, roles, userRoles, categories, devices, identifierLeases, identifierReleasePool, identifiers, auditLogs, idempotencyRecords } from "../db/schema";
 import { generateIdentifier } from "../services/identifier.service";
 import { leaseIdentifiers, releaseLease, forceReleaseLease, registerOfflineIdentifiers } from "../services/lease.service";
 
@@ -86,6 +86,7 @@ describe("M2 — Offline Identifiers (lease/release/force-release/register-offli
           await tx.execute(sql`DELETE FROM identifier_release_pool WHERE tenant_id = ${tenant.id}`);
           await tx.execute(sql`DELETE FROM identifier_leases WHERE tenant_id = ${tenant.id}`);
           await tx.execute(sql`DELETE FROM identifiers WHERE tenant_id = ${tenant.id}`);
+          await tx.execute(sql`DELETE FROM idempotency_records WHERE tenant_id = ${tenant.id}`);
           await tx.execute(sql`DELETE FROM devices WHERE tenant_id = ${tenant.id}`);
           await tx.execute(sql`DELETE FROM user_roles WHERE user_id IN (SELECT id FROM users WHERE tenant_id = ${tenant.id})`);
           await tx.execute(sql`DELETE FROM users WHERE tenant_id = ${tenant.id}`);
@@ -616,6 +617,149 @@ describe("M2 — Offline Identifiers (lease/release/force-release/register-offli
         .where(and(eq(auditLogs.resourceId, genned.id), eq(auditLogs.action, "GENERATE")));
       expect(genLogs).toHaveLength(1);
       expect(genLogs[0].ip).toBe("10.0.0.6");
+    });
+  });
+
+  /* ================================================================
+   * 7. Idempotency (idempotencyKey)
+   * ================================================================ */
+  describe("7. Idempotency", () => {
+    test("(a) register-offline-loose: mesmo idempotencyKey devolve mesmo identificador", async () => {
+      const key = `loose-idem-${tag}-a`;
+      const [d] = await withTenant(orgId, (tx) =>
+        tx.insert(devices).values({ tenantId: orgId, userId, name: `IdemLooseA-${tag}`, status: "active" })
+          .returning({ id: devices.id }));
+
+      const first = await withTenant(orgId, (tx) =>
+        generateIdentifier(tx, authUser(), {
+          categoryId: catNoSeqId, sectorId, idempotencyKey: key,
+        }));
+
+      const second = await withTenant(orgId, (tx) =>
+        generateIdentifier(tx, authUser(), {
+          categoryId: catNoSeqId, sectorId, idempotencyKey: key,
+        }));
+
+      expect(second.id).toBe(first.id);
+      expect(second.identifier).toBe(first.identifier);
+      expect(second.sequence).toBe(first.sequence);
+    });
+
+    test("(b) register-offline: mesmo idempotencyKey devolve mesmos identificadores e não avança usedUpTo", async () => {
+      const key = `offline-idem-${tag}-b`;
+      const [d] = await withTenant(orgId, (tx) =>
+        tx.insert(devices).values({ tenantId: orgId, userId, name: `IdemOffB-${tag}`, status: "active" })
+          .returning({ id: devices.id }));
+
+      const [lease] = await db.insert(identifierLeases).values({
+        tenantId: orgId, categoryId: catSeqId, sectorId,
+        deviceId: d.id, startSeq: 9100, endSeq: 9200, status: "active",
+      }).returning();
+
+      const first = await withTenant(orgId, (tx) =>
+        registerOfflineIdentifiers(tx, authUser(), {
+          deviceId: d.id, leaseId: lease.id,
+          identifiers: [{ sequence: 9100 }, { sequence: 9101 }],
+          idempotencyKey: key,
+        }));
+
+      const second = await withTenant(orgId, (tx) =>
+        registerOfflineIdentifiers(tx, authUser(), {
+          deviceId: d.id, leaseId: lease.id,
+          identifiers: [{ sequence: 9100 }, { sequence: 9101 }],
+          idempotencyKey: key,
+        }));
+
+      expect(second).toHaveLength(first.length);
+      expect(second[0].id).toBe(first[0].id);
+      expect(second[1].id).toBe(first[1].id);
+
+      const freshLease = await db.query.identifierLeases.findFirst({ where: eq(identifierLeases.id, lease.id) });
+      expect(freshLease!.usedUpTo).toBe(9101);
+    });
+
+    test("(c) concorrência com mesmo idempotencyKey: só uma linha criada", async () => {
+      const key = `concurrent-idem-${tag}-c`;
+      const [d] = await withTenant(orgId, (tx) =>
+        tx.insert(devices).values({ tenantId: orgId, userId, name: `IdemConcC-${tag}`, status: "active" })
+          .returning({ id: devices.id }));
+
+      const results = await Promise.all([
+        withTenant(orgId, (tx) =>
+          generateIdentifier(tx, authUser(), {
+            categoryId: catNoSeqId, sectorId, idempotencyKey: key,
+          })),
+        withTenant(orgId, (tx) =>
+          generateIdentifier(tx, authUser(), {
+            categoryId: catNoSeqId, sectorId, idempotencyKey: key,
+          })),
+      ]);
+
+      expect(results[0].id).toBe(results[1].id);
+
+      const rows = await db.select().from(idempotencyRecords)
+        .where(and(eq(idempotencyRecords.tenantId, orgId), eq(idempotencyRecords.idempotencyKey, key)));
+      expect(rows).toHaveLength(1);
+    });
+
+    test("(d) duas idempotencyKey diferentes geram identificadores distintos", async () => {
+      const key1 = `distinct-idem-${tag}-d1`;
+      const key2 = `distinct-idem-${tag}-d2`;
+      const [d] = await withTenant(orgId, (tx) =>
+        tx.insert(devices).values({ tenantId: orgId, userId, name: `IdemDistD-${tag}`, status: "active" })
+          .returning({ id: devices.id }));
+
+      const [r1, r2] = await Promise.all([
+        withTenant(orgId, (tx) =>
+          generateIdentifier(tx, authUser(), {
+            categoryId: catNoSeqId, sectorId, idempotencyKey: key1,
+          })),
+        withTenant(orgId, (tx) =>
+          generateIdentifier(tx, authUser(), {
+            categoryId: catNoSeqId, sectorId, idempotencyKey: key2,
+          })),
+      ]);
+
+      expect(r1.id).not.toBe(r2.id);
+      expect(r1.identifier).not.toBe(r2.identifier);
+    });
+
+    test("(e) concorrência: mesma idempotencyKey, categorias diferentes — só um idempotency_record criado", async () => {
+      const key = `cross-cat-idem-${tag}-e`;
+      const [d] = await withTenant(orgId, (tx) =>
+        tx.insert(devices).values({ tenantId: orgId, userId, name: `IdemCrossE-${tag}`, status: "active" })
+          .returning({ id: devices.id }));
+
+      const cat2Id = `TST-NOSEQ2-${tag}`;
+      await db.insert(categories).values({
+        id: cat2Id, name: "Test Non-Sequential 2", group: "Test", prefix: cat2Id, requiresSequential: false,
+      });
+
+      try {
+        const [r1, r2] = await Promise.all([
+          withTenant(orgId, (tx) =>
+            generateIdentifier(tx, authUser(), {
+              categoryId: catNoSeqId, sectorId, idempotencyKey: key,
+            })),
+          withTenant(orgId, (tx) =>
+            generateIdentifier(tx, authUser(), {
+              categoryId: cat2Id, sectorId, idempotencyKey: key,
+            })),
+        ]);
+
+        expect(r1.id).toBe(r2.id);
+        expect(r1.identifier).toBe(r2.identifier);
+
+        const records = await db.select().from(idempotencyRecords)
+          .where(and(
+            eq(idempotencyRecords.tenantId, orgId),
+            eq(idempotencyRecords.idempotencyKey, key),
+          ));
+        expect(records).toHaveLength(1);
+      } finally {
+        await db.execute(sql`DELETE FROM identifiers WHERE category_id = ${cat2Id}`);
+        await db.execute(sql`DELETE FROM categories WHERE id = ${cat2Id}`);
+      }
     });
   });
 });

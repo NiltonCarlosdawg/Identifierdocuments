@@ -1,5 +1,5 @@
 import type { DB } from "../db";
-import { identifiers, categories, organizations, devices, identifierLeases, identifierReleasePool, auditLogs } from "../db/schema";
+import { identifiers, categories, organizations, devices, identifierLeases, identifierReleasePool, auditLogs, idempotencyRecords } from "../db/schema";
 import { eq, and, sql } from "drizzle-orm";
 import type { AuthPayload } from "../middleware/auth";
 
@@ -181,6 +181,7 @@ export async function registerOfflineIdentifiers(
       visibility?: "public" | "sector_only";
       origin?: "digital" | "physical";
     }>;
+    idempotencyKey?: string;
   },
   ip: string = "unknown",
 ) {
@@ -208,9 +209,19 @@ export async function registerOfflineIdentifiers(
   const month = now.getMonth() + 1;
   const day = now.getDate();
 
-  const created = await tx.transaction(async (tx2) => {
+    const created = await tx.transaction(async (tx2) => {
     const lockKey = sql`hashtext(CONCAT(${auth.tenantId}::text, '-', ${lease.categoryId}::text))`;
     await tx2.execute(sql`SELECT pg_advisory_xact_lock(${lockKey})`);
+
+    if (opts.idempotencyKey) {
+      const record = await tx2.query.idempotencyRecords.findFirst({
+        where: and(
+          eq(idempotencyRecords.tenantId, auth.tenantId),
+          eq(idempotencyRecords.idempotencyKey, opts.idempotencyKey),
+        ),
+      });
+      if (record) return record.result as any[];
+    }
 
     const freshLease = await tx2.query.identifierLeases.findFirst({
       where: eq(identifierLeases.id, opts.leaseId),
@@ -255,6 +266,24 @@ export async function registerOfflineIdentifiers(
     await tx2.update(identifierLeases)
       .set({ usedUpTo: newUsedUpTo })
       .where(eq(identifierLeases.id, opts.leaseId));
+
+    if (opts.idempotencyKey) {
+      const [rec] = await tx2.insert(idempotencyRecords).values({
+        tenantId: auth.tenantId,
+        idempotencyKey: opts.idempotencyKey,
+        result: inserted as any,
+      }).onConflictDoNothing().returning();
+
+      if (!rec) {
+        const existing = await tx2.query.idempotencyRecords.findFirst({
+          where: and(
+            eq(idempotencyRecords.tenantId, auth.tenantId),
+            eq(idempotencyRecords.idempotencyKey, opts.idempotencyKey),
+          ),
+        });
+        return existing!.result as any[];
+      }
+    }
 
     return inserted;
   });

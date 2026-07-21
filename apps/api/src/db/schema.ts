@@ -99,6 +99,15 @@ export const identifiers = pgTable("identifiers", {
   uniqueIndex("identifiers_tenant_identifier_idx").on(t.tenantId, t.identifier),
 ]);
 
+export const idempotencyRecords = pgTable("idempotency_records", {
+  tenantId: uuid("tenant_id").notNull().references(() => organizations.id),
+  idempotencyKey: text("idempotency_key").notNull(),
+  result: jsonb("result").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => ({
+  pk: primaryKey({ columns: [t.tenantId, t.idempotencyKey] }),
+}));
+
 export const documents = pgTable("documents", {
   id: uuid("id").primaryKey().defaultRandom(),
   tenantId: uuid("tenant_id").notNull().references(() => organizations.id),
