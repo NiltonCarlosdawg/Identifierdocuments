@@ -126,7 +126,23 @@ export async function generateIdentifier(tx: DB, auth: AuthPayload, opts: {
             eq(idempotencyRecords.idempotencyKey, opts.idempotencyKey),
           ),
         });
-        return [existing!.result as typeof id];
+        const winner = existing!.result as typeof id;
+
+        await tx2.insert(auditLogs).values({
+          tenantId: auth.tenantId,
+          userId: auth.userId,
+          action: "IDEMPOTENCY_DISCARDED",
+          resource: "identifiers",
+          resourceId: inserted[0].id,
+          metadata: JSON.stringify({
+            idempotencyKey: opts.idempotencyKey,
+            orphanIdentifier: inserted[0].identifier,
+            winnerIdentifier: winner.identifier,
+            reason: "Concurrent call with same idempotencyKey won the race",
+          }),
+        });
+
+        return [winner];
       }
     }
 

@@ -27,45 +27,73 @@ Quando o sync detecta que um lease foi forçado no servidor:
 Lease revogado. Reconecte para obter um novo lease.
 ```
 
-## Idempotency Gap (bloqueador para Parte 2 — ciclo de sincronização)
+## Idempotência (tabela dedicada idempotency_records)
 
-O lado Rust gera e persiste `idempotency_key` (UUID v4) em cada registo
-de `local_pending_identifiers`. O backend **não** verifica esta chave.
+### Estado actual (implementado)
 
-### Estado actual do backend
-
-| Cenário | Mecanismo actual | Risco |
+| Cenário | Mecanismo actual | Protecção |
 |---|---|---|
-| Fiscal (`POST /register-offline`) | `pg_advisory_xact_lock` + `usedUpTo` | Rejeita replay com "fora de ordem". Não silencia, não duplica. |
-| Não-fiscal (`POST /register-offline-loose`) | Reusa `generateIdentifier()` → `MAX(sequence)+1` | **Replay gera novo identificador** com sequência diferente. Sem protecção. |
+| Fiscal (`POST /register-offline`) | `pg_advisory_xact_lock` + `idempotency_records` PK | `ON CONFLICT DO NOTHING` garante que o primeiro vencedor é devolvido em replays |
+| Não-fiscal (`POST /register-offline-loose`) | `pg_advisory_xact_lock` + `idempotency_records` PK | Idêntico ao fiscal, usando `generateIdentifier()` |
 
-### O que falta
-
-Uma tabela `idempotency_keys` no PostgreSQL e verificação em ambos os
-endpoints:
+### Tabela
 
 ```sql
-CREATE TABLE idempotency_keys (
-    id             TEXT PRIMARY KEY,          -- = idempotency_key do cliente
-    tenant_id      TEXT NOT NULL,
-    response       JSONB NOT NULL,            -- Resultado original (serializado)
-    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-
-    -- Limpeza por TTL (ex: 7 dias)
-    expires_at     TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '7 days'
+CREATE TABLE idempotency_records (
+    tenant_id      uuid NOT NULL REFERENCES organizations(id),
+    idempotency_key text NOT NULL,
+    result         jsonb NOT NULL,
+    created_at     timestamp NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, idempotency_key)
 );
-
-CREATE INDEX idx_idempotency_keys_expires ON idempotency_keys(expires_at);
 ```
 
-Fluxo esperado para ambos os endpoints:
+### Fluxo (ambos os endpoints)
 
-1. Receber `idempotency_key` no body (campo obrigatório).
-2. `SELECT response FROM idempotency_keys WHERE id = ?1`.
-   - Se existir → devolver `response` sem processar (idempotência garantida).
-3. Processar normalmente.
-4. `INSERT INTO idempotency_keys (id, tenant_id, response) VALUES (...)`.
-5. Job de limpeza (ou `ON CONFLICT DO NOTHING` + TTL).
+1. Receber `idempotencyKey` opcional no body.
+2. Dentro da transacção com `pg_advisory_xact_lock`:
+   a. `SELECT` por `(tenant_id, idempotency_key)` → se existir, devolver `result`.
+   b. Processar normalmente (gerar identificador, registar batch).
+   c. `INSERT INTO idempotency_records ... ON CONFLICT DO NOTHING RETURNING *`.
+   d. Se `RETURNING` vazio → outro chamador concorrente já registou a mesma key.
+      - Inserir `audit_logs` com `action = 'IDEMPOTENCY_DISCARDED'` com:
+        - `resourceId` = identificador órfão (o que acabámos de criar e vamos descartar)
+        - `metadata` contém o `idempotencyKey`, `orphanIdentifier` (nosso), `winnerIdentifier` (do vencedor)
+      - Devolver o `result` do registo existente (vencedor), ignorando o nosso.
+3. Sem key fornecida → comportamento inalterado (sem idempotência).
+
+### Desperdício de sequência no cenário de corrida (cross-category)
+
+**Decisão: aceitável, desde que auditável.**
+
+Uma corrida com a mesma `idempotencyKey` mas categorias diferentes (ex:
+Call A para categoria X, Call B para categoria Y com a mesma key) pode
+produzir o seguinte cenário:
+
+1. Call A adquire lock X, gera identificador X-001, insere `idempotency_records`.
+2. Call B adquire lock Y (lock diferente), gera identificador Y-001, tenta
+   inserir `idempotency_records` → `ON CONFLICT DO NOTHING`.
+3. Call B detecta `RETURNING` vazio, sabe que perdeu a corrida.
+4. Call B insere `audit_logs` com `IDEMPOTENCY_DISCARDED` (identificador Y-001 órfão).
+5. Call B devolve o resultado de Call A (X-001) ao chamador.
+
+Neste momento o identificador Y-001 existe na BD mas ninguém o reivindica.
+
+**Porque é aceitável:**
+
+- O precedente com `identifier_release_pool` já estabelece que números
+  de sequência podem ser permanentemente queimados quando um lease é
+  libertado antes de consumir todo o intervalo.
+- O desperdício é um subproduto inevitável de locks independentes por
+  categoria. Para partilhar um lock global por tenant (e serializar
+  todas as gerações independentemente da categoria) perder-se-ia
+  demasiada concorrência.
+- Cada desperdício fica registado em `audit_logs` com
+  `action = 'IDEMPOTENCY_DISCARDED'`, o que significa que é sempre
+  auditável e pode ser detectado por jobs de reconciliação futuros.
+- A janela de ocorrência é extremamente reduzida: requer que dois
+  chamadores usem a mesma `idempotencyKey` UUID v4 simultaneamente em
+  categorias diferentes, o que é improvável na prática.
 
 ### Porque é bloqueante para a Parte 2
 
@@ -77,7 +105,5 @@ O ciclo de sincronização (Parte 2) vai re-enviar registos de
 - **Não-fiscal**: cada re-envio gera um identificador novo no servidor,
   corrompendo a sequência.
 
-A implementação da tabela `idempotency_keys` no backend é
-**pré-requisito obrigatório** antes de iniciar o ciclo de sincronização.
-Não pode ser adiada para depois da Parte 2 nem tratada como trabalho
-independente em paralelo.
+A implementação da idempotência é **pré-requisito obrigatório** antes de
+iniciar o ciclo de sincronização.

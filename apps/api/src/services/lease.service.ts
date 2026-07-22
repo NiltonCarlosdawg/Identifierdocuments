@@ -281,7 +281,25 @@ export async function registerOfflineIdentifiers(
             eq(idempotencyRecords.idempotencyKey, opts.idempotencyKey),
           ),
         });
-        return existing!.result as any[];
+        const winner = existing!.result as any[];
+
+        for (const orphan of inserted) {
+          await tx2.insert(auditLogs).values({
+            tenantId: auth.tenantId,
+            userId: auth.userId,
+            action: "IDEMPOTENCY_DISCARDED",
+            resource: "identifiers",
+            resourceId: orphan.id,
+            metadata: JSON.stringify({
+              idempotencyKey: opts.idempotencyKey,
+              orphanIdentifier: orphan.identifier,
+              winnerIdentifiers: winner.map((w: any) => w.identifier),
+              reason: "Concurrent call with same idempotencyKey won the race",
+            }),
+          });
+        }
+
+        return winner;
       }
     }
 
