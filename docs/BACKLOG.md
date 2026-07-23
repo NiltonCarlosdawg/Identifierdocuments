@@ -5,8 +5,9 @@
 >
 > **Estado: Fases 1-4 completas e validadas E2E. Fase 5 maioritariamente completa
 > (falta preview de PDF/multi-página no scanner e cache do classificador). Fase 6
-> — Geração Offline de Identificadores — em progresso (backend completo, desktop
-> nativo e UI pendentes).**
+> — Geração Offline de Identificadores — backend completo, motor de sync nativo
+> implementado (agrupamento, HTTP, response handling, renovação de lease),
+> geração offline funcional, UI pendente.**
 
 ---
 
@@ -355,14 +356,31 @@ aplicadas posteriormente a itens aqui marcados como completos)*
   lote alheio
 - [x] **P0** `force-release` seguido de tentativa de registo é rejeitado
 
-### 6.5 — Desktop nativo (M3) — **pendente**
-- [ ] **P0** Cache local (SQLite) de lotes activos, prefixo da organização e
-  categorias (para montar o identificador offline sem rede)
-- [ ] **P0** Comando `generate_offline_identifier` — consome lote local
-  (categorias fiscais) ou contador local solto (restantes)
-- [ ] **P0** Fila de sincronização de identificadores pendentes, um de cada
-  vez (consistente com o motor de sync já existente)
-- [ ] **P1** Renovação automática de lote perto do esgotamento
+### 6.5 — Desktop nativo (M3)
+- [x] **P0** Cache local (SQLite) de lotes activos, prefixo da organização e
+  categorias — `cache_categories()`, `cache_tenant_state()`, schema
+  `local_category_cache`, `local_identifier_lease`
+- [x] **P0** Comando `generate_offline_identifier` — consome lote local
+  (categorias fiscais via `local_identifier_lease`) ou contador local solto
+  (restantes via `local_loose_counters`); insere em `local_pending_identifiers`
+- [x] **P0** Motor de sincronização de identificadores pendentes — integrado no
+  `run_sync_cycle_inner` existente:
+  - Agrupamento de pendentes fiscais por `lease_id` (lote único) e não-fiscais
+    item-a-item (`group_identifier_batches`)
+  - `POST /identifiers/register-offline` para lotes fiscais,
+    `POST /identifiers/register-offline-loose` para não-fiscais
+  - Tratamento de resposta: `synced` (OK), `conflict`/`OUT_OF_ORDER` (fora de
+    ordem), `LeaseInactive` → `mark_lease_remote_released_inner`, retry com
+    `MAX_ATTEMPTS=3`
+  - 16 testes unitários de agrupamento e transições de estado
+- [x] **P1** Renovação automática de lote perto do esgotamento:
+  - `renew_exhausted_leases()` verifica leases activos com 20% ou menos de
+    capacidade restante (ou `next_to_use > end_seq`)
+  - HTTP (`POST /identifiers/lease`) primeiro, só depois aplica troca atómica
+    em transacção SQLite (`TransactionBehavior::Immediate`)
+  - `apply_lease_renewal()` extraída como função síncrona testável (3 testes:
+    sucesso, corrida perdida, idempotência sem duplicação)
+- [ ] **P2** UI de gestão de leases (dispositivos, forçar libertação)
 
 ### 6.6 — Frontend (M4) — **pendente**
 - [ ] **P0** `Identifiers.tsx` — caminho offline com indicação visual de
@@ -378,7 +396,9 @@ aplicadas posteriormente a itens aqui marcados como completos)*
 - [x] **P1** Testes de integração para endpoints críticos
 - [x] **P1** Testes do motor de sync offline — **feito**: `compute_upload_outcome`
   (função pura), `reset_stuck_items` (crash recovery), ciclo completo
-  sucesso/falha até `MAX_ATTEMPTS`, 30+ testes Rust no total
+  sucesso/falha até `MAX_ATTEMPTS`; sincronização de identificadores
+  (agrupamento, state transitions, `lease_needs_renewal`, `apply_lease_renewal`,
+  `fetch_active_leases`); 90 testes Rust no total
 - [x] **P1** Rate limiting nos endpoints públicos — **estendido** aos novos
   endpoints de exportação (5/hora)
 - [x] **P1** Sanitização de nomes de ficheiro no upload (path traversal) —
@@ -402,7 +422,7 @@ aplicadas posteriormente a itens aqui marcados como completos)*
 | **4** | Partilha + Aprovações + SSE | ✅ Completo |
 | **5** | Scanner + IA + File Watcher + Settings | 🔄 Quase completo — falta preview PDF/multi-página no scanner, cache do classificador, e a UI detalhada de 3-opções do watcher |
 | **5.6** | Correcções de segurança (hardening) | ✅ Completo — RLS, advisory lock, roles frescas, tratamento de erro uniforme, suite de testes de carga |
-| **6** | Geração offline de identificadores | 🔄 Backend completo (M0–M2); desktop nativo e UI pendentes (M3–M4); classificação legal de categorias pendente de confirmação profissional |
+| **6** | Geração offline de identificadores | 🔄 Backend completo (M0–M2), motor de sync nativo implementado (M3, excepto UI de gestão de leases); classificação legal de categorias pendente de confirmação profissional; UI pendente (M4) |
 
 > Consultar `README.md` para visão geral do produto e arquitectura; este
 > ficheiro é o documento vivo de estado por fase.
