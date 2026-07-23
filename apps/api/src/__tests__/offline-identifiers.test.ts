@@ -756,6 +756,22 @@ describe("M2 — Offline Identifiers (lease/release/force-release/register-offli
             eq(idempotencyRecords.idempotencyKey, key),
           ));
         expect(records).toHaveLength(1);
+
+        const discardLogs = await db.select().from(auditLogs)
+          .where(and(
+            eq(auditLogs.tenantId, orgId),
+            eq(auditLogs.action, "IDEMPOTENCY_DISCARDED"),
+            sql`metadata LIKE ${'%' + key + '%'}`,
+          ));
+        expect(discardLogs).toHaveLength(1);
+        const log = discardLogs[0];
+        const meta = JSON.parse(log.metadata!);
+        expect(meta.idempotencyKey).toBe(key);
+        expect(meta.winnerIdentifier).toBe(r1.identifier);
+        expect(log.resourceId).not.toBe(r1.id);
+        const orphan = await db.query.identifiers.findFirst({ where: eq(identifiers.id, log.resourceId!) });
+        expect(orphan).not.toBeNull();
+        expect(orphan!.identifier).toBe(meta.orphanIdentifier);
       } finally {
         await db.execute(sql`DELETE FROM identifiers WHERE category_id = ${cat2Id}`);
         await db.execute(sql`DELETE FROM categories WHERE id = ${cat2Id}`);
