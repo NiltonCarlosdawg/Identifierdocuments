@@ -1,11 +1,14 @@
 import { useState } from "react";
 import { useAuthStore } from "../stores/authStore";
+import { useAppConfigStore } from "../stores/configStore";
 import { api } from "../../infrastructure/di/container";
 import { PageHeader } from "../components/docid-ui";
-import { User, Lock, Save } from "lucide-react";
+import { User, Lock, Save, Sun, Moon } from "lucide-react";
 
 export default function Profile() {
   const user = useAuthStore(s => s.user);
+  const theme = useAppConfigStore(s => s.theme);
+  const setTheme = useAppConfigStore(s => s.setTheme);
   const [fullName, setFullName] = useState(user?.fullName || "");
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState("");
@@ -70,6 +73,17 @@ export default function Profile() {
           {pwSuccess && <p className="text-xs text-docid-secondary">{pwSuccess}</p>}
           <button type="submit" disabled={pwLoading || !currentPassword || !newPassword || !confirmPassword} className="docid-button-primary">{pwLoading ? "A alterar..." : "Alterar Password"}</button>
         </form>
+      </div>
+
+      <div className="docid-panel p-6">
+        <h2 className="flex items-center gap-2 text-base font-semibold mb-4"><Sun className="h-4 w-4" /> Aparência</h2>
+        <div>
+          <label className="mb-1.5 block text-xs font-semibold text-docid-muted">Tema</label>
+          <div className="flex gap-3">
+            <button onClick={() => setTheme("light")} className={`flex flex-1 items-center justify-center gap-2 rounded-lg border px-4 py-3 text-sm font-medium transition ${theme === "light" ? "border-docid-primary bg-docid-primary/10 text-docid-primary-soft" : "border-docid-border text-docid-muted hover:bg-docid-surface-high"}`}><Sun className="h-5 w-5" /> Claro</button>
+            <button onClick={() => setTheme("dark")} className={`flex flex-1 items-center justify-center gap-2 rounded-lg border px-4 py-3 text-sm font-medium transition ${theme === "dark" ? "border-docid-primary bg-docid-primary/10 text-docid-primary-soft" : "border-docid-border text-docid-muted hover:bg-docid-surface-high"}`}><Moon className="h-5 w-5" /> Escuro</button>
+          </div>
+        </div>
       </div>
     </div>
   );
