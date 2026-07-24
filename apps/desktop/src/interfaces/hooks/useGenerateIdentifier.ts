@@ -68,8 +68,8 @@ export function useGenerateIdentifier() {
       const { invoke } = await import("@tauri-apps/api/core");
       const pending = await invoke<{
         identifier: string;
-        sequence: number | null;
-        lease_id: string | null;
+        sequence: number;
+        fiscal: boolean;
       }>("generate_offline_identifier", {
         categoryId: input.categoryId,
         issuedTo: input.issuedTo || null,
@@ -79,7 +79,7 @@ export function useGenerateIdentifier() {
         sectorId: input.sectorId,
       });
 
-      const mode = pending.lease_id ? "offline_fiscal" : "offline_loose";
+      const mode = pending.fiscal ? "offline_fiscal" : "offline_loose";
       const r: GenerateResult = { identifier: pending.identifier, mode };
       setResult(r);
       return r;

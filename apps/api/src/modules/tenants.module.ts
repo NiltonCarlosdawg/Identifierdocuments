@@ -110,7 +110,12 @@ export const tenantsModule = new Elysia({ prefix: "/tenants" })
       set.status = 404;
       return { error: { code: "NOT_FOUND", message: "Organização não encontrada." } };
     }
-    return { data: org };
+    return {
+      data: {
+        ...org,
+        identifierLeaseBatchSize: org.identifierLeaseBatchSize,
+      },
+    };
   }, {
     detail: { summary: "Dados da organização", tags: ["Organizações"] },
   })
@@ -119,9 +124,14 @@ export const tenantsModule = new Elysia({ prefix: "/tenants" })
 
   .patch("/me", async ({ auth, body, set }) => {
     try {
+      const updates: Record<string, unknown> = {};
+      if (body.name !== undefined) updates.name = body.name;
+      if (body.identifierPrefix !== undefined) updates.identifierPrefix = body.identifierPrefix;
+      if (body.identifierLeaseBatchSize !== undefined) updates.identifierLeaseBatchSize = body.identifierLeaseBatchSize;
+
       const [org] = await db
         .update(organizations)
-        .set({ name: body.name, identifierPrefix: body.identifierPrefix })
+        .set(updates)
         .where(eq(organizations.id, auth!.tenantId))
         .returning();
       return { data: org };
@@ -133,6 +143,7 @@ export const tenantsModule = new Elysia({ prefix: "/tenants" })
     body: t.Object({
       name: t.Optional(t.String()),
       identifierPrefix: t.Optional(t.String({ maxLength: 6 })),
+      identifierLeaseBatchSize: t.Optional(t.Integer({ minimum: 10, maximum: 500 })),
     }),
     detail: { summary: "Actualizar organização", tags: ["Organizações"] },
   });
