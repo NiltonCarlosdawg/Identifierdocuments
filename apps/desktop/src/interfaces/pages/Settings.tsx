@@ -459,6 +459,7 @@ function WatcherTab() {
   useEffect(() => {
     let unlisteners: (() => void)[] = [];
     (async () => {
+      if (typeof window !== "undefined" && !("__TAURI_INTERNALS__" in window)) return;
       const { listen } = await import("@tauri-apps/api/event");
       const f1 = await listen("watcher:file_detected", () => bumpDetected());
       const f2 = await listen("watcher:identifier_found", () => bumpDetected());
