@@ -1,7 +1,8 @@
+import { useState, useRef, useEffect } from "react";
 import { Outlet, NavLink, useNavigate } from "react-router-dom";
 import { useAuthStore } from "../stores/authStore";
 import { useAppConfigStore } from "../stores/configStore";
-import { LayoutDashboard, FileText, Fingerprint, CheckSquare, Users, UserPlus, Cog, History, Scan, CloudOff, Search, Menu } from "lucide-react";
+import { LayoutDashboard, FileText, Fingerprint, CheckSquare, Users, UserPlus, Cog, History, Scan, CloudOff, Search, Menu, LogOut, User } from "lucide-react";
 import OfflineQueuePanel, { OfflineQueueBadge } from "./OfflineQueuePanel";
 import NotificationBell from "./NotificationBell";
 
@@ -19,9 +20,20 @@ const navItems = [
 
 export default function Layout() {
   const user = useAuthStore(s => s.user);
+  const logout = useAuthStore(s => s.logout);
   const avatar = useAppConfigStore(s => s.avatar);
   const navigate = useNavigate();
   const visibleNav = navItems.filter(item => !item.roles || item.roles.some(r => user?.roles.includes(r)));
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
 
   return (
     <div className="flex h-screen overflow-hidden bg-docid-background text-docid-text">
@@ -54,10 +66,19 @@ export default function Layout() {
           </div>
           <div className="flex items-center gap-2">
             <OfflineQueueBadge /><NotificationBell />
-            <button onClick={() => navigate("/perfil")} className="flex items-center gap-2 rounded-lg p-1.5 pr-3 transition hover:bg-docid-surface-high">
-              {avatar ? <img src={avatar} alt="Avatar" className="h-8 w-8 rounded-full object-cover" /> : <div className="flex h-8 w-8 items-center justify-center rounded-full bg-docid-primary/15 text-xs font-semibold text-docid-primary-soft">{(user?.fullName || "AD").split(" ").map(p => p[0]).join("").slice(0, 2).toUpperCase()}</div>}
-              <span className="text-sm font-medium text-docid-text">{user?.fullName}</span>
-            </button>
+            <div ref={menuRef} className="relative">
+              <button onClick={() => setMenuOpen(!menuOpen)} className="flex items-center gap-2 rounded-lg p-1.5 pr-3 transition hover:bg-docid-surface-high">
+                {avatar ? <img src={avatar} alt="Avatar" className="h-8 w-8 rounded-full object-cover" /> : <div className="flex h-8 w-8 items-center justify-center rounded-full bg-docid-primary/15 text-xs font-semibold text-docid-primary-soft">{(user?.fullName || "AD").split(" ").map(p => p[0]).join("").slice(0, 2).toUpperCase()}</div>}
+                <span className="text-sm font-medium text-docid-text">{user?.fullName}</span>
+              </button>
+              {menuOpen && (
+                <div className="absolute right-0 top-full mt-1 w-48 rounded-lg border border-docid-border bg-docid-surface shadow-xl z-50 py-1">
+                  <button onClick={() => { setMenuOpen(false); navigate("/perfil"); }} className="flex w-full items-center gap-2 px-4 py-2.5 text-sm text-docid-text hover:bg-docid-surface-high transition-colors"><User className="h-4 w-4" /> Perfil</button>
+                  <div className="border-t border-docid-border" />
+                  <button onClick={() => { setMenuOpen(false); logout(); navigate("/login"); }} className="flex w-full items-center gap-2 px-4 py-2.5 text-sm text-docid-error hover:bg-docid-surface-high transition-colors"><LogOut className="h-4 w-4" /> Sair</button>
+                </div>
+              )}
+            </div>
           </div>
         </header>
         <main className="flex-1 overflow-y-auto bg-docid-background"><div className="mx-auto max-w-7xl px-6 py-7"><Outlet /></div></main>

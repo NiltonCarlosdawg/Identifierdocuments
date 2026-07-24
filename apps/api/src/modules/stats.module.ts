@@ -60,7 +60,6 @@ async function collectStats(tenantId: string) {
 
 export const statsModule = new Elysia({ prefix: "/stats" })
   .use(requireAuth())
-  .use(requireRole("ORG_ADMIN"))
 
   .get("/", async ({ tenantId }) => {
     try {

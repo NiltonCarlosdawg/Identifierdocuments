@@ -4,6 +4,7 @@ export interface StoredUser {
   fullName: string;
   tenantId: string;
   sectorId: string | null;
+  sectorName: string | null;
   roles: string[];
   organization: string | null;
 }

@@ -52,7 +52,7 @@ export default function App() {
   useEffect(() => {
     if (token && !user) {
       const decoded = decodeJwtUser(token);
-      if (decoded) setUser({ id: decoded.userId, email: "", fullName: "", tenantId: decoded.tenantId, sectorId: decoded.sectorId, roles: decoded.roles, organization: null });
+      if (decoded) setUser({ id: decoded.userId, email: "", fullName: "", tenantId: decoded.tenantId, sectorId: decoded.sectorId, sectorName: null, roles: decoded.roles, organization: null });
     }
   }, [token, user, setUser]);
 

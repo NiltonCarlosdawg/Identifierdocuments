@@ -3,7 +3,7 @@ import { api } from "../../infrastructure/di/container";
 import { PageHeader, Modal, StatusChip, EmptyState, Pagination } from "../components/docid-ui";
 import { Search, Plus, Users, Pencil, Trash2 } from "lucide-react";
 
-interface SectorRow { id: string; name: string; code: string; supervisorName: string | null; memberCount: number; createdAt: string; }
+interface SectorRow { id: string; name: string; code: string; supervisorName: string | null; supervisorId: string | null; memberCount: number; createdAt: string; }
 interface User { id: string; fullName: string; }
 
 export default function Sectors() {
@@ -105,14 +105,30 @@ function CreateSectorModal({ onClose, onDone }: { onClose: () => void; onDone: (
 function EditSectorModal({ sector, onClose, onDone }: { sector: SectorRow; onClose: () => void; onDone: () => void }) {
   const [name, setName] = useState(sector.name);
   const [code, setCode] = useState(sector.code);
+  const [supervisorId, setSupervisorId] = useState(sector.supervisorId || "");
+  const [supervisorName, setSupervisorName] = useState(sector.supervisorName || "");
+  const [members, setMembers] = useState<User[]>([]);
+  const [memberLoading, setMemberLoading] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await api.get<{ data: User[] }>(`/sectors/${sector.id}/members`);
+        setMembers(res.data || []);
+      } catch {} finally { setMemberLoading(false); }
+    })();
+  }, [sector.id]);
 
   const handleSave = async () => {
     if (!name.trim() || !code.trim()) return;
     setError(""); setLoading(true);
     try {
       await api.patch(`/sectors/${sector.id}`, { name: name.trim(), code: code.trim().toUpperCase() });
+      if (supervisorId !== (sector.supervisorId || "")) {
+        await api.patch(`/sectors/${sector.id}/supervisor`, { supervisorId: supervisorId || undefined });
+      }
       onDone();
     } catch (err: any) { setError(err.message || "Erro ao actualizar sector."); } finally { setLoading(false); }
   };
@@ -129,7 +145,21 @@ function EditSectorModal({ sector, onClose, onDone }: { sector: SectorRow; onClo
         {error && <div className="rounded-lg border border-docid-error/30 bg-docid-error/10 p-3 text-sm text-docid-error">{error}</div>}
         <div><label className="mb-1.5 block text-xs font-semibold text-docid-muted">Nome do sector</label><input value={name} onChange={e => setName(e.target.value)} className="docid-input w-full" /></div>
         <div><label className="mb-1.5 block text-xs font-semibold text-docid-muted">Código</label><input value={code} onChange={e => setCode(e.target.value.toUpperCase())} className="docid-input w-full font-mono uppercase" maxLength={10} /></div>
-        {sector.supervisorName && <div className="rounded-lg bg-docid-surface-low p-3 text-sm"><span className="text-xs text-docid-muted">Supervisor actual: </span><span className="font-medium">{sector.supervisorName}</span></div>}
+        <div><label className="mb-1.5 block text-xs font-semibold text-docid-muted">Supervisor</label>
+          {memberLoading ? (
+            <div className="text-sm text-docid-muted">A carregar membros...</div>
+          ) : (
+            <select value={supervisorId} onChange={e => {
+              const val = e.target.value;
+              setSupervisorId(val);
+              setSupervisorName(val ? members.find(m => m.id === val)?.fullName || "" : "");
+            }} className="docid-input w-full">
+              <option value="">Nenhum</option>
+              {members.map(m => <option key={m.id} value={m.id}>{m.fullName}</option>)}
+            </select>
+          )}
+          {supervisorName && <p className="mt-1 text-xs text-docid-muted">Supervisor actual: {supervisorName}</p>}
+        </div>
       </div>
     </Modal>
   );

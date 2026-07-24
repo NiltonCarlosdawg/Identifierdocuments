@@ -7,6 +7,7 @@ const TABLES_WITH_TENANT = [
   "documents", "approvals", "audit_logs",
   "classifier_feedback",
   "devices", "identifier_leases", "identifier_release_pool",
+  "idempotency_records",
 ];
 
 export async function setupRLS() {

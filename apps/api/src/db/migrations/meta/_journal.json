@@ -57,6 +57,34 @@
       "when": 1784401417959,
       "tag": "0007_noisy_gideon",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1784985600000,
+      "tag": "0008_preferences",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1784985600001,
+      "tag": "0009_offline_identifiers",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1784985600002,
+      "tag": "0010_idempotency",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1785321600000,
+      "tag": "0011_idempotency_records",
+      "breakpoints": true
     }
   ]
 }

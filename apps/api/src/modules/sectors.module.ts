@@ -1,7 +1,7 @@
 import { Elysia, t } from "elysia";
 import { db } from "../db";
 import { sectors, users } from "../db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { requireAuth, requireRole } from "../middleware/auth";
 import { withTenant } from "../db/withTenant";
 import { safeError } from "../lib/errors";
@@ -15,7 +15,16 @@ export const sectorsModule = new Elysia({ prefix: "/sectors" })
         where: eq(sectors.tenantId, tenantId),
         with: { supervisor: true },
       });
-      return { data: rows };
+      const data = await Promise.all(rows.map(async r => {
+        const [{ count }] = await tx.select({ count: sql<number>`count(*)` }).from(users).where(and(eq(users.tenantId, tenantId), eq(users.sectorId, r.id)));
+        return {
+          id: r.id, name: r.name, code: r.code,
+          supervisorName: r.supervisor?.fullName ?? null,
+          supervisorId: r.supervisorId,
+          memberCount: Number(count), createdAt: r.createdAt,
+        };
+      }));
+      return { data };
     });
   }, { detail: { summary: "Listar sectores", tags: ["Sectores"] } })
 

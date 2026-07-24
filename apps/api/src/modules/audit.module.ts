@@ -33,16 +33,23 @@ export const auditModule = new Elysia({ prefix: "/audit" })
 
       const rows = await tx.query.auditLogs.findMany({
         where: and(...conditions),
+        with: { user: { columns: { fullName: true } } },
         orderBy: desc(auditLogs.createdAt),
         limit, offset,
       });
+
+      const data = rows.map(r => ({
+        id: r.id, userId: r.userId, action: r.action, resource: r.resource,
+        resourceId: r.resourceId, metadata: r.metadata, ip: r.ip, createdAt: r.createdAt,
+        userName: r.user?.fullName ?? null,
+      }));
 
       const [totalResult] = await tx
         .select({ total: sql<number>`count(*)` })
         .from(auditLogs)
         .where(and(...conditions));
 
-      return { data: rows, meta: { total: Number(totalResult.total), page, limit } };
+      return { data, meta: { total: Number(totalResult.total), page, limit } };
     });
   }, {
     query: t.Object({

@@ -17,10 +17,19 @@ export const usersModule = new Elysia({ prefix: "/users" })
         with: { sector: true, userRoles: { with: { role: true } } },
         columns: { passwordHash: false },
       });
-      return { data: rows };
+      const data = rows.map(r => ({
+        id: r.id, email: r.email, fullName: r.fullName, isActive: r.isActive,
+        sectorId: r.sectorId, sectorName: r.sector?.name ?? null,
+        roles: r.userRoles.map(ur => ({ id: ur.role.id, name: ur.role.name })),
+        createdAt: r.createdAt,
+      }));
+      const page = Number(query.page) || 1;
+      const limit = Number(query.limit) || 20;
+      const start = (page - 1) * limit;
+      return { data: data.slice(start, start + limit), meta: { total: data.length, page, limit } };
     });
   }, {
-    query: t.Object({ sectorId: t.Optional(t.String()) }),
+    query: t.Object({ sectorId: t.Optional(t.String()), page: t.Optional(t.String()), limit: t.Optional(t.String()) }),
     detail: { summary: "Listar utilizadores", tags: ["Utilizadores"] },
   })
 
@@ -32,7 +41,14 @@ export const usersModule = new Elysia({ prefix: "/users" })
         columns: { passwordHash: false },
       });
       if (!user) { set.status = 404; return { error: { code: "NOT_FOUND", message: "Utilizador não encontrado." } }; }
-      return { data: user };
+      return {
+        data: {
+          id: user.id, email: user.email, fullName: user.fullName, isActive: user.isActive,
+          sectorId: user.sectorId, sectorName: user.sector?.name ?? null,
+          roles: user.userRoles.map(ur => ({ id: ur.role.id, name: ur.role.name })),
+          createdAt: user.createdAt,
+        },
+      };
     });
   }, {
     params: t.Object({ id: t.String() }),

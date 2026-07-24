@@ -22,7 +22,7 @@ export default function Documents() {
     try {
       const res = await api.get<{ data: DocRow[]; meta: { total: number; page: number; limit: number } }>(`/documents?page=${page}&limit=20`);
       setRows(res.data || []);
-      setMeta(res.meta);
+      setMeta(res.meta || { total: 0, page: 1, limit: 20 });
     } catch (err: any) { setError(err.message || "Erro ao carregar documentos."); }
     finally { setLoading(false); }
   }, []);

@@ -29,7 +29,7 @@ export async function login(email: string, password: string, organizationSlug?: 
 
   const user = await db.query.users.findFirst({
     where: whereCondition,
-    with: { organization: true, userRoles: { with: { role: true } } },
+    with: { organization: true, sector: true, userRoles: { with: { role: true } } },
   });
 
   if (!user || !user.isActive) {
@@ -59,6 +59,7 @@ export async function login(email: string, password: string, organizationSlug?: 
       fullName: user.fullName,
       tenantId: user.tenantId,
       sectorId: user.sectorId,
+      sectorName: user.sector?.name ?? null,
       roles: userRolesList,
       organization: user.organization?.name,
     },
@@ -79,7 +80,7 @@ export async function getMe(auth: AuthPayload) {
     tenantId: user.tenantId,
     sectorId: user.sectorId,
     sectorName: user.sector?.name ?? null,
-    organizationName: user.organization?.name ?? null,
+    organization: user.organization?.name ?? null,
     organizationSlug: user.organization?.slug ?? null,
     notificationPreferences: user.notificationPreferences,
     roles: auth.roles,
@@ -103,7 +104,7 @@ export async function refreshToken(token: string) {
   const payload = await verifyTokenWithGrace(token);
   const user = await db.query.users.findFirst({
     where: eq(users.id, payload.userId),
-    with: { organization: true, userRoles: { with: { role: true } } },
+    with: { organization: true, sector: true, userRoles: { with: { role: true } } },
   });
   if (!user || !user.isActive) throw new Error("Utilizador não encontrado ou inactivo.");
 
@@ -123,10 +124,8 @@ export async function refreshToken(token: string) {
       fullName: user.fullName,
       tenantId: user.tenantId,
       sectorId: user.sectorId,
+      sectorName: user.sector?.name ?? null,
       roles: userRolesList,
-      // CORREÇÃO: antes era sempre `null`, inconsistente com login() que devolve o
-      // nome real da organização. Um cliente que confiasse neste campo após um
-      // refresh via este endpoint via a organização "desaparecer" da resposta.
       organization: user.organization?.name ?? null,
     },
   };

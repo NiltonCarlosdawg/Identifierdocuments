@@ -1,9 +1,11 @@
+use crate::commands::identifiers::{mark_lease_remote_released_inner, PendingIdentifier};
 use crate::db;
 use chrono::Utc;
 use reqwest::multipart;
 use reqwest::tls::Version;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, TransactionBehavior};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
@@ -49,6 +51,667 @@ fn reset_stuck_items(conn: &Connection) -> Result<usize, String> {
     Ok(count)
 }
 
+// ============================================================
+// Identifier sync — grouping for fiscal/non-fiscal batches
+// ============================================================
+
+#[derive(Debug, Clone)]
+pub struct IdentifierSyncBatch {
+    pub lease_id: Option<String>,
+    pub items: Vec<PendingIdentifier>,
+    pub idempotency_key: String,
+}
+
+fn fetch_pending_identifiers(conn: &Connection) -> Result<Vec<PendingIdentifier>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, idempotency_key, category_id, device_id, identifier, sequence,
+                    lease_id, issued_to, description, visibility, origin, sector_id,
+                    status, attempts, last_error, conflict_reason, created_at
+             FROM local_pending_identifiers
+             WHERE status = 'pending'
+             ORDER BY created_at ASC",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let rows = stmt
+        .query_map([], row_to_pending_identifier)
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+
+    Ok(rows)
+}
+
+fn row_to_pending_identifier(row: &rusqlite::Row<'_>) -> rusqlite::Result<PendingIdentifier> {
+    Ok(PendingIdentifier {
+        id: row.get(0)?,
+        idempotency_key: row.get(1)?,
+        category_id: row.get(2)?,
+        device_id: row.get(3)?,
+        identifier: row.get(4)?,
+        sequence: row.get(5)?,
+        lease_id: row.get(6)?,
+        issued_to: row.get(7)?,
+        description: row.get(8)?,
+        visibility: row.get(9)?,
+        origin: row.get(10)?,
+        sector_id: row.get(11)?,
+        status: row.get(12)?,
+        attempts: row.get(13)?,
+        last_error: row.get(14)?,
+        conflict_reason: row.get(15)?,
+        created_at: row.get(16)?,
+    })
+}
+
+fn group_identifier_batches(items: Vec<PendingIdentifier>) -> Vec<IdentifierSyncBatch> {
+    let mut fiscal: HashMap<String, Vec<PendingIdentifier>> = HashMap::new();
+    let mut non_fiscal: Vec<PendingIdentifier> = Vec::new();
+
+    for item in items {
+        if let Some(ref lease_id) = item.lease_id {
+            fiscal.entry(lease_id.clone()).or_default().push(item);
+        } else {
+            non_fiscal.push(item);
+        }
+    }
+
+    let mut batches: Vec<IdentifierSyncBatch> = fiscal
+        .into_iter()
+        .map(|(lease_id, items)| {
+            let idempotency_key = items
+                .first()
+                .map(|i| i.idempotency_key.clone())
+                .unwrap_or_default();
+            IdentifierSyncBatch {
+                lease_id: Some(lease_id),
+                items,
+                idempotency_key,
+            }
+        })
+        .collect();
+
+    // Sort fiscal batches by earliest item creation time (deterministic order)
+    batches.sort_by(|a, b| {
+        let a_first = a.items.first().map(|i| &i.created_at);
+        let b_first = b.items.first().map(|i| &i.created_at);
+        a_first.cmp(&b_first)
+    });
+
+    // Non-fiscal — each item is its own batch
+    for item in non_fiscal {
+        let key = item.idempotency_key.clone();
+        batches.push(IdentifierSyncBatch {
+            lease_id: None,
+            items: vec![item],
+            idempotency_key: key,
+        });
+    }
+
+    batches
+}
+
+// ============================================================
+// Identifier sync — HTTP calls
+// ============================================================
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FiscalBatchPayload {
+    device_id: String,
+    idempotency_key: String,
+    lease_id: String,
+    identifiers: Vec<IdentifierPayload>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LooseIdentifierPayload {
+    device_id: String,
+    category_id: String,
+    idempotency_key: String,
+    issued_to: Option<String>,
+    description: Option<String>,
+    visibility: String,
+    origin: String,
+    sector_id: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct IdentifierPayload {
+    sequence: i32,
+    issued_to: Option<String>,
+    description: Option<String>,
+    visibility: String,
+    origin: String,
+}
+
+#[derive(Debug)]
+pub enum SyncBatchError {
+    Backend { code: String, message: String },
+    Network(String),
+    Validation(String),
+}
+
+struct BackendErrorInfo {
+    code: String,
+    message: String,
+}
+
+fn parse_backend_error(body: &str, status_code: u16) -> BackendErrorInfo {
+    if let Ok(err) = serde_json::from_str::<serde_json::Value>(body) {
+        let code = err
+            .get("error")
+            .and_then(|e| e.get("code"))
+            .and_then(|c| c.as_str())
+            .unwrap_or("UNKNOWN")
+            .to_string();
+        let message = err
+            .get("error")
+            .and_then(|e| e.get("message"))
+            .and_then(|m| m.as_str())
+            .unwrap_or("Erro desconhecido")
+            .to_string();
+        BackendErrorInfo { code, message }
+    } else {
+        BackendErrorInfo {
+            code: "HTTP_ERROR".to_string(),
+            message: format!("HTTP {status_code}: {body}"),
+        }
+    }
+}
+
+async fn sync_identifier_batch_http(
+    api_base_url: &str,
+    token: &str,
+    batch: &IdentifierSyncBatch,
+) -> Result<serde_json::Value, SyncBatchError> {
+    let client = build_tls_client(30).map_err(|e| SyncBatchError::Network(e))?;
+
+    match &batch.lease_id {
+        Some(lease_id) => {
+            let device_id = &batch.items[0].device_id;
+            for item in &batch.items[1..] {
+                if &item.device_id != device_id {
+                    return Err(SyncBatchError::Validation(format!(
+                        "Fiscal batch items have inconsistent device_id: expected {device_id}, got {}",
+                        item.device_id
+                    )));
+                }
+            }
+
+            let identifiers: Result<Vec<IdentifierPayload>, SyncBatchError> = batch
+                .items
+                .iter()
+                .map(|item| {
+                    let seq = item.sequence.ok_or_else(|| {
+                        SyncBatchError::Validation(
+                            "Fiscal pending item missing sequence: invalid state".to_string(),
+                        )
+                    })?;
+                    Ok(IdentifierPayload {
+                        sequence: seq,
+                        issued_to: item.issued_to.clone(),
+                        description: item.description.clone(),
+                        visibility: item.visibility.clone(),
+                        origin: item.origin.clone(),
+                    })
+                })
+                .collect();
+            let identifiers = identifiers?;
+
+            let payload = FiscalBatchPayload {
+                device_id: device_id.clone(),
+                idempotency_key: batch.idempotency_key.clone(),
+                lease_id: lease_id.clone(),
+                identifiers,
+            };
+
+            let res = client
+                .post(format!("{api_base_url}/identifiers/register-offline"))
+                .bearer_auth(token)
+                .json(&payload)
+                .send()
+                .await
+                .map_err(|e| SyncBatchError::Network(e.to_string()))?;
+
+            let status = res.status();
+            let body = res.text().await.unwrap_or_default();
+
+            if status.is_success() {
+                serde_json::from_str(&body)
+                    .map_err(|e| SyncBatchError::Network(format!("Erro a parsear resposta: {e}")))
+            } else {
+                let err = parse_backend_error(&body, status.as_u16());
+                Err(SyncBatchError::Backend {
+                    code: err.code,
+                    message: err.message,
+                })
+            }
+        }
+        None => {
+            let item = &batch.items[0];
+            let payload = LooseIdentifierPayload {
+                device_id: item.device_id.clone(),
+                category_id: item.category_id.clone(),
+                idempotency_key: batch.idempotency_key.clone(),
+                issued_to: item.issued_to.clone(),
+                description: item.description.clone(),
+                visibility: item.visibility.clone(),
+                origin: item.origin.clone(),
+                sector_id: item.sector_id.clone(),
+            };
+
+            let res = client
+                .post(format!("{api_base_url}/identifiers/register-offline-loose"))
+                .bearer_auth(token)
+                .json(&payload)
+                .send()
+                .await
+                .map_err(|e| SyncBatchError::Network(e.to_string()))?;
+
+            let status = res.status();
+            let body = res.text().await.unwrap_or_default();
+
+            if status.is_success() {
+                serde_json::from_str(&body)
+                    .map_err(|e| SyncBatchError::Network(format!("Erro a parsear resposta: {e}")))
+            } else {
+                let err = parse_backend_error(&body, status.as_u16());
+                Err(SyncBatchError::Backend {
+                    code: err.code,
+                    message: err.message,
+                })
+            }
+        }
+    }
+}
+
+// ============================================================
+// Identifier sync — response handling
+// ============================================================
+
+#[derive(Debug, Clone, PartialEq)]
+enum BackendErrorKind {
+    OutOfOrder,
+    LeaseInactive,
+    OtherBackendError,
+}
+
+fn classify_backend_error(message: &str) -> BackendErrorKind {
+    let lower = message.to_lowercase();
+    if lower.contains("fora de ordem") {
+        BackendErrorKind::OutOfOrder
+    } else if lower.contains("lease") {
+        BackendErrorKind::LeaseInactive
+    } else {
+        BackendErrorKind::OtherBackendError
+    }
+}
+
+fn apply_identifier_error(
+    conn: &mut Connection,
+    batch: &IdentifierSyncBatch,
+    message: &str,
+    terminal: bool,
+) -> Result<usize, String> {
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    for item in &batch.items {
+        let new_attempts = item.attempts + 1;
+        let new_status = if terminal {
+            "failed"
+        } else if new_attempts >= MAX_ATTEMPTS {
+            "failed"
+        } else {
+            "pending"
+        };
+        tx.execute(
+            "UPDATE local_pending_identifiers SET status = ?1, attempts = ?2, last_error = ?3 WHERE id = ?4",
+            params![new_status, new_attempts, message, item.id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(0)
+}
+
+fn handle_identifier_response(
+    conn: &mut Connection,
+    state: &SyncState,
+    batch: &IdentifierSyncBatch,
+    result: Result<serde_json::Value, SyncBatchError>,
+) -> Result<usize, String> {
+    match result {
+        Ok(_) => {
+            let tx = conn.transaction().map_err(|e| e.to_string())?;
+            for item in &batch.items {
+                tx.execute(
+                    "UPDATE local_pending_identifiers SET status = 'synced', attempts = 0, last_error = NULL WHERE id = ?1",
+                    params![item.id],
+                ).map_err(|e| e.to_string())?;
+            }
+            tx.commit().map_err(|e| e.to_string())?;
+            Ok(batch.items.len())
+        }
+        Err(SyncBatchError::Backend { code: _, message }) => {
+            match classify_backend_error(&message) {
+                BackendErrorKind::OutOfOrder => {
+                    let tx = conn.transaction().map_err(|e| e.to_string())?;
+                    for item in &batch.items {
+                        tx.execute(
+                            "UPDATE local_pending_identifiers SET status = 'conflict', conflict_reason = 'OUT_OF_ORDER', last_error = ?1 WHERE id = ?2",
+                            params![message, item.id],
+                        ).map_err(|e| e.to_string())?;
+                    }
+                    tx.commit().map_err(|e| e.to_string())?;
+                    Ok(0)
+                }
+                BackendErrorKind::LeaseInactive => {
+                    match &batch.lease_id {
+                        Some(lease_id) => {
+                            match mark_lease_remote_released_inner(state, lease_id.clone()) {
+                                Ok(_) => Ok(0),
+                                Err(e) => apply_identifier_error(
+                                    conn,
+                                    batch,
+                                    &format!("LeaseInactive handler error: {e}"),
+                                    false,
+                                ),
+                            }
+                        }
+                        None => apply_identifier_error(conn, batch, &message, false),
+                    }
+                }
+                BackendErrorKind::OtherBackendError => {
+                    apply_identifier_error(conn, batch, &message, false)
+                }
+            }
+        }
+        Err(SyncBatchError::Network(msg)) => {
+            apply_identifier_error(conn, batch, &msg, false)
+        }
+        Err(SyncBatchError::Validation(msg)) => {
+            apply_identifier_error(conn, batch, &msg, true)
+        }
+    }
+}
+
+async fn process_identifier_batch(
+    conn: &mut Connection,
+    state: &SyncState,
+    api_base_url: &str,
+    token: &str,
+    batch: &IdentifierSyncBatch,
+) -> Result<usize, String> {
+    let http_result = sync_identifier_batch_http(api_base_url, token, batch).await;
+    handle_identifier_response(conn, state, batch, http_result)
+}
+
+async fn sync_pending_identifiers(
+    state: &SyncState,
+    api_base_url: &str,
+    token: &str,
+) -> Result<usize, String> {
+    let mut conn = state.conn()?;
+    let items = fetch_pending_identifiers(&conn)?;
+    if items.is_empty() {
+        return Ok(0);
+    }
+    let batches = group_identifier_batches(items);
+    let mut synced = 0usize;
+    for batch in &batches {
+        synced += process_identifier_batch(&mut conn, state, api_base_url, token, batch).await?;
+    }
+    Ok(synced)
+}
+
+// ============================================================
+// Piece 4 — Lease renewal (20% threshold or exhausted)
+// ============================================================
+
+#[derive(Debug, Clone)]
+pub struct LeaseInfo {
+    pub id: String,
+    pub category_id: String,
+    pub device_id: String,
+    pub sector_id: String,
+    pub start_seq: i32,
+    pub end_seq: i32,
+    pub next_to_use: i32,
+    pub status: String,
+    pub created_at: String,
+}
+
+fn fetch_active_leases(conn: &Connection) -> Result<Vec<LeaseInfo>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, category_id, device_id, sector_id, start_seq, end_seq, next_to_use, status, created_at
+             FROM local_identifier_lease
+             WHERE status = 'active'
+             ORDER BY created_at ASC",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(LeaseInfo {
+                id: row.get(0)?,
+                category_id: row.get(1)?,
+                device_id: row.get(2)?,
+                sector_id: row.get(3)?,
+                start_seq: row.get(4)?,
+                end_seq: row.get(5)?,
+                next_to_use: row.get(6)?,
+                status: row.get(7)?,
+                created_at: row.get(8)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+
+    Ok(rows)
+}
+
+fn lease_needs_renewal(lease: &LeaseInfo) -> bool {
+    if lease.next_to_use > lease.end_seq {
+        return true;
+    }
+    let total = lease.end_seq - lease.start_seq + 1;
+    if total <= 0 {
+        return true;
+    }
+    let used = lease.next_to_use - lease.start_seq;
+    used * 100 / total >= 80
+}
+
+struct NewLeaseData {
+    id: String,
+    category_id: String,
+    device_id: String,
+    sector_id: String,
+    start_seq: i32,
+    end_seq: i32,
+    created_at: String,
+}
+
+fn apply_lease_renewal(
+    conn: &mut Connection,
+    old_lease_id: &str,
+    new_lease: &NewLeaseData,
+) -> Result<bool, String> {
+    let tx = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|e| e.to_string())?;
+
+    let updated = tx
+        .execute(
+            "UPDATE local_identifier_lease SET status = 'exhausted' WHERE id = ?1 AND status = 'active'",
+            params![old_lease_id],
+        )
+        .map_err(|e| e.to_string())?;
+
+    if updated == 0 {
+        tx.commit().map_err(|e| e.to_string())?;
+        return Ok(false);
+    }
+
+    tx.execute(
+        "INSERT INTO local_identifier_lease (id, category_id, device_id, sector_id, start_seq, end_seq, next_to_use, status, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'active', ?8)",
+        params![
+            new_lease.id,
+            new_lease.category_id,
+            new_lease.device_id,
+            new_lease.sector_id,
+            new_lease.start_seq,
+            new_lease.end_seq,
+            new_lease.start_seq,
+            new_lease.created_at,
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(true)
+}
+
+async fn renew_exhausted_leases(state: &SyncState) -> Result<usize, String> {
+    let api_base_url = state
+        .api_base_url
+        .lock()
+        .map_err(|e| e.to_string())?
+        .clone();
+    let token = state
+        .auth_token
+        .lock()
+        .map_err(|e| e.to_string())?
+        .clone()
+        .ok_or_else(|| "Sessão não autenticada.".to_string())?;
+
+    if !check_online(&api_base_url).await {
+        return Ok(0);
+    }
+
+    let conn = state.conn()?;
+    let leases = fetch_active_leases(&conn)?;
+    let mut renewed = 0usize;
+
+    for lease in leases {
+        if !lease_needs_renewal(&lease) {
+            continue;
+        }
+
+        let client = match build_tls_client(30) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("Erro ao criar cliente HTTP para renovar lease: {e}");
+                continue;
+            }
+        };
+
+        let body = serde_json::json!({
+            "deviceId": lease.device_id,
+            "categoryId": lease.category_id,
+            "sectorId": lease.sector_id,
+        });
+
+        let resp = match client
+            .post(format!("{api_base_url}/identifiers/lease"))
+            .bearer_auth(&token)
+            .json(&body)
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("Falha de rede ao renovar lease {}: {e}", lease.id);
+                continue;
+            }
+        };
+
+        let status = resp.status();
+        let response_body = resp.text().await.unwrap_or_default();
+
+        if !status.is_success() {
+            let msg = serde_json::from_str::<serde_json::Value>(&response_body)
+                .ok()
+                .and_then(|v| v.get("error").and_then(|e| e.get("message")).and_then(|m| m.as_str()).map(|s| s.to_string()))
+                .unwrap_or_else(|| format!("HTTP {status}: {response_body}"));
+            eprintln!("Servidor rejeitou renovação do lease {}: {msg}", lease.id);
+            continue;
+        }
+
+        let server_lease: serde_json::Value = match serde_json::from_str(&response_body) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("Resposta inválida do servidor ao renovar lease {}: {e}", lease.id);
+                continue;
+            }
+        };
+
+        let data = server_lease.get("data").unwrap_or(&server_lease);
+        let new_id = match data.get("id").and_then(|v| v.as_str()) {
+            Some(id) => id.to_string(),
+            None => {
+                eprintln!("Resposta do servidor sem id ao renovar lease {}", lease.id);
+                continue;
+            }
+        };
+
+        let start_seq = match data
+            .get("startSeq")
+            .or_else(|| data.get("start_seq"))
+            .and_then(|v| v.as_i64())
+            .map(|v| v as i32)
+        {
+            Some(v) => v,
+            None => {
+                eprintln!("Resposta do servidor sem startSeq ao renovar lease {}", lease.id);
+                continue;
+            }
+        };
+        let end_seq = match data
+            .get("endSeq")
+            .or_else(|| data.get("end_seq"))
+            .and_then(|v| v.as_i64())
+            .map(|v| v as i32)
+        {
+            Some(v) => v,
+            None => {
+                eprintln!("Resposta do servidor sem endSeq ao renovar lease {}", lease.id);
+                continue;
+            }
+        };
+        let now = chrono::Utc::now().to_rfc3339();
+
+        let new_lease = NewLeaseData {
+            id: new_id,
+            category_id: lease.category_id.clone(),
+            device_id: lease.device_id.clone(),
+            sector_id: lease.sector_id.clone(),
+            start_seq,
+            end_seq,
+            created_at: now,
+        };
+        let mut conn = state.conn()?;
+        match apply_lease_renewal(&mut conn, &lease.id, &new_lease) {
+            Ok(true) => renewed += 1,
+            Ok(false) => {
+                // Race lost: another process already renewed this lease
+                eprintln!("Corrida ao renovar lease {} — outro processo já renovou", lease.id);
+            }
+            Err(e) => {
+                eprintln!("Erro de BD ao renovar lease {}: {e}", lease.id);
+            }
+        }
+    }
+
+    Ok(renewed)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueueItem {
     pub id: String,
@@ -72,7 +735,7 @@ pub struct SyncState {
 }
 
 impl SyncState {
-    pub fn conn(&self) -> Result<Connection, String> {
+    pub(crate) fn conn(&self) -> Result<Connection, String> {
         db::open(&self.db_path).map_err(|e| e.to_string())
     }
 }
@@ -258,6 +921,16 @@ async fn run_sync_cycle_inner(app: &AppHandle, state: &SyncState) -> Result<usiz
     // Crash recovery: reset items stuck in 'uploading' back to 'pending'
     let _ = reset_stuck_items(&conn);
 
+    // Piece 4: Renew leases that are exhausted or below 20% capacity
+    let renewed = renew_exhausted_leases(state).await.unwrap_or(0);
+
+    // Sync pending identifiers (fiscal batches + non-fiscal items)
+    let identifiers_synced = sync_pending_identifiers(state, &api_base_url, &token)
+        .await
+        .unwrap_or(0);
+
+    let total_renewed_or_synced = renewed + identifiers_synced;
+
     let items: Vec<QueueItem> = conn
         .prepare(
             "SELECT id, file_path, filename, identifier, tenant_id, user_id, status, attempts, last_error, created_at
@@ -272,7 +945,7 @@ async fn run_sync_cycle_inner(app: &AppHandle, state: &SyncState) -> Result<usiz
         .map_err(|e| e.to_string())?;
 
     if items.is_empty() {
-        return Ok(0);
+        return Ok(total_renewed_or_synced);
     }
 
     let total = items.len();
@@ -364,7 +1037,7 @@ async fn run_sync_cycle_inner(app: &AppHandle, state: &SyncState) -> Result<usiz
         );
     }
 
-    Ok(uploaded)
+    Ok(total_renewed_or_synced + uploaded)
 }
 
 pub fn start_background_sync(app: AppHandle) {
@@ -985,6 +1658,174 @@ mod tests {
         fs::remove_dir_all(dir).ok();
     }
 
+    // ============================================================
+    // Helpers for identifier grouping tests
+    // ============================================================
+
+    fn make_pending(
+        id: &str,
+        lease_id: Option<&str>,
+        idempotency_key: &str,
+        created_at: &str,
+        attempts: i32,
+    ) -> PendingIdentifier {
+        PendingIdentifier {
+            id: id.to_string(),
+            idempotency_key: idempotency_key.to_string(),
+            category_id: "cat-f".into(),
+            device_id: "dev-1".into(),
+            identifier: format!("TST-{id}"),
+            sequence: None,
+            lease_id: lease_id.map(|s| s.to_string()),
+            issued_to: None,
+            description: None,
+            visibility: "public".into(),
+            origin: "physical".into(),
+            sector_id: "s1".into(),
+            status: "pending".into(),
+            attempts,
+            last_error: None,
+            conflict_reason: None,
+            created_at: created_at.to_string(),
+        }
+    }
+
+    // ============================================================
+    // Test 1: Same lease → same batch
+    // ============================================================
+    #[test]
+    fn same_lease_same_batch() {
+        let items = vec![
+            make_pending("a", Some("L1"), "k-a", "2026-07-21T12:00:01Z", 0),
+            make_pending("b", Some("L1"), "k-b", "2026-07-21T12:00:02Z", 0),
+            make_pending("c", Some("L1"), "k-c", "2026-07-21T12:00:03Z", 0),
+        ];
+        let batches = group_identifier_batches(items);
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].lease_id.as_deref(), Some("L1"));
+        assert_eq!(batches[0].items.len(), 3);
+        assert_eq!(batches[0].idempotency_key, "k-a");
+    }
+
+    // ============================================================
+    // Test 2: Different lease → different batches
+    // ============================================================
+    #[test]
+    fn different_lease_different_batch() {
+        let items = vec![
+            make_pending("a", Some("L1"), "k-a", "2026-07-21T12:00:01Z", 0),
+            make_pending("b", Some("L2"), "k-b", "2026-07-21T12:00:02Z", 0),
+            make_pending("c", Some("L1"), "k-c", "2026-07-21T12:00:03Z", 0),
+        ];
+        let batches = group_identifier_batches(items);
+        assert_eq!(batches.len(), 2);
+        // L1 batch has items [a, c], key = first item (a) = k-a
+        let l1 = batches.iter().find(|b| b.lease_id.as_deref() == Some("L1")).unwrap();
+        assert_eq!(l1.items.len(), 2);
+        assert_eq!(l1.idempotency_key, "k-a");
+        // L2 batch has item [b], key = k-b
+        let l2 = batches.iter().find(|b| b.lease_id.as_deref() == Some("L2")).unwrap();
+        assert_eq!(l2.items.len(), 1);
+        assert_eq!(l2.idempotency_key, "k-b");
+    }
+
+    // ============================================================
+    // Test 3: Non-fiscal → one batch per item, never grouped
+    // ============================================================
+    #[test]
+    fn non_fiscal_one_per_batch() {
+        let items = vec![
+            make_pending("a", None, "k-a", "2026-07-21T12:00:01Z", 0),
+            make_pending("b", None, "k-b", "2026-07-21T12:00:02Z", 0),
+            make_pending("c", None, "k-c", "2026-07-21T12:00:03Z", 0),
+        ];
+        let batches = group_identifier_batches(items);
+        assert_eq!(batches.len(), 3);
+        for batch in batches.iter() {
+            assert!(batch.lease_id.is_none());
+            assert_eq!(batch.items.len(), 1);
+        }
+        // Idempotency keys are per-item
+        assert_eq!(batches[0].idempotency_key, "k-a");
+        assert_eq!(batches[1].idempotency_key, "k-b");
+        assert_eq!(batches[2].idempotency_key, "k-c");
+    }
+
+    // ============================================================
+    // Test 4: Deterministic ordering — multiple runs, same result
+    // ============================================================
+    #[test]
+    fn deterministic_ordering() {
+        let items = vec![
+            make_pending("z", Some("L-late"), "k-z", "2026-07-21T12:00:05Z", 0),
+            make_pending("a", Some("L-early"), "k-a", "2026-07-21T12:00:01Z", 0),
+            make_pending("m", Some("L-mid"), "k-m", "2026-07-21T12:00:03Z", 0),
+        ];
+
+        // First pass
+        let first = group_identifier_batches(items.clone());
+        // Second pass (items in reverse order should still group the same)
+        let mut reversed = items.clone();
+        reversed.reverse();
+        let second = group_identifier_batches(reversed);
+
+        // Both must have same number of batches
+        assert_eq!(first.len(), second.len());
+
+        // Batches should be sorted by first item's created_at: L-early, L-mid, L-late
+        let lease_order: Vec<Option<&str>> = first
+            .iter()
+            .map(|b| b.lease_id.as_deref())
+            .collect();
+        assert_eq!(
+            lease_order,
+            vec![Some("L-early"), Some("L-mid"), Some("L-late")],
+            "batches must be sorted by earliest item created_at"
+        );
+
+        // Second run must produce identical batches
+        for (a, b) in first.iter().zip(second.iter()) {
+            assert_eq!(a.lease_id, b.lease_id);
+            assert_eq!(a.idempotency_key, b.idempotency_key);
+            assert_eq!(a.items.len(), b.items.len());
+            for (ia, ib) in a.items.iter().zip(b.items.iter()) {
+                assert_eq!(ia.id, ib.id);
+            }
+        }
+    }
+
+    // ============================================================
+    // Test 5: Retry stability — demonstrates the problem
+    // ============================================================
+    #[test]
+    fn retry_idempotency_key_changes_when_first_item_synced() {
+        let items = vec![
+            make_pending("a", Some("L1"), "k-a", "2026-07-21T12:00:01Z", 0),
+            make_pending("b", Some("L1"), "k-b", "2026-07-21T12:00:02Z", 0),
+            make_pending("c", Some("L1"), "k-c", "2026-07-21T12:00:03Z", 0),
+        ];
+
+        let batches = group_identifier_batches(items);
+        assert_eq!(batches.len(), 1);
+        let first_key = batches[0].idempotency_key.clone();
+        assert_eq!(first_key, "k-a");
+
+        let remaining = vec![
+            make_pending("b", Some("L1"), "k-b", "2026-07-21T12:00:02Z", 0),
+            make_pending("c", Some("L1"), "k-c", "2026-07-21T12:00:03Z", 0),
+        ];
+        let retry_batches = group_identifier_batches(remaining);
+        assert_eq!(retry_batches.len(), 1);
+        let retry_key = retry_batches[0].idempotency_key.clone();
+
+        assert_eq!(retry_key, "k-b");
+
+        assert_ne!(
+            first_key, retry_key,
+            "BUG: idempotency key changed from {first_key} to {retry_key}"
+        );
+    }
+
     #[test]
     fn test_retry_queue_item() {
         let (dir, conn) = tmp_db();
@@ -1013,6 +1854,725 @@ mod tests {
 
         fs::remove_dir_all(dir).ok();
     }
+
+    // ============================================================
+    // Helpers for identifier response tests
+    // ============================================================
+
+    fn identifier_test_env() -> (PathBuf, SyncState, Connection) {
+        let dir = std::env::temp_dir().join(format!("docid_test_idresp_{}", Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let db_path = dir.join("test.db");
+        crate::db::open(&db_path).unwrap();
+
+        let state = SyncState {
+            db_path: db_path.clone(),
+            uploads_dir: dir.clone(),
+            api_base_url: std::sync::Mutex::new("http://localhost:3000".to_string()),
+            auth_token: std::sync::Mutex::new(None),
+            syncing: std::sync::Mutex::new(false),
+        };
+
+        let conn = crate::db::open(&db_path).unwrap();
+        (dir, state, conn)
+    }
+
+    fn ensure_category(conn: &Connection) {
+        conn.execute(
+            "INSERT OR IGNORE INTO local_category_cache (category_id, prefix, requires_sequential, last_synced_at)
+             VALUES ('cat-f', 'FISC', 1, '2026-07-21T12:00:00Z')",
+            [],
+        )
+        .unwrap();
+    }
+
+    fn ensure_lease(conn: &Connection) {
+        ensure_category(conn);
+        conn.execute(
+            "INSERT OR IGNORE INTO local_identifier_lease (id, category_id, device_id, sector_id, start_seq, end_seq, next_to_use, status, created_at)
+             VALUES ('L1', 'cat-f', 'dev-1', 's1', 1, 50, 1, 'active', '2026-07-21T12:00:00Z')",
+            [],
+        )
+        .unwrap();
+    }
+
+    fn seed_pending(
+        conn: &Connection,
+        id: &str,
+        lease_id: Option<&str>,
+        idempotency_key: &str,
+        attempts: i32,
+        status: &str,
+    ) {
+        conn.execute(
+            "INSERT INTO local_pending_identifiers
+                (id, idempotency_key, category_id, device_id, identifier, sequence, lease_id,
+                 sector_id, status, attempts, created_at)
+             VALUES (?1, ?2, 'cat-f', 'dev-1', 'TST-001', 1, ?3, 's1', ?4, ?5, '2026-07-21T12:00:00Z')",
+            params![id, idempotency_key, lease_id, status, attempts],
+        )
+        .unwrap();
+    }
+
+    fn make_single_batch(item: PendingIdentifier) -> IdentifierSyncBatch {
+        let key = item.idempotency_key.clone();
+        IdentifierSyncBatch {
+            lease_id: item.lease_id.clone(),
+            items: vec![item],
+            idempotency_key: key,
+        }
+    }
+
+    // ============================================================
+    // classify_backend_error tests
+    // ============================================================
+    #[test]
+    fn classify_out_of_order() {
+        assert_eq!(
+            classify_backend_error("Sequência fora de ordem. Esperado 5, recebido 7."),
+            BackendErrorKind::OutOfOrder
+        );
+        assert_eq!(
+            classify_backend_error("fora de ordem"),
+            BackendErrorKind::OutOfOrder
+        );
+    }
+
+    #[test]
+    fn classify_lease_inactive() {
+        assert_eq!(
+            classify_backend_error("Lease não encontrado."),
+            BackendErrorKind::LeaseInactive
+        );
+        assert_eq!(
+            classify_backend_error("Lease não está activo."),
+            BackendErrorKind::LeaseInactive
+        );
+        assert_eq!(
+            classify_backend_error("Lease já não está activo."),
+            BackendErrorKind::LeaseInactive
+        );
+    }
+
+    #[test]
+    fn classify_other() {
+        assert_eq!(
+            classify_backend_error("Dispositivo não encontrado."),
+            BackendErrorKind::OtherBackendError
+        );
+        assert_eq!(
+            classify_backend_error("Categoria não encontrada."),
+            BackendErrorKind::OtherBackendError
+        );
+        assert_eq!(
+            classify_backend_error("Erro desconhecido."),
+            BackendErrorKind::OtherBackendError
+        );
+    }
+
+    // ============================================================
+    // apply_identifier_error tests
+    // ============================================================
+    #[test]
+    fn apply_error_terminal_marks_failed_immediately() {
+        let (dir, _state, mut conn) = identifier_test_env();
+        ensure_category(&conn);
+        seed_pending(&conn, "p1", None, "k-1", 0, "pending");
+        let items = vec![make_pending("p1", None, "k-1", "2026-07-21T12:00:00Z", 0)];
+        let batch = make_single_batch(items.into_iter().next().unwrap());
+
+        apply_identifier_error(&mut conn, &batch, "erro de validação", true).unwrap();
+
+        let (status, attempts, last_error): (String, i32, Option<String>) = conn
+            .query_row(
+                "SELECT status, attempts, last_error FROM local_pending_identifiers WHERE id = 'p1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(status, "failed", "terminal error must mark as failed immediately");
+        assert_eq!(attempts, 1);
+        assert_eq!(last_error.as_deref(), Some("erro de validação"));
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn apply_error_non_terminal_stays_pending_within_limit() {
+        let (dir, _state, mut conn) = identifier_test_env();
+        ensure_category(&conn);
+        seed_pending(&conn, "p1", None, "k-1", 0, "pending");
+        let items = vec![make_pending("p1", None, "k-1", "2026-07-21T12:00:00Z", 0)];
+        let batch = make_single_batch(items.into_iter().next().unwrap());
+
+        apply_identifier_error(&mut conn, &batch, "timeout", false).unwrap();
+
+        let (status, attempts): (String, i32) = conn
+            .query_row(
+                "SELECT status, attempts FROM local_pending_identifiers WHERE id = 'p1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(status, "pending", "non-terminal within limit must stay pending");
+        assert_eq!(attempts, 1);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn apply_error_non_terminal_hits_max_attempts() {
+        let (dir, _state, mut conn) = identifier_test_env();
+        // Start at attempt 2 so that +1 = 3 = MAX_ATTEMPTS
+        ensure_category(&conn);
+        seed_pending(&conn, "p1", None, "k-1", 2, "pending");
+        let items = vec![make_pending("p1", None, "k-1", "2026-07-21T12:00:00Z", 2)];
+        let batch = make_single_batch(items.into_iter().next().unwrap());
+
+        apply_identifier_error(&mut conn, &batch, "limite excedido", false).unwrap();
+
+        let (status, attempts): (String, i32) = conn
+            .query_row(
+                "SELECT status, attempts FROM local_pending_identifiers WHERE id = 'p1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(status, "failed", "must become failed when attempts >= MAX_ATTEMPTS");
+        assert_eq!(attempts, 3);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    // ============================================================
+    // handle_identifier_response — state transitions
+    // ============================================================
+    #[test]
+    fn response_ok_marks_synced() {
+        let (dir, state, mut conn) = identifier_test_env();
+        ensure_category(&conn);
+        seed_pending(&conn, "p1", None, "k-1", 0, "pending");
+        let items = vec![make_pending("p1", None, "k-1", "2026-07-21T12:00:00Z", 0)];
+        let batch = make_single_batch(items.into_iter().next().unwrap());
+
+        handle_identifier_response(
+            &mut conn,
+            &state,
+            &batch,
+            Ok(serde_json::json!({"data": [{"id": "r1", "identifier": "TST-001"}]})),
+        )
+        .unwrap();
+
+        let (status, attempts, last_error): (String, i32, Option<String>) = conn
+            .query_row(
+                "SELECT status, attempts, last_error FROM local_pending_identifiers WHERE id = 'p1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(status, "synced");
+        assert_eq!(attempts, 0);
+        assert_eq!(last_error, None);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn response_ok_idempotent_retry_never_calls_classify() {
+        let (dir, state, mut conn) = identifier_test_env();
+        ensure_category(&conn);
+        seed_pending(&conn, "p1", None, "k-1", 0, "pending");
+        let items = vec![make_pending("p1", None, "k-1", "2026-07-21T12:00:00Z", 0)];
+        let batch = make_single_batch(items.into_iter().next().unwrap());
+
+        // First call succeeds
+        handle_identifier_response(
+            &mut conn,
+            &state,
+            &batch,
+            Ok(serde_json::json!({"data": [{"id": "r1"}]})),
+        )
+        .unwrap();
+
+        // Second call also succeeds (backend returns cached result for same idempotencyKey)
+        handle_identifier_response(
+            &mut conn,
+            &state,
+            &batch,
+            Ok(serde_json::json!({"data": [{"id": "r1"}]})),
+        )
+        .unwrap();
+
+        // Items remain synced
+        let count: i32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM local_pending_identifiers WHERE status = 'synced' AND id = 'p1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1, "idempotent retry must keep items synced");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn response_out_of_order_marks_conflict() {
+        let (dir, state, mut conn) = identifier_test_env();
+        ensure_category(&conn);
+        seed_pending(&conn, "p1", None, "k-1", 0, "pending");
+        let items = vec![make_pending("p1", None, "k-1", "2026-07-21T12:00:00Z", 0)];
+        let batch = make_single_batch(items.into_iter().next().unwrap());
+
+        handle_identifier_response(
+            &mut conn,
+            &state,
+            &batch,
+            Err(SyncBatchError::Backend {
+                code: "REGISTER_OFFLINE_ERROR".into(),
+                message: "Sequência fora de ordem. Esperado 5, recebido 7.".into(),
+            }),
+        )
+        .unwrap();
+
+        let (status, conflict_reason, last_error): (String, Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT status, conflict_reason, last_error FROM local_pending_identifiers WHERE id = 'p1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(status, "conflict");
+        assert_eq!(conflict_reason.as_deref(), Some("OUT_OF_ORDER"));
+        assert!(last_error.unwrap().contains("fora de ordem"));
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn response_other_backend_increments_attempts() {
+        let (dir, state, mut conn) = identifier_test_env();
+        ensure_category(&conn);
+        seed_pending(&conn, "p1", None, "k-1", 0, "pending");
+        let items = vec![make_pending("p1", None, "k-1", "2026-07-21T12:00:00Z", 0)];
+        let batch = make_single_batch(items.into_iter().next().unwrap());
+
+        handle_identifier_response(
+            &mut conn,
+            &state,
+            &batch,
+            Err(SyncBatchError::Backend {
+                code: "REGISTER_OFFLINE_ERROR".into(),
+                message: "Dispositivo não encontrado.".into(),
+            }),
+        )
+        .unwrap();
+
+        let (status, attempts): (String, i32) = conn
+            .query_row(
+                "SELECT status, attempts FROM local_pending_identifiers WHERE id = 'p1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(status, "pending", "other backend error within limit stays pending");
+        assert_eq!(attempts, 1);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn response_validation_terminal_marks_failed() {
+        let (dir, state, mut conn) = identifier_test_env();
+        ensure_category(&conn);
+        seed_pending(&conn, "p1", None, "k-1", 0, "pending");
+        let items = vec![make_pending("p1", None, "k-1", "2026-07-21T12:00:00Z", 0)];
+        let batch = make_single_batch(items.into_iter().next().unwrap());
+
+        handle_identifier_response(
+            &mut conn,
+            &state,
+            &batch,
+            Err(SyncBatchError::Validation(
+                "Fiscal batch items have inconsistent device_id".into(),
+            )),
+        )
+        .unwrap();
+
+        let (status, attempts): (String, i32) = conn
+            .query_row(
+                "SELECT status, attempts FROM local_pending_identifiers WHERE id = 'p1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(status, "failed", "Validation errors must be terminal");
+        assert_eq!(attempts, 1);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn response_network_increments_attempts() {
+        let (dir, state, mut conn) = identifier_test_env();
+        ensure_category(&conn);
+        seed_pending(&conn, "p1", None, "k-1", 0, "pending");
+        let items = vec![make_pending("p1", None, "k-1", "2026-07-21T12:00:00Z", 0)];
+        let batch = make_single_batch(items.into_iter().next().unwrap());
+
+        handle_identifier_response(
+            &mut conn,
+            &state,
+            &batch,
+            Err(SyncBatchError::Network("timeout".into())),
+        )
+        .unwrap();
+
+        let (status, attempts): (String, i32) = conn
+            .query_row(
+                "SELECT status, attempts FROM local_pending_identifiers WHERE id = 'p1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(status, "pending");
+        assert_eq!(attempts, 1);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    // ============================================================
+    // LeaseInactive handler tests
+    // ============================================================
+    #[test]
+    fn response_lease_inactive_calls_mark_released() {
+        let (dir, state, mut conn) = identifier_test_env();
+        ensure_category(&conn);
+        ensure_lease(&conn);
+        seed_pending(&conn, "p1", Some("L1"), "k-1", 0, "pending");
+        let items = vec![make_pending("p1", Some("L1"), "k-1", "2026-07-21T12:00:00Z", 0)];
+        let batch = make_single_batch(items.into_iter().next().unwrap());
+
+        handle_identifier_response(
+            &mut conn,
+            &state,
+            &batch,
+            Err(SyncBatchError::Backend {
+                code: "REGISTER_OFFLINE_ERROR".into(),
+                message: "Lease não está activo.".into(),
+            }),
+        )
+        .unwrap();
+
+        // Lease should be marked remote_released
+        let lease_status: String = conn
+            .query_row(
+                "SELECT status FROM local_identifier_lease WHERE id = 'L1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(lease_status, "remote_released");
+
+        // Pending should be marked conflict
+        let (status, conflict_reason): (String, Option<String>) = conn
+            .query_row(
+                "SELECT status, conflict_reason FROM local_pending_identifiers WHERE id = 'p1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(status, "conflict");
+        assert_eq!(conflict_reason.as_deref(), Some("LEASE_FORCE_RELEASED"));
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn response_lease_inactive_fallback_on_error() {
+        let (dir, state, mut conn) = identifier_test_env();
+        ensure_category(&conn);
+        // Lease must exist for FK when inserting pending item, then we remove it
+        ensure_lease(&conn);
+        seed_pending(&conn, "p1", Some("L1"), "k-1", 0, "pending");
+        // Remove lease row so mark_lease_remote_released_inner (which opens its own
+        // connection) does not find it and returns Err.
+        conn.execute("PRAGMA foreign_keys = OFF", []).unwrap();
+        conn.execute("DELETE FROM local_identifier_lease WHERE id = 'L1'", [])
+            .unwrap();
+        conn.execute("PRAGMA foreign_keys = ON", []).unwrap();
+
+        let items = vec![make_pending("p1", Some("L1"), "k-1", "2026-07-21T12:00:00Z", 0)];
+        let batch = make_single_batch(items.into_iter().next().unwrap());
+
+        handle_identifier_response(
+            &mut conn,
+            &state,
+            &batch,
+            Err(SyncBatchError::Backend {
+                code: "REGISTER_OFFLINE_ERROR".into(),
+                message: "Lease não encontrado.".into(),
+            }),
+        )
+        .unwrap();
+
+        // mark_lease_remote_released_inner failed → fallback to apply_identifier_error
+        let (status, attempts): (String, i32) = conn
+            .query_row(
+                "SELECT status, attempts FROM local_pending_identifiers WHERE id = 'p1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(status, "pending", "fallback must use error handling logic");
+        assert_eq!(attempts, 1);
+        // Last error should mention the fallback
+        let last_error: Option<String> = conn
+            .query_row(
+                "SELECT last_error FROM local_pending_identifiers WHERE id = 'p1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(
+            last_error.unwrap().contains("LeaseInactive handler error"),
+            "fallback error must include LeaseInactive handler failure"
+        );
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    // ============================================================
+    // lease_needs_renewal tests
+    // ============================================================
+
+    fn make_lease(
+        id: &str,
+        start_seq: i32,
+        end_seq: i32,
+        next_to_use: i32,
+    ) -> LeaseInfo {
+        LeaseInfo {
+            id: id.to_string(),
+            category_id: "cat-f".into(),
+            device_id: "dev-1".into(),
+            sector_id: "s1".into(),
+            start_seq,
+            end_seq,
+            next_to_use,
+            status: "active".into(),
+            created_at: "2026-07-21T12:00:00Z".into(),
+        }
+    }
+
+    #[test]
+    fn lease_renewal_exhausted() {
+        let lease = make_lease("L1", 1, 50, 51);
+        assert!(lease_needs_renewal(&lease), "next_to_use > end_seq must signal renewal");
+    }
+
+    #[test]
+    fn lease_renewal_at_20_percent_threshold() {
+        // 80% used of 100 = used 80, remaining 20
+        let lease = make_lease("L1", 1, 100, 81);
+        assert!(lease_needs_renewal(&lease), "80% used must signal renewal");
+    }
+
+    #[test]
+    fn lease_renewal_just_under_threshold() {
+        // 79% used of 100 = used 79, remaining 21
+        let lease = make_lease("L1", 1, 100, 80);
+        assert!(!lease_needs_renewal(&lease), "79% used must NOT signal renewal");
+    }
+
+    #[test]
+    fn lease_renewal_fresh_lease() {
+        let lease = make_lease("L1", 1, 50, 1);
+        assert!(!lease_needs_renewal(&lease), "fresh lease must NOT signal renewal");
+    }
+
+    #[test]
+    fn lease_renewal_single_item_lease() {
+        // Batch size = 1 (end_seq == start_seq), just used the only number
+        let lease = make_lease("L1", 42, 42, 43);
+        assert!(lease_needs_renewal(&lease), "exhausted single-item lease must signal renewal");
+    }
+
+    #[test]
+    fn lease_renewal_single_item_fresh() {
+        // Batch size = 1, not yet used
+        let lease = make_lease("L1", 42, 42, 42);
+        assert!(!lease_needs_renewal(&lease), "fresh single-item lease must NOT signal renewal");
+    }
+
+    #[test]
+    fn lease_renewal_exactly_at_end() {
+        // next_to_use == end_seq, the last number is about to be used
+        let lease = make_lease("L1", 1, 10, 10);
+        // used = 9, total = 10, 9*100/10 = 90% >= 80
+        assert!(lease_needs_renewal(&lease), "at last number (90% used) must signal renewal");
+    }
+
+    #[test]
+    fn lease_renewal_large_lease_just_below() {
+        // 199 used out of 250 = 79.6%, truncated to 79% by integer math
+        let lease = make_lease("L1", 1, 250, 200);
+        assert!(!lease_needs_renewal(&lease), "79.6%% used (integer 79%%) must NOT signal renewal");
+    }
+
+    #[test]
+    fn lease_renewal_large_lease_at_threshold() {
+        // 200 used out of 250 = exactly 80%
+        let lease = make_lease("L1", 1, 250, 201);
+        assert!(lease_needs_renewal(&lease), "80%% used must signal renewal");
+    }
+
+    // ============================================================
+    // fetch_active_leases tests
+    // ============================================================
+    #[test]
+    fn fetch_active_leases_returns_only_active() {
+        let (dir, _state, conn) = identifier_test_env();
+        ensure_category(&conn);
+
+        // Insert two leases: one active, one exhausted
+        conn.execute(
+            "INSERT INTO local_identifier_lease (id, category_id, device_id, sector_id, start_seq, end_seq, next_to_use, status, created_at)
+             VALUES ('L-active', 'cat-f', 'dev-1', 's1', 1, 50, 1, 'active', '2026-07-21T12:00:00Z')",
+            [],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO local_identifier_lease (id, category_id, device_id, sector_id, start_seq, end_seq, next_to_use, status, created_at)
+             VALUES ('L-exhausted', 'cat-f', 'dev-1', 's1', 51, 100, 101, 'exhausted', '2026-07-21T12:00:01Z')",
+            [],
+        ).unwrap();
+
+        let leases = fetch_active_leases(&conn).unwrap();
+        assert_eq!(leases.len(), 1, "only active leases should be returned");
+        assert_eq!(leases[0].id, "L-active");
+        assert_eq!(leases[0].status, "active");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn fetch_active_leases_empty_when_none_active() {
+        let (dir, _state, conn) = identifier_test_env();
+        ensure_category(&conn);
+
+        conn.execute(
+            "INSERT INTO local_identifier_lease (id, category_id, device_id, sector_id, start_seq, end_seq, next_to_use, status, created_at)
+             VALUES ('L-ex', 'cat-f', 'dev-1', 's1', 1, 50, 51, 'exhausted', '2026-07-21T12:00:00Z')",
+            [],
+        ).unwrap();
+
+        let leases = fetch_active_leases(&conn).unwrap();
+        assert!(leases.is_empty(), "no active leases should return empty vec");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    // ============================================================
+    // apply_lease_renewal tests
+    // ============================================================
+
+    fn make_new_lease(id: &str, start_seq: i32, end_seq: i32) -> NewLeaseData {
+        NewLeaseData {
+            id: id.to_string(),
+            category_id: "cat-f".into(),
+            device_id: "dev-1".into(),
+            sector_id: "s1".into(),
+            start_seq,
+            end_seq,
+            created_at: "2026-07-21T12:00:00Z".into(),
+        }
+    }
+
+    #[test]
+    fn apply_renewal_success() {
+        let (dir, _state, mut conn) = identifier_test_env();
+        ensure_category(&conn);
+        ensure_lease(&conn); // creates lease 'L1' active, 1..50
+
+        let new_lease = make_new_lease("L2", 51, 100);
+        let applied = apply_lease_renewal(&mut conn, "L1", &new_lease).unwrap();
+        assert!(applied, "renewal must succeed when old lease is active");
+
+        // Old lease marked exhausted
+        let old_status: String = conn
+            .query_row(
+                "SELECT status FROM local_identifier_lease WHERE id = 'L1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(old_status, "exhausted");
+
+        // New lease inserted as active
+        let (new_status, new_start, new_end): (String, i32, i32) = conn
+            .query_row(
+                "SELECT status, start_seq, end_seq FROM local_identifier_lease WHERE id = 'L2'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(new_status, "active");
+        assert_eq!(new_start, 51);
+        assert_eq!(new_end, 100);
+
+        // Only one active lease for cat-f/s1 (unique index enforced)
+        let active_count: i32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM local_identifier_lease WHERE category_id = 'cat-f' AND sector_id = 's1' AND status = 'active'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(active_count, 1, "exactly one active lease must exist after renewal");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn apply_renewal_race_lost() {
+        let (dir, _state, mut conn) = identifier_test_env();
+        ensure_category(&conn);
+        ensure_lease(&conn);
+
+        // Simulate another process already exhausting the lease
+        conn.execute(
+            "UPDATE local_identifier_lease SET status = 'exhausted' WHERE id = 'L1'",
+            [],
+        )
+        .unwrap();
+
+        let new_lease = make_new_lease("L2", 51, 100);
+        let applied = apply_lease_renewal(&mut conn, "L1", &new_lease).unwrap();
+        assert!(!applied, "must return false when old lease is already exhausted");
+
+        // New lease must NOT have been inserted
+        let count: i32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM local_identifier_lease WHERE id = 'L2'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0, "new lease must not be inserted when race is lost");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn apply_renewal_idempotent_same_new_lease() {
+        let (dir, _state, mut conn) = identifier_test_env();
+        ensure_category(&conn);
+        ensure_lease(&conn);
+
+        let new_lease = make_new_lease("L2", 51, 100);
+
+        // First call succeeds
+        let first = apply_lease_renewal(&mut conn, "L1", &new_lease).unwrap();
+        assert!(first);
+
+        // Second call with same old ID: old is already exhausted, race lost
+        let second = apply_lease_renewal(&mut conn, "L1", &new_lease).unwrap();
+        assert!(!second, "second call with exhausted old lease must lose race");
+
+        // Still only one active lease
+        let active_count: i32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM local_identifier_lease WHERE category_id = 'cat-f' AND sector_id = 's1' AND status = 'active'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(active_count, 1, "unique index must prevent duplicate active leases");
+        fs::remove_dir_all(&dir).ok();
+    }
 }
-
-
