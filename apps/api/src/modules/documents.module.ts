@@ -4,7 +4,7 @@ import path from "node:path";
 import { attachDocument, getDocumentMeta, downloadDocument, canAccessDocument } from "../services/attachment.service";
 import { getSharedDocIds } from "../services/identifier.service";
 import { requireAuth, getFreshRoles } from "../middleware/auth";
-import { documents, documentShares, approvals, sectors, auditLogs, identifiers, users } from "../db/schema";
+import { documents, documentShares, approvals, sectors, auditLogs, identifiers, users, documentAccessRequests } from "../db/schema";
 import { eq, and, isNull, or, desc } from "drizzle-orm";
 import { notify } from "../services/notification.service";
 import { withTenant } from "../db/withTenant";
@@ -487,6 +487,10 @@ export const documentsModule = new Elysia({ prefix: "/documents" })
             set.status = 422; return { error: { code: "NOT_RESTRICTED", message: "Apenas documentos sector_only necessitam de pedido de acesso." } };
           }
 
+          if (idRow.document.uploadedBy === auth!.userId) {
+            set.status = 422; return { error: { code: "OWN_DOCUMENT", message: "É dono do documento — não precisa de pedir acesso." } };
+          }
+
           const supervisorId = idRow.sector?.supervisorId;
           if (!supervisorId) {
             set.status = 422; return { error: { code: "NO_SUPERVISOR", message: "Sector emitente não tem supervisor definido." } };
@@ -509,40 +513,37 @@ export const documentsModule = new Elysia({ prefix: "/documents" })
             return { error: { code: "ALREADY_HAS_ACCESS", message: "Já tem acesso a este documento." } };
           }
 
-          const existing = await tx.query.approvals.findFirst({
+          const existing = await tx.query.documentAccessRequests.findFirst({
             where: and(
-              eq(approvals.documentId, idRow.document.id),
-              eq(approvals.requesterId, auth!.userId),
-              eq(approvals.type, "access_request"),
-              eq(approvals.status, "pending"),
+              eq(documentAccessRequests.documentId, idRow.document.id),
+              eq(documentAccessRequests.requesterId, auth!.userId),
+              eq(documentAccessRequests.status, "pending"),
             ),
           });
           if (existing) {
             set.status = 409; return { error: { code: "ALREADY_REQUESTED", message: "Já existe um pedido de acesso pendente para este documento." } };
           }
 
-          const [approval] = await tx.insert(approvals).values({
+          const [request] = await tx.insert(documentAccessRequests).values({
             tenantId, documentId: idRow.document.id,
-            sectorId: idRow.sectorId, supervisorId,
-            requesterId: auth!.userId, type: "access_request",
-            notes: body.reason ?? null,
+            requesterId: auth!.userId,
           }).returning();
 
           await notify(tx, {
             type: "access:requested",
             userId: supervisorId,
             tenantId,
-            payload: { documentId: idRow.document.id, identifier: params.param, requesterId: auth!.userId },
+            payload: { documentId: idRow.document.id, identifier: params.param, requesterId: auth!.userId, requestId: request.id },
           });
 
           await tx.insert(auditLogs).values({
             tenantId, userId: auth!.userId, action: "REQUEST_ACCESS",
             resource: "documents", resourceId: idRow.document.id,
-            metadata: JSON.stringify({ identifier: params.param, approvalId: approval.id }),
+            metadata: JSON.stringify({ identifier: params.param, requestId: request.id }),
             ip: clientIp,
           });
 
-          return { data: approval };
+          return { data: request };
         } catch (err: any) {
           console.error("[REQUEST_ACCESS_ERROR]", err);
           throw err;
@@ -558,6 +559,208 @@ export const documentsModule = new Elysia({ prefix: "/documents" })
     detail: { summary: "Solicitar acesso a documento sector_only", tags: ["Documentos"] },
   })
 
+  .get("/:param/access-requests", async ({ tenantId, auth, params, set }) => {
+    try {
+      return await withTenant(tenantId, async (tx) => {
+        try {
+          const idRow = await tx.query.identifiers.findFirst({
+            where: and(eq(identifiers.identifier, params.param), eq(identifiers.tenantId, tenantId)),
+            with: { document: true, sector: true },
+          });
+          if (!idRow?.document) {
+            set.status = 404; return { error: { code: "NOT_FOUND", message: "Documento não encontrado." } };
+          }
+
+          const isOwner = idRow.document.uploadedBy === auth!.userId;
+          const isSupervisor = idRow.sector?.supervisorId === auth!.userId;
+
+          if (!isOwner && !isSupervisor) {
+            const myRequests = await tx.query.documentAccessRequests.findMany({
+              where: and(
+                eq(documentAccessRequests.documentId, idRow.document.id),
+                eq(documentAccessRequests.requesterId, auth!.userId),
+              ),
+              with: { requester: true, resolver: true },
+              orderBy: [documentAccessRequests.createdAt],
+            });
+            return { data: myRequests };
+          }
+
+          const allRequests = await tx.query.documentAccessRequests.findMany({
+            where: eq(documentAccessRequests.documentId, idRow.document.id),
+            with: { requester: true, resolver: true },
+            orderBy: [documentAccessRequests.createdAt],
+          });
+          return { data: allRequests };
+        } catch (err: any) {
+          console.error("[ACCESS_REQUESTS_ERROR]", err);
+          throw err;
+        }
+      });
+    } catch (err: any) {
+      set.status = 500;
+      return { error: { code: "ACCESS_REQUESTS_ERROR", message: safeError(err) } };
+    }
+  }, {
+    params: t.Object({ param: t.String() }),
+    detail: { summary: "Listar pedidos de acesso do documento", tags: ["Documentos"] },
+  })
+
+  .patch("/:param/access-requests/:requestId", async ({ tenantId, auth, params, body, set, clientIp }) => {
+    try {
+      return await withTenant(tenantId, async (tx) => {
+        try {
+          const idRow = await tx.query.identifiers.findFirst({
+            where: and(eq(identifiers.identifier, params.param), eq(identifiers.tenantId, tenantId)),
+            with: { document: true, sector: true },
+          });
+          if (!idRow?.document) {
+            set.status = 404; return { error: { code: "NOT_FOUND", message: "Documento não encontrado." } };
+          }
+
+          const req = await tx.query.documentAccessRequests.findFirst({
+            where: and(
+              eq(documentAccessRequests.id, params.requestId),
+              eq(documentAccessRequests.documentId, idRow.document.id),
+            ),
+          });
+          if (!req) {
+            set.status = 404; return { error: { code: "NOT_FOUND", message: "Pedido de acesso não encontrado." } };
+          }
+          if (req.status !== "pending") {
+            set.status = 400; return { error: { code: "ALREADY_RESOLVED", message: "Pedido já foi resolvido." } };
+          }
+
+          const isOwner = idRow.document.uploadedBy === auth!.userId;
+          const isSupervisor = idRow.sector?.supervisorId === auth!.userId;
+          if (!isOwner && !isSupervisor) {
+            set.status = 403; return { error: { code: "FORBIDDEN", message: "Apenas o dono do documento ou o supervisor do sector podem resolver este pedido." } };
+          }
+
+          if (body.status === "approved") {
+            const now = new Date();
+            await tx.update(documentAccessRequests)
+              .set({ status: "approved", resolvedBy: auth!.userId, resolvedAt: now })
+              .where(eq(documentAccessRequests.id, params.requestId));
+
+            const [share] = await tx.insert(documentShares).values({
+              documentId: idRow.document.id,
+              sharedBy: auth!.userId,
+              sharedWithUserId: req.requesterId,
+              sourceRequestId: req.id,
+            }).returning();
+
+            await notify(tx, {
+              type: "access:granted",
+              userId: req.requesterId,
+              tenantId,
+              payload: { documentId: idRow.document.id, identifier: params.param, shareId: share.id },
+            });
+
+            await tx.insert(auditLogs).values({
+              tenantId, userId: auth!.userId, action: "ACCESS_APPROVED",
+              resource: "documents", resourceId: idRow.document.id,
+              metadata: JSON.stringify({ requestId: params.requestId }),
+              ip: clientIp,
+            });
+          } else {
+            const now = new Date();
+            await tx.update(documentAccessRequests)
+              .set({ status: "denied", resolvedBy: auth!.userId, resolvedAt: now })
+              .where(eq(documentAccessRequests.id, params.requestId));
+
+            await notify(tx, {
+              type: "access:rejected",
+              userId: req.requesterId,
+              tenantId,
+              payload: { documentId: idRow.document.id, identifier: params.param, notes: body.notes },
+            });
+
+            await tx.insert(auditLogs).values({
+              tenantId, userId: auth!.userId, action: "ACCESS_DENIED",
+              resource: "documents", resourceId: idRow.document.id,
+              metadata: JSON.stringify({ requestId: params.requestId, notes: body.notes }),
+              ip: clientIp,
+            });
+          }
+
+          const updated = await tx.query.documentAccessRequests.findFirst({
+            where: eq(documentAccessRequests.id, params.requestId),
+          });
+          return { data: updated };
+        } catch (err: any) {
+          console.error("[ACCESS_REQUEST_RESOLVE_ERROR]", err);
+          throw err;
+        }
+      });
+    } catch (err: any) {
+      set.status = 400;
+      return { error: { code: "ACCESS_REQUEST_ERROR", message: safeError(err) } };
+    }
+  }, {
+    params: t.Object({ param: t.String(), requestId: t.String() }),
+    body: t.Object({
+      status: t.Union([t.Literal("approved"), t.Literal("denied")]),
+      notes: t.Optional(t.String()),
+    }),
+    detail: { summary: "Aprovar ou rejeitar pedido de acesso", tags: ["Documentos"] },
+  })
+
+  .post("/:param/access-requests/:requestId/cancel", async ({ tenantId, auth, params, set, clientIp }) => {
+    try {
+      return await withTenant(tenantId, async (tx) => {
+        try {
+          const idRow = await tx.query.identifiers.findFirst({
+            where: and(eq(identifiers.identifier, params.param), eq(identifiers.tenantId, tenantId)),
+            with: { document: true },
+          });
+          if (!idRow?.document) {
+            set.status = 404; return { error: { code: "NOT_FOUND", message: "Documento não encontrado." } };
+          }
+
+          const req = await tx.query.documentAccessRequests.findFirst({
+            where: and(
+              eq(documentAccessRequests.id, params.requestId),
+              eq(documentAccessRequests.documentId, idRow.document.id),
+            ),
+          });
+          if (!req) {
+            set.status = 404; return { error: { code: "NOT_FOUND", message: "Pedido de acesso não encontrado." } };
+          }
+          if (req.requesterId !== auth!.userId) {
+            set.status = 403; return { error: { code: "FORBIDDEN", message: "Apenas o requerente pode cancelar o próprio pedido." } };
+          }
+          if (req.status !== "pending") {
+            set.status = 400; return { error: { code: "ALREADY_RESOLVED", message: "Pedido já foi resolvido." } };
+          }
+
+          const [updated] = await tx.update(documentAccessRequests)
+            .set({ status: "cancelled" })
+            .where(eq(documentAccessRequests.id, params.requestId))
+            .returning();
+
+          await tx.insert(auditLogs).values({
+            tenantId, userId: auth!.userId, action: "CANCEL_ACCESS_REQUEST",
+            resource: "documents", resourceId: idRow.document.id,
+            metadata: JSON.stringify({ requestId: params.requestId }),
+            ip: clientIp,
+          });
+
+          return { data: updated };
+        } catch (err: any) {
+          console.error("[CANCEL_ACCESS_REQUEST_ERROR]", err);
+          throw err;
+        }
+      });
+    } catch (err: any) {
+      set.status = 400;
+      return { error: { code: "CANCEL_REQUEST_ERROR", message: safeError(err) } };
+    }
+  }, {
+    params: t.Object({ param: t.String(), requestId: t.String() }),
+    detail: { summary: "Cancelar próprio pedido de acesso", tags: ["Documentos"] },
+  })
+
   .patch("/:param/shares/:shareId/revoke", async ({ tenantId, auth, params, set, clientIp }) => {
     try {
       return await withTenant(tenantId, async (tx) => {
@@ -569,18 +772,24 @@ export const documentsModule = new Elysia({ prefix: "/documents" })
           if (!idRow?.document) {
             set.status = 404; return { error: { code: "NOT_FOUND", message: "Documento não encontrado." } };
           }
-          if (!(await canShareDocument(tx, auth!, idRow.sectorId, idRow.document.uploadedBy))) {
+                    if (!(await canShareDocument(tx, auth!, idRow.sectorId, idRow.document.uploadedBy))) {
             set.status = 403; return { error: { code: "FORBIDDEN", message: "Não tem permissão para revogar partilhas." } };
           }
+
+          const existingShare = await tx.query.documentShares.findFirst({
+            where: and(eq(documentShares.id, params.shareId), eq(documentShares.documentId, idRow.document.id)),
+          });
+          if (!existingShare || existingShare.revokedAt) {
+            set.status = 404; return { error: { code: "NOT_FOUND", message: "Partilha não encontrada ou já revogada." } };
+          }
+          if (existingShare.sourceRequestId) {
+            set.status = 403; return { error: { code: "CANNOT_REVOKE", message: "Acesso concedido por pedido de acesso não pode ser revogado." } };
+          }
+
           const [share] = await tx.update(documentShares)
             .set({ revokedAt: new Date() })
-            .where(and(
-              eq(documentShares.id, params.shareId),
-              eq(documentShares.documentId, idRow.document.id),
-              isNull(documentShares.revokedAt),
-            ))
+            .where(eq(documentShares.id, params.shareId))
             .returning();
-          if (!share) { set.status = 404; return { error: { code: "NOT_FOUND", message: "Partilha não encontrada ou já revogada." } }; }
 
           if (share.sharedWithUserId) {
             await notify(tx, {

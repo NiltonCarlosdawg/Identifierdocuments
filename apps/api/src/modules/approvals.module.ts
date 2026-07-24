@@ -108,21 +108,6 @@ export const approvalsModule = new Elysia({ prefix: "/approvals" })
           const identifierStr = doc?.identifier?.identifier;
 
           if (body.status === "approved") {
-            if (existing.type === "access_request" && existing.requesterId) {
-              await tx.insert(documentShares).values({
-                documentId: approval.documentId, sharedBy: auth!.userId,
-                sharedWithUserId: existing.requesterId,
-              });
-              await notify(tx, {
-                type: "access:granted",
-                userId: existing.requesterId,
-                tenantId,
-                payload: {
-                  documentId: approval.documentId,
-                  identifier: identifierStr,
-                },
-              });
-            }
             if (existing.type === "cross_sector" && existing.shareId) {
               const [updatedShare] = await tx.update(documentShares)
                 .set({ status: "active" })

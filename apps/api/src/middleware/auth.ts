@@ -2,7 +2,7 @@ import { Elysia } from "elysia";
 import { jwtVerify } from "jose";
 import { SignJWT } from "jose";
 import { db } from "../db";
-import { userRoles, roles } from "../db/schema";
+import { userRoles, roles, users } from "../db/schema";
 import { eq, and } from "drizzle-orm";
 
 const rawSecret = process.env.JWT_SECRET;
@@ -101,6 +101,45 @@ export function requireRole(...requiredRoles: string[]) {
         if (!requiredRoles.some((r) => roleNames.includes(r))) {
           ctx.set.status = 403;
           return { error: { code: "FORBIDDEN", message: "Permissão insuficiente." } };
+        }
+      },
+    });
+}
+
+/** Garante que o utilizador autenticado tem um sector atribuído.
+ *
+ * - `derive`: busca o sector do utilizador (PK lookup, sem risco cross-tenant)
+ *   e expõe `sectorScopeId` no contexto para os handlers consumirem.
+ *   Usa `db` directamente (não `withTenant`) porque os hooks Elysia correm
+ *   antes do handler e não têm acesso à transacção — seguro porque a query
+ *   é `WHERE users.id = ?` (PK única, sem leak entre tenants).
+ * - `guard`: nega 401 sem auth, 403 sem sector.
+ *
+ * Opcionalmente aceita `bypassRoles` — array de nomes de role que passam
+ * o guard mesmo sem `sectorId` (ex.: `requireSectorScope({ bypassRoles: ["ORG_ADMIN"] })`). */
+export function requireSectorScope(opts?: { bypassRoles?: string[] }) {
+  return (app: Elysia) => app
+    .derive({ as: "scoped" }, async (ctx: any) => {
+      if (!ctx.auth) return {};
+      const [user] = await db
+        .select({ sectorId: users.sectorId })
+        .from(users)
+        .where(eq(users.id, ctx.auth.userId));
+      return { sectorScopeId: user?.sectorId ?? null };
+    })
+    .guard({
+      beforeHandle: async (ctx: any) => {
+        if (!ctx.auth) {
+          ctx.set.status = 401;
+          return { error: { code: "UNAUTHORIZED", message: "Autenticação necessária." } };
+        }
+        if (opts?.bypassRoles?.length) {
+          const roleNames = await getFreshRoles(ctx.auth.userId, ctx.auth.tenantId);
+          if (opts.bypassRoles.some((r) => roleNames.includes(r))) return;
+        }
+        if (!ctx.sectorScopeId) {
+          ctx.set.status = 403;
+          return { error: { code: "FORBIDDEN", message: "Utilizador sem sector atribuído." } };
         }
       },
     });

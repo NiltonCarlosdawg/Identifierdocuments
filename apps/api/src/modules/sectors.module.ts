@@ -2,7 +2,7 @@ import { Elysia, t } from "elysia";
 import { db } from "../db";
 import { sectors, users } from "../db/schema";
 import { eq, and, sql } from "drizzle-orm";
-import { requireAuth, requireRole } from "../middleware/auth";
+import { requireAuth, requireRole, requireSectorScope, getFreshRoles } from "../middleware/auth";
 import { withTenant } from "../db/withTenant";
 import { safeError } from "../lib/errors";
 
@@ -42,8 +42,14 @@ export const sectorsModule = new Elysia({ prefix: "/sectors" })
     detail: { summary: "Detalhe do sector", tags: ["Sectores"] },
   })
 
-  .get("/:id/members", async ({ params, tenantId }) => {
+  .use(requireSectorScope({ bypassRoles: ["ORG_ADMIN"] }))
+  .get("/:id/members", async ({ params, tenantId, sectorScopeId, auth, set }) => {
     return withTenant(tenantId, async (tx) => {
+      const roleNames = await getFreshRoles(auth!.userId, tenantId);
+      if (!roleNames.includes("ORG_ADMIN") && sectorScopeId !== params.id) {
+        set.status = 403;
+        return { error: { code: "FORBIDDEN", message: "Só pode ver membros do seu próprio sector." } };
+      }
       const members = await tx.query.users.findMany({
         where: and(eq(users.tenantId, tenantId), eq(users.sectorId, params.id)),
         columns: { passwordHash: false },
