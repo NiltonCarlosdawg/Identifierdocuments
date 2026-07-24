@@ -45,6 +45,8 @@ pub fn run() {
             identifiers::cache_tenant_state,
             identifiers::get_pending_identifiers,
             identifiers::clear_synced_identifier,
+            identifiers::reset_pending_identifier,
+            identifiers::delete_pending_identifier,
             identifiers::mark_lease_remote_released,
             identifiers::get_leases,
             identifiers::generate_offline_identifier,

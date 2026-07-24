@@ -194,6 +194,36 @@ pub fn clear_synced_identifier(state: State<'_, SyncState>, id: String) -> Resul
     Ok(())
 }
 
+// ============================================================
+// reset_pending_identifier — reinicia para pending (re-sync)
+// ============================================================
+#[tauri::command]
+pub fn reset_pending_identifier(state: State<'_, SyncState>, id: String) -> Result<(), String> {
+    let conn = state.conn()?;
+    conn.execute(
+        "UPDATE local_pending_identifiers
+         SET status = 'pending', attempts = 0, last_error = NULL, conflict_reason = NULL
+         WHERE id = ?1",
+        params![id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+// ============================================================
+// delete_pending_identifier — remove da fila local
+// ============================================================
+#[tauri::command]
+pub fn delete_pending_identifier(state: State<'_, SyncState>, id: String) -> Result<(), String> {
+    let conn = state.conn()?;
+    conn.execute(
+        "DELETE FROM local_pending_identifiers WHERE id = ?1",
+        params![id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 pub fn mark_lease_remote_released_inner(
     state: &SyncState,
     lease_id: String,

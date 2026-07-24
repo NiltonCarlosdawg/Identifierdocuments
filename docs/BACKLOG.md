@@ -380,15 +380,29 @@ aplicadas posteriormente a itens aqui marcados como completos)*
     em transacção SQLite (`TransactionBehavior::Immediate`)
   - `apply_lease_renewal()` extraída como função síncrona testável (3 testes:
     sucesso, corrida perdida, idempotência sem duplicação)
-- [ ] **P2** UI de gestão de leases (dispositivos, forçar libertação)
+- [x] **P2** UI de gestão de leases (dispositivos, forçar libertação) — Settings →
+  "Dispositivos" com lista de leases, barra de uso, status chip, botão "Forçar
+  libertação" com confirmação irreversível
 
-### 6.6 — Frontend (M4) — **pendente**
-- [ ] **P0** `Identifiers.tsx` — caminho offline com indicação visual de
+### 6.6 — Frontend (M4)
+- [x] **P0** `Identifiers.tsx` — caminho offline com indicação visual de
   número "definitivo" (fiscal, via lease) vs "provisório até sincronizar"
-  (não-fiscal, via `register-offline-loose`)
-- [ ] **P1** `Settings` → "Organização": configurar `identifierLeaseBatchSize`
-- [ ] **P1** Gestão de dispositivos (listar, force-release com aviso de
-  irreversibilidade)
+  (não-fiscal, via `register-offline-loose`) — badges verde/âmbar no
+  GenerateModal
+- [x] **P1** `Settings` → "Organização": configurar `identifierLeaseBatchSize`
+  (10–500, default 50)
+- [x] **P1** Gestão de dispositivos (listar, force-release com aviso de
+  irreversibilidade) — separador "Dispositivos" em Settings
+
+### 6.7 — UI de Pendentes (M4.5)
+- [x] **P1** Separador "Pendentes" na página Identifiers com sub-tabs
+  "Todos/Conflitos/Falhados"
+- [x] **P1** Lista de pendentes com identificador, categoria, status, tentativas,
+  última origem e data de criação
+- [x] **P1** Detalhe visual de conflito (razão + mensagem) e de erro terminal
+- [x] **P1** Acções "Re-sincronizar" (reset para pending) e "Remover" (delete
+  local) para conflitos e falhados
+- [x] **P1** Badge de contagem total no separador Pendentes
 
 ---
 
@@ -422,7 +436,7 @@ aplicadas posteriormente a itens aqui marcados como completos)*
 | **4** | Partilha + Aprovações + SSE | ✅ Completo |
 | **5** | Scanner + IA + File Watcher + Settings | 🔄 Quase completo — falta preview PDF/multi-página no scanner, cache do classificador, e a UI detalhada de 3-opções do watcher |
 | **5.6** | Correcções de segurança (hardening) | ✅ Completo — RLS, advisory lock, roles frescas, tratamento de erro uniforme, suite de testes de carga |
-| **6** | Geração offline de identificadores | 🔄 Backend completo (M0–M2), motor de sync nativo implementado (M3, excepto UI de gestão de leases); classificação legal de categorias pendente de confirmação profissional; UI pendente (M4) |
+| **6** | Geração offline de identificadores | ✅ Backend completo (M0–M2), motor de sync nativo + testes (M3), UI completa (M4 + M4.5); classificação legal de categorias pendente de confirmação profissional |
 
 > Consultar `README.md` para visão geral do produto e arquitectura; este
 > ficheiro é o documento vivo de estado por fase.
