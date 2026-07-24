@@ -51,7 +51,7 @@ export default function Profile() {
           <div className="flex h-16 w-16 items-center justify-center rounded-full bg-docid-primary/15 text-2xl font-bold text-docid-primary-soft">{(user.fullName || "AD").split(" ").map(p => p[0]).join("").slice(0, 2).toUpperCase()}</div>
           <div><p className="text-lg font-semibold">{user.fullName}</p><p className="text-sm text-docid-muted">{user.email}</p></div>
         </div>
-        <div className="grid grid-cols-2 gap-4 text-sm"><div><p className="text-xs text-docid-muted">Organização</p><p className="font-medium">{user.organization || "-"}</p></div><div><p className="text-xs text-docid-muted">Sector</p><p className="font-medium">{user.sectorId || "-"}</p></div><div className="col-span-2"><p className="text-xs text-docid-muted">Roles</p><p className="font-medium">{user.roles.join(", ") || "-"}</p></div></div>
+        <div className="grid grid-cols-2 gap-4 text-sm"><div><p className="text-xs text-docid-muted">Organização</p><p className="font-medium">{user.organization || "-"}</p></div><div><p className="text-xs text-docid-muted">Sector</p><p className="font-medium">{user.sectorName || user.sectorId || "-"}</p></div><div className="col-span-2"><p className="text-xs text-docid-muted">Roles</p><p className="font-medium">{user.roles.join(", ") || "-"}</p></div></div>
       </div>
 
       <div className="docid-panel p-6 mb-6">

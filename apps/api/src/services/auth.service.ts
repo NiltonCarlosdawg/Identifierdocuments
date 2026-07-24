@@ -79,7 +79,7 @@ export async function getMe(auth: AuthPayload) {
     tenantId: user.tenantId,
     sectorId: user.sectorId,
     sectorName: user.sector?.name ?? null,
-    organizationName: user.organization?.name ?? null,
+    organization: user.organization?.name ?? null,
     organizationSlug: user.organization?.slug ?? null,
     notificationPreferences: user.notificationPreferences,
     roles: auth.roles,
