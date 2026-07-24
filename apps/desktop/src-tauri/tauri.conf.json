@@ -28,7 +28,7 @@
     "targets": ["nsis", "msi", "deb", "appimage"],
     "publisher": "Verano Labs",
     "copyright": "© 2026 Verano Labs. Todos os direitos reservados.",
-    "category": "Office",
+    "category": "Business",
     "shortDescription": "Gestão Documental Empresarial",
     "longDescription": "DocID é uma plataforma de gestão documental para empresas angolanas. Gere, partilhe e archive documentos com identificadores únicos e controlo de acesso por sector.",
     "icon": [
@@ -42,7 +42,7 @@
       "nsis": {
         "installMode": "currentUser",
         "installerIcon": "icons/icon.ico",
-        "language": "Portuguese"
+        "languages": ["Portuguese"]
       },
       "wix": {
         "language": "pt-PT"
