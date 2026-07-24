@@ -1,9 +1,11 @@
 import { useState, useEffect, useCallback } from "react";
-import { api } from "../../infrastructure/di/container";
+import { api, sync } from "../../infrastructure/di/container";
+import { useGenerateIdentifier } from "../hooks/useGenerateIdentifier";
+import { useAuthStore } from "../stores/authStore";
 import { PageHeader, Modal, StatusChip, EmptyState, Pagination } from "../components/docid-ui";
-import { Fingerprint, Plus, Copy, Ban, Search } from "lucide-react";
+import { Fingerprint, Plus, Copy, Ban, Search, WifiOff, RefreshCw } from "lucide-react";
 
-interface Category { id: string; name: string; group: string; prefix: string; }
+interface Category { id: string; name: string; group: string; prefix: string; requiresSequential: boolean; }
 interface IdentifierRow { id: string; identifier: string; categoryId: string; category: { id: string; name: string; group: string; prefix: string }; status: string; origin: string; visibility: string; issuedTo: string | null; description: string | null; createdAt: string; sector: { id: string; name: string } | null; document: { id: string; filename: string } | null; createdByUser: { id: string; fullName: string } | null; restricted?: boolean; }
 
 export default function Identifiers() {
@@ -80,34 +82,124 @@ function GenerateModal({ categories, onClose, onDone }: { categories: Category[]
   const [issuedTo, setIssuedTo] = useState("");
   const [description, setDescription] = useState("");
   const [origin, setOrigin] = useState<"digital" | "physical">("digital");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [result, setResult] = useState<{ identifier: string } | null>(null);
+  const [visibility, setVisibility] = useState<"public" | "sector_only">("sector_only");
+  const { generate, loading, error, result, clearError, reset } = useGenerateIdentifier();
+  const user = useAuthStore(s => s.user);
+  const [isOffline, setIsOffline] = useState(false);
+  const [leaseRevoked, setLeaseRevoked] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      if (!sync.isAvailable()) { setIsOffline(false); return; }
+      setIsOffline(!(await sync.isOnline()));
+    })();
+  }, []);
 
   const groups = categories.reduce<Record<string, Category[]>>((acc, c) => { (acc[c.group] = acc[c.group] || []).push(c); return acc; }, {});
 
   const handleGenerate = async () => {
     if (!categoryId) return;
-    setError(""); setLoading(true);
+    clearError();
+    setLeaseRevoked(false);
     try {
-      const res = await api.post<{ data: { identifier: string } }>("/identifiers/generate", { categoryId, issuedTo: issuedTo || undefined, description: description || undefined, origin });
-      setResult(res.data);
-    } catch (err: any) { setError(err.message || "Erro ao gerar identificador."); } finally { setLoading(false); }
+      await generate({
+        categoryId,
+        issuedTo: issuedTo || undefined,
+        description: description || undefined,
+        origin,
+        visibility,
+        sectorId: user?.sectorId || "",
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("Lease revogado")) {
+        setLeaseRevoked(true);
+      }
+    }
+  };
+
+  const handleReconnect = async () => {
+    setIsOffline(!(await sync.isOnline()));
+    if (sync.isAvailable() && await sync.isOnline()) {
+      clearError();
+      setLeaseRevoked(false);
+    }
   };
 
   if (result) return (
-    <Modal title="Identificador Gerado" onClose={onClose} footer={<button onClick={onDone} className="docid-button-primary">Fechar</button>}>
-      <div className="flex flex-col items-center gap-4 py-6"><Fingerprint className="h-12 w-12 text-docid-primary-soft" /><p className="font-mono text-xl font-bold text-docid-text">{result.identifier}</p><p className="text-sm text-docid-muted">Copie o identificador e inclua-o no documento antes de anexar.</p><button onClick={() => navigator.clipboard.writeText(result.identifier)} className="docid-button-secondary"><Copy className="h-4 w-4" /> Copiar</button></div>
+    <Modal title="Identificador Gerado" onClose={onClose} footer={<button onClick={() => { reset(); onDone(); }} className="docid-button-primary">Fechar</button>}>
+      <div className="flex flex-col items-center gap-4 py-6">
+        <Fingerprint className="h-12 w-12 text-docid-primary-soft" />
+        <p className="font-mono text-xl font-bold text-docid-text">{result.identifier}</p>
+        {result.mode === "offline_loose" && (
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/15 px-3 py-1 text-xs font-medium text-amber-500">
+            <WifiOff className="h-3.5 w-3.5" /> Provisório — confirmado após sincronização
+          </span>
+        )}
+        {result.mode === "offline_fiscal" && (
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-medium text-emerald-500">
+            Nº reservado offline
+          </span>
+        )}
+        <p className="text-sm text-docid-muted">Copie o identificador e inclua-o no documento antes de anexar.</p>
+        <button onClick={() => navigator.clipboard.writeText(result.identifier)} className="docid-button-secondary">
+          <Copy className="h-4 w-4" /> Copiar
+        </button>
+      </div>
     </Modal>
   );
 
   return (
-    <Modal title="Gerar Identificador" onClose={onClose} footer={<><button onClick={onClose} className="docid-button-secondary">Cancelar</button><button onClick={handleGenerate} disabled={loading || !categoryId} className="docid-button-primary">{loading ? "A gerar..." : "Gerar"}</button></>}>
+    <Modal title="Gerar Identificador" onClose={onClose} footer={
+      leaseRevoked ? (
+        <button onClick={handleReconnect} className="docid-button-primary">
+          <RefreshCw className="h-4 w-4" /> Reconectar e tentar de novo
+        </button>
+      ) : (
+        <><button onClick={onClose} className="docid-button-secondary">Cancelar</button><button onClick={handleGenerate} disabled={loading || !categoryId} className="docid-button-primary">{loading ? "A gerar..." : "Gerar"}</button></>
+      )
+    }>
       <div className="space-y-4">
-        {error && <div className="rounded-lg border border-docid-error/30 bg-docid-error/10 p-3 text-sm text-docid-error">{error}</div>}
-        <div><label className="mb-1.5 block text-xs font-semibold text-docid-muted">Categoria</label><select value={categoryId} onChange={e => setCategoryId(e.target.value)} className="docid-input w-full"><option value="">Seleccionar categoria...</option>{Object.entries(groups).map(([group, cats]) => <optgroup key={group} label={group}>{cats.map(c => <option key={c.id} value={c.id}>{c.name} ({c.id})</option>)}</optgroup>)}</select></div>
+        {error && (
+          <div className="rounded-lg border border-docid-error/30 bg-docid-error/10 p-3 text-sm text-docid-error">
+            {error}
+            {leaseRevoked && (
+              <button onClick={handleReconnect} className="ml-2 underline text-xs">Reconectar</button>
+            )}
+          </div>
+        )}
+        {isOffline && (
+          <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-500 flex items-center gap-2">
+            <WifiOff className="h-4 w-4 shrink-0" /> Modo offline — identificadores serão gerados localmente e sincronizados depois.
+          </div>
+        )}
+        <div>
+          <label className="mb-1.5 block text-xs font-semibold text-docid-muted">Categoria</label>
+          <select value={categoryId} onChange={e => setCategoryId(e.target.value)} className="docid-input w-full">
+            <option value="">Seleccionar categoria...</option>
+            {Object.entries(groups).map(([group, cats]) => (
+              <optgroup key={group} label={group}>
+                {cats.map(c => (
+                  <option key={c.id} value={c.id}>
+                    {c.name} ({c.id}){c.requiresSequential ? "" : " *"}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+          {categoryId && !categories.find(c => c.id === categoryId)?.requiresSequential && isOffline && (
+            <p className="mt-1 text-xs text-amber-500">* Sequência provisória até sincronizar.</p>
+          )}
+        </div>
         <div><label className="mb-1.5 block text-xs font-semibold text-docid-muted">Emitido para</label><input value={issuedTo} onChange={e => setIssuedTo(e.target.value)} className="docid-input w-full" placeholder="Nome do cliente/destinatário (opcional)" /></div>
         <div><label className="mb-1.5 block text-xs font-semibold text-docid-muted">Descrição</label><textarea value={description} onChange={e => setDescription(e.target.value)} className="docid-input w-full" rows={2} placeholder="Descrição opcional" /></div>
+        <div>
+          <label className="mb-1.5 block text-xs font-semibold text-docid-muted">Visibilidade</label>
+          <div className="flex gap-2">
+            <button onClick={() => setVisibility("sector_only")} className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition ${visibility === "sector_only" ? "border-docid-primary bg-docid-primary/10 text-docid-primary-soft" : "border-docid-border text-docid-muted hover:bg-docid-surface-high"}`}>🔒 Apenas sector</button>
+            <button onClick={() => setVisibility("public")} className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition ${visibility === "public" ? "border-docid-primary bg-docid-primary/10 text-docid-primary-soft" : "border-docid-border text-docid-muted hover:bg-docid-surface-high"}`}>🌐 Público</button>
+          </div>
+        </div>
         <div><label className="mb-1.5 block text-xs font-semibold text-docid-muted">Origem</label><div className="flex gap-2"><button onClick={() => setOrigin("digital")} className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition ${origin === "digital" ? "border-docid-primary bg-docid-primary/10 text-docid-primary-soft" : "border-docid-border text-docid-muted hover:bg-docid-surface-high"}`}>🖥 Digital</button><button onClick={() => setOrigin("physical")} className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition ${origin === "physical" ? "border-docid-primary bg-docid-primary/10 text-docid-primary-soft" : "border-docid-border text-docid-muted hover:bg-docid-surface-high"}`}>📄 Físico</button></div></div>
       </div>
     </Modal>
