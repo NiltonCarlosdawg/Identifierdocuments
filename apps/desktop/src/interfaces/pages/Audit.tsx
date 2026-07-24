@@ -34,7 +34,7 @@ export default function Audit() {
       if (resourceFilter) params.set("resource", resourceFilter);
       const res = await api.get<{ data: AuditLog[]; meta: { total: number; page: number; limit: number } }>(`/audit?${params}`);
       setRows(res.data || []);
-      setMeta(res.meta);
+      setMeta(res.meta || { total: 0, page: 1, limit: 50 });
     } catch (err: any) { setError(err.message || "Erro ao carregar registos de auditoria."); }
     finally { setLoading(false); }
   }, [actionFilter, resourceFilter]);

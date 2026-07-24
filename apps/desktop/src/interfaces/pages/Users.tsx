@@ -24,7 +24,7 @@ export default function Users() {
       if (sectorFilter) params.set("sectorId", sectorFilter);
       const res = await api.get<{ data: UserRow[]; meta: { total: number; page: number; limit: number } }>(`/users?${params}`);
       setRows(res.data || []);
-      setMeta(res.meta);
+      setMeta(res.meta || { total: 0, page: 1, limit: 20 });
     } catch (err: any) { setError(err.message || "Erro ao carregar utilizadores."); }
     finally { setLoading(false); }
   }, [sectorFilter]);
@@ -67,7 +67,7 @@ export default function Users() {
             ))}</tbody>
           </table>
         )}
-        <Pagination totalLabel={`${meta.total} utilizador(es)`} />
+        <Pagination totalLabel={`${meta?.total ?? 0} utilizador(es)`} />
       </div>
       {showCreate && <CreateUserModal sectors={sectors} onClose={() => setShowCreate(false)} onDone={() => { setShowCreate(false); load(); }} />}
       {selected && <DetailUserModal user={selected} sectors={sectors} onClose={() => setSelected(null)} onDone={() => { setSelected(null); load(); }} />}

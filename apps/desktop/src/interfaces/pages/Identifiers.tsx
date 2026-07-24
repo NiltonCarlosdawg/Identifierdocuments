@@ -33,7 +33,7 @@ export default function Identifiers() {
       if (filterOrigin) params.set("origin", filterOrigin);
       const res = await api.get<{ data: IdentifierRow[]; meta: { total: number; page: number; limit: number } }>(`/identifiers?${params}`);
       setRows(res.data || []);
-      setMeta(res.meta);
+      setMeta(res.meta || { total: 0, page: 1, limit: 20 });
     } catch (err: any) { setError(err.message || "Erro ao carregar identificadores."); }
     finally { setLoading(false); }
   }, [filterStatus, filterOrigin]);
