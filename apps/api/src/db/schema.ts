@@ -277,6 +277,11 @@ export const userRelations = relations(users, ({ one, many }) => ({
   uploadedDocuments: many(documents),
   sharedDocuments: many(documentShares, { relationName: "sharedByShares" }),
   approvals: many(approvals),
+  auditLogs: many(auditLogs),
+}));
+
+export const auditLogRelations = relations(auditLogs, ({ one }) => ({
+  user: one(users, { fields: [auditLogs.userId], references: [users.id] }),
 }));
 
 export const roleRelations = relations(roles, ({ one, many }) => ({

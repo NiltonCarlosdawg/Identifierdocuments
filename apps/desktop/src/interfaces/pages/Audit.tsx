@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback } from "react";
 import { api } from "../../infrastructure/di/container";
-import { PageHeader, Modal, StatusChip, EmptyState, Pagination } from "../components/docid-ui";
-import { History, Search, Filter, ChevronDown, ChevronRight } from "lucide-react";
+import { PageHeader, Modal, EmptyState, Pagination } from "../components/docid-ui";
+import { History, Search, Filter, ChevronDown, ChevronRight, User, Globe, Clock, Tag, Fingerprint, HardDrive, Info } from "lucide-react";
 
 interface AuditLog {
   id: string;
   userId: string | null;
+  userName: string | null;
   action: string;
   resource: string;
   resourceId: string | null;
@@ -14,8 +15,53 @@ interface AuditLog {
   createdAt: string;
 }
 
+interface Sector { id: string; name: string; }
+interface User { id: string; fullName: string; }
+
 const ACTIONS = ["GENERATE", "QUERY", "CANCEL", "SHARE", "REQUEST_ACCESS", "REVOKE_SHARE", "ATTACH", "ATTACH_FAILED"];
 const RESOURCES = ["documents", "identifiers", "sectors", "users", "audit", "roles"];
+
+function parseMeta(m: string | null): Record<string, any> {
+  try { return m ? JSON.parse(m) : {}; } catch { return {}; }
+}
+
+function formatNarrative(log: AuditLog, sectorMap: Record<string, string>, userMap: Record<string, string>): string {
+  const meta = parseMeta(log.metadata);
+  const name = log.userName || "Utilizador desconhecido";
+
+  switch (log.action) {
+    case "GENERATE":
+      return `${name} gerou o identificador ${meta.identifier || "—"}${meta.category ? ` (${meta.category})` : ""}`;
+    case "QUERY":
+      return `${name} consultou o identificador ${meta.identifier || log.resourceId || "—"}`;
+    case "CANCEL":
+      return `${name} cancelou o identificador ${meta.identifier || "—"}${meta.reason ? ` — motivo: ${meta.reason}` : ""}`;
+    case "ATTACH":
+      return `${name} anexou o ficheiro "${meta.filename || "—"}" ao identificador ${meta.identifier || "—"}`;
+    case "ATTACH_FAILED":
+      return `${name} tentou anexar "${meta.filename || "—"}", mas o identificador não foi encontrado no ficheiro`;
+    case "SHARE": {
+      const targetSector = meta.sharedWithSectorId ? sectorMap[meta.sharedWithSectorId] : null;
+      const targetUser = meta.sharedWithUserId ? userMap[meta.sharedWithUserId] : null;
+      if (targetSector) return `${name} partilhou um documento com o sector ${targetSector}`;
+      if (targetUser) return `${name} partilhou um documento com ${targetUser}`;
+      return `${name} partilhou um documento`;
+    }
+    case "REVOKE_SHARE":
+      return `${name} revogou uma partilha de documento`;
+    case "REQUEST_ACCESS":
+      return `${name} solicitou acesso a um documento`;
+    default:
+      return `${name} realizou ${log.action} em ${log.resource}`;
+  }
+}
+
+function toneIcon(action: string): string {
+  if (action === "ATTACH_FAILED") return "🔴";
+  if (action === "CANCEL" || action === "REVOKE_SHARE") return "🟡";
+  if (action === "GENERATE" || action === "ATTACH" || action === "SHARE") return "🟢";
+  return "🔵";
+}
 
 export default function Audit() {
   const [rows, setRows] = useState<AuditLog[]>([]);
@@ -24,7 +70,22 @@ export default function Audit() {
   const [error, setError] = useState("");
   const [actionFilter, setActionFilter] = useState("");
   const [resourceFilter, setResourceFilter] = useState("");
-  const [expanded, setExpanded] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [sectorMap, setSectorMap] = useState<Record<string, string>>({});
+  const [userMap, setUserMap] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    api.get<{ data: Sector[] }>("/sectors").then(r => {
+      const m: Record<string, string> = {};
+      (r.data || []).forEach(s => { m[s.id] = s.name; });
+      setSectorMap(m);
+    }).catch(() => {});
+    api.get<{ data: User[] }>("/users").then(r => {
+      const m: Record<string, string> = {};
+      (r.data || []).forEach(u => { m[u.id] = u.fullName; });
+      setUserMap(m);
+    }).catch(() => {});
+  }, []);
 
   const load = useCallback(async (page = 1) => {
     setLoading(true); setError("");
@@ -47,13 +108,6 @@ export default function Audit() {
     ATTACH: "Anexar", ATTACH_FAILED: "Falha Anexo",
   }[a] || a);
 
-  const actionTone = (a: string): "success" | "warning" | "error" | "info" | "neutral" => {
-    if (a === "ATTACH_FAILED") return "error";
-    if (a === "CANCEL" || a === "REVOKE_SHARE") return "warning";
-    if (a === "GENERATE" || a === "ATTACH" || a === "SHARE") return "success";
-    return "info";
-  };
-
   return (
     <div>
       <PageHeader title="Auditoria" description="Registo de todas as acções realizadas na organização" />
@@ -72,65 +126,57 @@ export default function Audit() {
         </select>
         <span className="text-xs text-docid-muted">{meta.total} registo(s)</span>
       </div>
-      <div className="docid-panel overflow-hidden">
+      <div className="space-y-3">
         {loading ? (
-          <div className="flex items-center justify-center py-16 text-sm text-docid-muted">A carregar...</div>
+          <div className="docid-panel flex items-center justify-center py-16 text-sm text-docid-muted">A carregar...</div>
         ) : rows.length === 0 ? (
           <EmptyState>Nenhum registo de auditoria encontrado.</EmptyState>
         ) : (
-          <table className="docid-table">
-            <thead>
-              <tr>
-                <th className="w-40">Data/Hora</th>
-                <th className="w-20">Utilizador</th>
-                <th className="w-28">Acção</th>
-                <th className="w-24">Recurso</th>
-                <th>ID do Recurso</th>
-                <th className="w-28">IP</th>
-                <th className="w-10"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map(row => (
-                <tr key={row.id}>
-                  <td className="text-xs whitespace-nowrap">{new Date(row.createdAt).toLocaleString("pt-AO")}</td>
-                  <td className="text-xs font-mono">{row.userId ? row.userId.slice(0, 8) + "…" : "—"}</td>
-                  <td><StatusChip tone={actionTone(row.action)}>{actionLabel(row.action)}</StatusChip></td>
-                  <td className="text-xs text-docid-muted">{row.resource}</td>
-                  <td className="text-xs font-mono max-w-[200px] truncate" title={row.resourceId || ""}>{row.resourceId || "—"}</td>
-                  <td className="text-xs text-docid-muted">{row.ip || "—"}</td>
-                  <td>
+          rows.map(row => {
+            const metaData = parseMeta(row.metadata);
+            const narrative = formatNarrative(row, sectorMap, userMap);
+            const expanded = expandedId === row.id;
+            return (
+              <div key={row.id} className="docid-panel p-4 space-y-2">
+                <div className="flex items-start gap-3">
+                  <span className="text-lg leading-none mt-0.5 shrink-0">{toneIcon(row.action)}</span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-docid-text leading-relaxed">{narrative}</p>
+                    <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-docid-muted">
+                      <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{new Date(row.createdAt).toLocaleString("pt-AO")}</span>
+                      {row.ip && row.ip !== "unknown" && <span className="flex items-center gap-1"><Globe className="h-3 w-3" />{row.ip}</span>}
+                    </div>
+                  </div>
+                  <button onClick={() => setExpandedId(expanded ? null : row.id)} className="shrink-0 rounded p-1.5 text-docid-muted hover:text-docid-text hover:bg-docid-surface-high">
+                    {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                    <span className="sr-only">{expanded ? "Ocultar" : "Ver"} detalhes</span>
+                  </button>
+                </div>
+                {expanded && (
+                  <div className="ml-8 mt-2 rounded-lg border border-docid-border bg-docid-surface-low p-3 space-y-2 text-xs">
+                    <p className="flex items-center gap-1.5 text-docid-muted font-semibold mb-2"><Info className="h-3 w-3" /> Detalhes técnicos</p>
+                    <div className="grid grid-cols-2 gap-x-6 gap-y-1.5">
+                      <div className="flex items-center gap-1.5"><User className="h-3 w-3 shrink-0 text-docid-outline" /><span className="text-docid-muted">Utilizador:</span><span className="font-mono">{row.userId || "—"}</span></div>
+                      <div className="flex items-center gap-1.5"><Tag className="h-3 w-3 shrink-0 text-docid-outline" /><span className="text-docid-muted">Acção:</span><span>{row.action}</span></div>
+                      <div className="flex items-center gap-1.5"><HardDrive className="h-3 w-3 shrink-0 text-docid-outline" /><span className="text-docid-muted">Recurso:</span><span>{row.resource}</span></div>
+                      <div className="flex items-center gap-1.5"><Fingerprint className="h-3 w-3 shrink-0 text-docid-outline" /><span className="text-docid-muted">ID do recurso:</span><span className="font-mono">{row.resourceId || "—"}</span></div>
+                      <div className="flex items-center gap-1.5"><Globe className="h-3 w-3 shrink-0 text-docid-outline" /><span className="text-docid-muted">IP:</span><span>{row.ip || "—"}</span></div>
+                      <div className="flex items-center gap-1.5"><Clock className="h-3 w-3 shrink-0 text-docid-outline" /><span className="text-docid-muted">Data/Hora:</span><span>{new Date(row.createdAt).toISOString()}</span></div>
+                    </div>
                     {row.metadata && (
-                      <button onClick={() => setExpanded(expanded === row.id ? null : row.id)} className="rounded p-1 text-docid-muted hover:text-docid-text">
-                        {expanded === row.id ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-                      </button>
+                      <details className="mt-2">
+                        <summary className="cursor-pointer text-docid-muted hover:text-docid-text text-xs font-medium">Metadados completos</summary>
+                        <pre className="mt-2 max-h-48 overflow-auto rounded bg-docid-surface p-2 text-[10px] text-docid-text font-mono whitespace-pre-wrap break-words">{JSON.stringify(metaData, null, 2)}</pre>
+                      </details>
                     )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  </div>
+                )}
+              </div>
+            );
+          })
         )}
         <Pagination totalLabel={`${meta.total} registo(s) — Página ${meta.page}`} />
       </div>
-      {expanded && (() => {
-        const log = rows.find(r => r.id === expanded);
-        if (!log?.metadata) return null;
-        try {
-          const parsed = JSON.parse(log.metadata);
-          return (
-            <Modal title="Detalhes do Registo" onClose={() => setExpanded(null)} maxWidth="max-w-lg">
-              <pre className="max-h-96 overflow-auto rounded-lg bg-docid-surface-low p-4 text-xs text-docid-text whitespace-pre-wrap break-words font-mono">{JSON.stringify(parsed, null, 2)}</pre>
-            </Modal>
-          );
-        } catch {
-          return (
-            <Modal title="Detalhes do Registo" onClose={() => setExpanded(null)} maxWidth="max-w-lg">
-              <pre className="max-h-96 overflow-auto rounded-lg bg-docid-surface-low p-4 text-xs text-docid-text whitespace-pre-wrap break-words font-mono">{log.metadata}</pre>
-            </Modal>
-          );
-        }
-      })()}
     </div>
   );
 }
