@@ -59,7 +59,7 @@ export default function Users() {
                 <td className="font-medium">{row.fullName}</td>
                 <td className="text-xs text-docid-muted">{row.email}</td>
                 <td className="text-xs">{row.sectorName || "-"}</td>
-                <td><div className="flex flex-wrap gap-1">{row.roles.map(r => <span key={r.id} className="rounded-full bg-docid-surface-high px-2 py-0.5 text-[10px] font-medium text-docid-muted">{r.name}</span>)}</div></td>
+                <td><div className="flex flex-wrap gap-1">{(row.roles || []).map(r => <span key={r.id} className="rounded-full bg-docid-surface-high px-2 py-0.5 text-[10px] font-medium text-docid-muted">{r.name}</span>)}</div></td>
                 <td><StatusChip tone={row.isActive ? "success" : "error"}>{row.isActive ? "Activo" : "Inactivo"}</StatusChip></td>
                 <td className="text-xs text-docid-muted">{new Date(row.createdAt).toLocaleDateString("pt-AO")}</td>
                 <td><button onClick={e => { e.stopPropagation(); setSelected(row); }} className="rounded p-1 text-docid-muted hover:text-docid-text"><Shield className="h-4 w-4" /></button></td>
@@ -152,7 +152,7 @@ function DetailUserModal({ user, sectors, onClose, onDone }: { user: UserRow; se
             <div><p className="text-xs text-docid-muted">Sector</p><p className="font-medium">{user.sectorName || "—"}</p></div>
             <div><p className="text-xs text-docid-muted">Estado</p><StatusChip tone={user.isActive ? "success" : "error"}>{user.isActive ? "Activo" : "Inactivo"}</StatusChip></div>
             <div><p className="text-xs text-docid-muted">Criado em</p><p className="font-medium">{new Date(user.createdAt).toLocaleDateString("pt-AO")}</p></div>
-            <div className="col-span-2"><p className="text-xs text-docid-muted mb-1">Roles</p><div className="flex flex-wrap gap-1">{user.roles.map(r => <span key={r.id} className="rounded-full bg-docid-primary/10 px-3 py-1 text-xs font-medium text-docid-primary-soft">{r.name}</span>)}</div></div>
+            <div className="col-span-2"><p className="text-xs text-docid-muted mb-1">Roles</p><div className="flex flex-wrap gap-1">{(user.roles || []).map(r => <span key={r.id} className="rounded-full bg-docid-primary/10 px-3 py-1 text-xs font-medium text-docid-primary-soft">{r.name}</span>)}</div></div>
           </div>
         )}
       </div>
