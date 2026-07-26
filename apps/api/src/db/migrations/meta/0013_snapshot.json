@@ -1,6 +1,6 @@
 {
-  "id": "30aa3b29-e88b-4b7a-9cd9-d59eb4a824fc",
-  "prevId": "0d22d8d3-9e59-4448-b4aa-9ca10c5d5d84",
+  "id": "eba96129-cfcd-4c21-ab8f-e9b29d86603b",
+  "prevId": "30aa3b29-e88b-4b7a-9cd9-d59eb4a824fc",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -531,6 +531,18 @@
           "primaryKey": false,
           "notNull": true
         },
+        "sector_id": {
+          "name": "sector_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "registered_by_user_id": {
+          "name": "registered_by_user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "name": {
           "name": "name",
           "type": "text",
@@ -550,25 +562,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "registered_by_user_id": {
-          "name": "registered_by_user_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "sector_id": {
-          "name": "sector_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
         "deactivated_at": {
           "name": "deactivated_at",
           "type": "timestamp",
@@ -580,6 +573,13 @@
           "type": "uuid",
           "primaryKey": false,
           "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
         }
       },
       "indexes": {
@@ -643,12 +643,38 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
+        "devices_sector_id_sectors_id_fk": {
+          "name": "devices_sector_id_sectors_id_fk",
+          "tableFrom": "devices",
+          "tableTo": "sectors",
+          "columnsFrom": [
+            "sector_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
         "devices_registered_by_user_id_users_id_fk": {
           "name": "devices_registered_by_user_id_users_id_fk",
           "tableFrom": "devices",
           "tableTo": "users",
           "columnsFrom": [
             "registered_by_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "devices_deactivated_by_users_id_fk": {
+          "name": "devices_deactivated_by_users_id_fk",
+          "tableFrom": "devices",
+          "tableTo": "users",
+          "columnsFrom": [
+            "deactivated_by"
           ],
           "columnsTo": [
             "id"

@@ -812,6 +812,144 @@ pub async fn request_lease(
 }
 
 // ============================================================
+// Registo / obtenção do device ID local
+// ============================================================
+
+use std::sync::OnceLock;
+use tokio::sync::Mutex;
+
+fn register_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
+
+fn read_local_identity(state: &SyncState) -> Result<Option<DeviceIdentity>, String> {
+    let conn = state.conn()?;
+    conn.query_row(
+        "SELECT device_id, device_name FROM local_device_identity LIMIT 1",
+        [],
+        |row| {
+            Ok(DeviceIdentity {
+                device_id: row.get(0)?,
+                device_name: row.get(1)?,
+            })
+        },
+    ).map(Some).or_else(|e| {
+        if e == rusqlite::Error::QueryReturnedNoRows {
+            Ok(None)
+        } else {
+            Err(e.to_string())
+        }
+    })
+}
+
+fn get_hostname() -> String {
+    hostname::get()
+        .ok()
+        .and_then(|h| h.to_str().map(|s| s.to_string()))
+        .unwrap_or_else(|| "unknown-device".to_string())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceIdentity {
+    pub device_id: String,
+    pub device_name: String,
+}
+
+#[tauri::command]
+pub async fn get_or_register_device_id(state: State<'_, SyncState>) -> Result<DeviceIdentity, String> {
+    // Fast path: já registado — sem lock
+    if let Some(identity) = read_local_identity(&state)? {
+        return Ok(identity);
+    }
+
+    // Lock de registo: serializa a secção crítica (POST + escrita local)
+    let _guard = register_lock().lock().await;
+
+    // Double-check: outra chamada pode ter registado enquanto esperávamos pelo lock
+    if let Some(identity) = read_local_identity(&state)? {
+        return Ok(identity);
+    }
+
+    let api_base_url = state
+        .api_base_url
+        .lock()
+        .map_err(|e| e.to_string())?
+        .clone();
+    let token = state
+        .auth_token
+        .lock()
+        .map_err(|e| e.to_string())?
+        .clone()
+        .ok_or_else(|| {
+            "Sessao nao autenticada. Faca login primeiro.".to_string()
+        })?;
+
+    let device_name = get_hostname();
+    let body = serde_json::json!({ "name": device_name });
+
+    let client = reqwest::Client::builder()
+        .use_rustls_tls()
+        .build()
+        .map_err(|e| format!("Erro ao criar cliente HTTP: {e}"))?;
+
+    let resp = client
+        .post(format!("{api_base_url}/devices"))
+        .bearer_auth(&token)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| {
+            if e.is_timeout() {
+                "OFFLINE_NO_DEVICE: Sem resposta do servidor (timeout).".to_string()
+            } else if e.is_connect() {
+                "OFFLINE_NO_DEVICE: Dispositivo ainda nao registado. Ligue-se a internet uma vez para ativar a geracao offline neste dispositivo.".to_string()
+            } else {
+                format!("OFFLINE_NO_DEVICE: Erro de rede: {e}")
+            }
+        })?;
+
+    let status = resp.status();
+    let response_body = resp.text().await.unwrap_or_default();
+
+    if !status.is_success() {
+        if let Ok(err) = serde_json::from_str::<serde_json::Value>(&response_body) {
+            let msg = err
+                .get("error")
+                .and_then(|e| e.get("message"))
+                .and_then(|m| m.as_str())
+                .unwrap_or("Erro desconhecido do servidor.");
+            return Err(format!("OFFLINE_NO_DEVICE: {msg}"));
+        }
+        return Err("OFFLINE_NO_DEVICE: Erro ao registar dispositivo no servidor.".to_string());
+    }
+
+    let parsed: serde_json::Value = serde_json::from_str(&response_body)
+        .map_err(|_| "OFFLINE_NO_DEVICE: Resposta invalida do servidor.".to_string())?;
+    let device_id = parsed
+        .get("data")
+        .and_then(|d| d.get("id"))
+        .and_then(|id| id.as_str())
+        .ok_or_else(|| "OFFLINE_NO_DEVICE: Resposta do servidor sem device id.".to_string())?
+        .to_string();
+
+    // Persistir localmente (ainda dentro do lock — ninguém mais escreve ao mesmo tempo)
+    {
+        let conn = state.conn()?;
+        conn.execute(
+            "INSERT OR REPLACE INTO local_device_identity (device_id, device_name, registered_at) VALUES (?1, ?2, ?3)",
+            params![device_id, device_name, chrono::Utc::now().to_rfc3339()],
+        )
+        .map_err(|e| format!("Erro ao guardar identidade do dispositivo: {e}"))?;
+    }
+
+    Ok(DeviceIdentity {
+        device_id,
+        device_name,
+    })
+}
+
+// ============================================================
 // Testes
 // ============================================================
 #[cfg(test)]

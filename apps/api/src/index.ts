@@ -15,6 +15,7 @@ import { documentsModule } from "./modules/documents.module";
 import { approvalsModule } from "./modules/approvals.module";
 import { auditModule } from "./modules/audit.module";
 import { statsModule } from "./modules/stats.module";
+import { devicesModule } from "./modules/devices.module";
 import { classifierModule } from "./modules/classifier.module";
 import { notificationSSEModule } from "./services/notification.service";
 
@@ -78,6 +79,7 @@ const app = new Elysia()
   .use(approvalsModule)
   .use(auditModule)
   .use(statsModule)
+  .use(devicesModule)
   .use(classifierModule)
   .use(notificationSSEModule)
   .onError(({ code, error, set }) => {

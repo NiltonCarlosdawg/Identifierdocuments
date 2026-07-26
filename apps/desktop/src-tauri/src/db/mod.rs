@@ -184,6 +184,15 @@ fn init_schema(conn: &Connection) -> Result<()> {
 
         CREATE INDEX IF NOT EXISTS idx_pending_sync
             ON local_pending_identifiers(status, created_at);
+
+        -- ============================================================
+        -- Tabela 6: Identidade local do dispositivo (uma unica linha)
+        -- ============================================================
+        CREATE TABLE IF NOT EXISTS local_device_identity (
+            device_id      TEXT PRIMARY KEY,
+            device_name    TEXT NOT NULL,
+            registered_at  TEXT NOT NULL
+        );
         ",
     )?;
     Ok(())

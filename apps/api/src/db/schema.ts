@@ -212,14 +212,18 @@ export const classifierFeedback = pgTable("classifier_feedback", {
 export const devices = pgTable("devices", {
   id: uuid("id").primaryKey().defaultRandom(),
   tenantId: uuid("tenant_id").notNull().references(() => organizations.id),
-  userId: uuid("user_id").references(() => users.id),
+  sectorId: uuid("sector_id").references(() => sectors.id),
+  registeredByUserId: uuid("registered_by_user_id").references(() => users.id),
   name: text("name").notNull(),
-  status: text("status", { enum: ["active", "force_released"] }).notNull().default("active"),
+  status: text("status", { enum: ["active", "inactive"] }).notNull().default("active"),
   lastSeenAt: timestamp("last_seen_at"),
+  deactivatedAt: timestamp("deactivated_at"),
+  deactivatedBy: uuid("deactivated_by").references(() => users.id),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [
   index("devices_tenant_idx").on(t.tenantId),
-  index("devices_user_idx").on(t.userId),
+  index("devices_sector_idx").on(t.sectorId),
+  index("devices_status_idx").on(t.status),
 ]);
 
 export const identifierLeases = pgTable("identifier_leases", {
@@ -359,7 +363,9 @@ export const approvalRelations = relations(approvals, ({ one }) => ({
 
 export const deviceRelations = relations(devices, ({ one }) => ({
   organization: one(organizations, { fields: [devices.tenantId], references: [organizations.id] }),
-  registeredBy: one(users, { fields: [devices.userId], references: [users.id] }),
+  sector: one(sectors, { fields: [devices.sectorId], references: [sectors.id] }),
+  registeredBy: one(users, { fields: [devices.registeredByUserId], references: [users.id], relationName: "registeredDevices" }),
+  deactivator: one(users, { fields: [devices.deactivatedBy], references: [users.id], relationName: "deactivatedDevices" }),
 }));
 
 export const identifierLeaseRelations = relations(identifierLeases, ({ one }) => ({

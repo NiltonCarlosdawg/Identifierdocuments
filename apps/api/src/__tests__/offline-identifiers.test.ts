@@ -25,7 +25,7 @@ const authUser = () => ({ userId, tenantId: orgId, sectorId, roles: [] });
 
 async function insertDevice(tx: any, name: string, status = "active") {
   const [d] = await tx.insert(devices).values({
-    tenantId: orgId, userId, name, status,
+    tenantId: orgId, registeredByUserId: userId, name, status,
   }).returning({ id: devices.id });
   return d.id;
 }
@@ -113,7 +113,7 @@ describe("M2 — Offline Identifiers (lease/release/force-release/register-offli
 
     test("rejeita categoria com requiresSequential = false", async () => {
       const [d] = await withTenant(orgId, (tx) =>
-        tx.insert(devices).values({ tenantId: orgId, userId, name: "TempDevice", status: "active" })
+        tx.insert(devices).values({ tenantId: orgId, registeredByUserId: userId, name: "TempDevice", status: "active" })
           .returning({ id: devices.id }));
       await expect(
         withTenant(orgId, (tx) =>
@@ -130,7 +130,7 @@ describe("M2 — Offline Identifiers (lease/release/force-release/register-offli
 
     test("rejeita device com status !== active", async () => {
       const [d] = await withTenant(orgId, (tx) =>
-        tx.insert(devices).values({ tenantId: orgId, userId, name: "InactiveDevice", status: "force_released" })
+        tx.insert(devices).values({ tenantId: orgId, registeredByUserId: userId, name: "InactiveDevice", status: "inactive" })
           .returning({ id: devices.id }));
       await expect(
         withTenant(orgId, (tx) =>
@@ -140,7 +140,7 @@ describe("M2 — Offline Identifiers (lease/release/force-release/register-offli
 
     test("rejeita segundo lease activo — partial unique index a nível BD", async () => {
       const [d] = await withTenant(orgId, (tx) =>
-        tx.insert(devices).values({ tenantId: orgId, userId, name: "DupDevice", status: "active" })
+        tx.insert(devices).values({ tenantId: orgId, registeredByUserId: userId, name: "DupDevice", status: "active" })
           .returning({ id: devices.id }));
 
       await withTenant(orgId, (tx) =>
@@ -168,7 +168,7 @@ describe("M2 — Offline Identifiers (lease/release/force-release/register-offli
       const deviceNames = Array.from({ length: 10 }, (_, i) => `device-conc-${tag}-${i}`);
       for (const name of deviceNames) {
         await withTenant(orgId, (tx) =>
-          tx.insert(devices).values({ tenantId: orgId, userId, name, status: "active" }).returning());
+          tx.insert(devices).values({ tenantId: orgId, registeredByUserId: userId, name, status: "active" }).returning());
       }
 
       const results = await Promise.all(
@@ -193,7 +193,7 @@ describe("M2 — Offline Identifiers (lease/release/force-release/register-offli
 
     test("nextStart respeita o maior entre identifiers.sequence, leases.end_seq e pool.range_end", async () => {
       const [d] = await withTenant(orgId, (tx) =>
-        tx.insert(devices).values({ tenantId: orgId, userId, name: `PoolTest-${tag}`, status: "active" })
+        tx.insert(devices).values({ tenantId: orgId, registeredByUserId: userId, name: `PoolTest-${tag}`, status: "active" })
           .returning({ id: devices.id }));
 
       // Pre-seed: identifier com sequence=100, lease com end_seq=200, pool com range_end=150
@@ -229,7 +229,7 @@ describe("M2 — Offline Identifiers (lease/release/force-release/register-offli
   describe("2. releaseLease / forceReleaseLease", () => {
     test("releaseLease: sequências não usadas vão para identifier_release_pool", async () => {
       const [d] = await withTenant(orgId, (tx) =>
-        tx.insert(devices).values({ tenantId: orgId, userId, name: `ReleaseDev-${tag}`, status: "active" })
+        tx.insert(devices).values({ tenantId: orgId, registeredByUserId: userId, name: `ReleaseDev-${tag}`, status: "active" })
           .returning({ id: devices.id }));
 
       // Lease [1,50], mark used_up_to=20
@@ -248,7 +248,7 @@ describe("M2 — Offline Identifiers (lease/release/force-release/register-offli
 
     test("releaseLease: lease já não-activo é rejeitado (idempotência)", async () => {
       const [d] = await withTenant(orgId, (tx) =>
-        tx.insert(devices).values({ tenantId: orgId, userId, name: `IdemDev-${tag}`, status: "active" })
+        tx.insert(devices).values({ tenantId: orgId, registeredByUserId: userId, name: `IdemDev-${tag}`, status: "active" })
           .returning({ id: devices.id }));
 
       const [lease] = await db.insert(identifierLeases).values({
@@ -263,7 +263,7 @@ describe("M2 — Offline Identifiers (lease/release/force-release/register-offli
 
     test("releaseLease/forceReleaseLease funcionam com device desactivado", async () => {
       const [d] = await withTenant(orgId, (tx) =>
-        tx.insert(devices).values({ tenantId: orgId, userId, name: `DeadDev-${tag}`, status: "force_released" })
+        tx.insert(devices).values({ tenantId: orgId, registeredByUserId: userId, name: `DeadDev-${tag}`, status: "inactive" })
           .returning({ id: devices.id }));
 
       const [lease] = await db.insert(identifierLeases).values({
@@ -278,7 +278,7 @@ describe("M2 — Offline Identifiers (lease/release/force-release/register-offli
 
     test("forceReleaseLease: admin revogado no DB não consegue forçar libertação", async () => {
       const [d] = await withTenant(orgId, (tx) =>
-        tx.insert(devices).values({ tenantId: orgId, userId, name: `ForceAdmin-${tag}`, status: "active" })
+        tx.insert(devices).values({ tenantId: orgId, registeredByUserId: userId, name: `ForceAdmin-${tag}`, status: "active" })
           .returning({ id: devices.id }));
       const [lease] = await db.insert(identifierLeases).values({
         tenantId: orgId, categoryId: catSeqId, sectorId,
@@ -311,7 +311,7 @@ describe("M2 — Offline Identifiers (lease/release/force-release/register-offli
 
     beforeAll(async () => {
       const [d] = await withTenant(orgId, (tx) =>
-        tx.insert(devices).values({ tenantId: orgId, userId, name: `OfflineDev-${tag}`, status: "active" })
+        tx.insert(devices).values({ tenantId: orgId, registeredByUserId: userId, name: `OfflineDev-${tag}`, status: "active" })
           .returning({ id: devices.id }));
       deviceIdA = d.id;
 
@@ -354,7 +354,7 @@ describe("M2 — Offline Identifiers (lease/release/force-release/register-offli
 
     test("rejeita device inactivo", async () => {
       const [d] = await withTenant(orgId, (tx) =>
-        tx.insert(devices).values({ tenantId: orgId, userId, name: `OffDead-${tag}`, status: "force_released" })
+        tx.insert(devices).values({ tenantId: orgId, registeredByUserId: userId, name: `OffDead-${tag}`, status: "inactive" })
           .returning({ id: devices.id }));
       const [l] = await db.insert(identifierLeases).values({
         tenantId: orgId, categoryId: catSeqId, sectorId,
@@ -382,7 +382,7 @@ describe("M2 — Offline Identifiers (lease/release/force-release/register-offli
 
     test("rejeita lease pertencente a outro device", async () => {
       const [d2] = await withTenant(orgId, (tx) =>
-        tx.insert(devices).values({ tenantId: orgId, userId, name: `OtherDev-${tag}`, status: "active" })
+        tx.insert(devices).values({ tenantId: orgId, registeredByUserId: userId, name: `OtherDev-${tag}`, status: "active" })
           .returning({ id: devices.id }));
 
       await expect(
@@ -396,7 +396,7 @@ describe("M2 — Offline Identifiers (lease/release/force-release/register-offli
 
     test("duas chamadas concorrentes à mesma sequência: só uma regista (o lock serializa correctamente)", async () => {
       const [d] = await withTenant(orgId, (tx) =>
-        tx.insert(devices).values({ tenantId: orgId, userId, name: `ConcOff-${tag}`, status: "active" })
+        tx.insert(devices).values({ tenantId: orgId, registeredByUserId: userId, name: `ConcOff-${tag}`, status: "active" })
           .returning({ id: devices.id }));
       // Usar sequência alta (1000) para evitar colisão com registos de outros testes
       const [l] = await db.insert(identifierLeases).values({
@@ -438,7 +438,7 @@ describe("M2 — Offline Identifiers (lease/release/force-release/register-offli
   describe("4. register-offline-loose", () => {
     test("rejeita categoria com requiresSequential = true (código 400 / CATEGORY_SEQUENTIAL)", async () => {
       const [d] = await withTenant(orgId, (tx) =>
-        tx.insert(devices).values({ tenantId: orgId, userId, name: `LooseSeq-${tag}`, status: "active" })
+        tx.insert(devices).values({ tenantId: orgId, registeredByUserId: userId, name: `LooseSeq-${tag}`, status: "active" })
           .returning({ id: devices.id }));
 
       await expect(
@@ -453,7 +453,7 @@ describe("M2 — Offline Identifiers (lease/release/force-release/register-offli
 
     test("rejeita device inactivo (DEVICE_INACTIVE, 400)", async () => {
       const [d] = await withTenant(orgId, (tx) =>
-        tx.insert(devices).values({ tenantId: orgId, userId, name: `LooseDead-${tag}`, status: "force_released" })
+        tx.insert(devices).values({ tenantId: orgId, registeredByUserId: userId, name: `LooseDead-${tag}`, status: "inactive" })
           .returning({ id: devices.id }));
 
       await expect(
@@ -470,7 +470,7 @@ describe("M2 — Offline Identifiers (lease/release/force-release/register-offli
 
     test("aloca via generateIdentifier — sequência consistente com MAX(sequence)+1 mesmo com concorrência", async () => {
       const [d] = await withTenant(orgId, (tx) =>
-        tx.insert(devices).values({ tenantId: orgId, userId, name: `LooseConc-${tag}`, status: "active" })
+        tx.insert(devices).values({ tenantId: orgId, registeredByUserId: userId, name: `LooseConc-${tag}`, status: "active" })
           .returning({ id: devices.id }));
 
       // Mix: generate (online) + register-offline-loose (offline) concorrentes
@@ -556,7 +556,7 @@ describe("M2 — Offline Identifiers (lease/release/force-release/register-offli
   describe("6. Auditoria", () => {
     test("cada operação grava exactamente uma entrada de audit log com metadata correcto", async () => {
       const [d] = await withTenant(orgId, (tx) =>
-        tx.insert(devices).values({ tenantId: orgId, userId, name: `AuditDev-${tag}`, status: "active" })
+        tx.insert(devices).values({ tenantId: orgId, registeredByUserId: userId, name: `AuditDev-${tag}`, status: "active" })
           .returning({ id: devices.id }));
 
       const lease = await withTenant(orgId, (tx) =>
@@ -578,7 +578,7 @@ describe("M2 — Offline Identifiers (lease/release/force-release/register-offli
 
       // Segundo lease para force-release
       const [d2] = await withTenant(orgId, (tx) =>
-        tx.insert(devices).values({ tenantId: orgId, userId, name: `AuditDev2-${tag}`, status: "active" })
+        tx.insert(devices).values({ tenantId: orgId, registeredByUserId: userId, name: `AuditDev2-${tag}`, status: "active" })
           .returning({ id: devices.id }));
       const lease2 = await withTenant(orgId, (tx) =>
         leaseIdentifiers(tx, authAdmin(), { deviceId: d2.id, categoryId: catSeqId }, "10.0.0.3"));
@@ -592,7 +592,7 @@ describe("M2 — Offline Identifiers (lease/release/force-release/register-offli
 
       // register-offline
       const [d3] = await withTenant(orgId, (tx) =>
-        tx.insert(devices).values({ tenantId: orgId, userId, name: `AuditDev3-${tag}`, status: "active" })
+        tx.insert(devices).values({ tenantId: orgId, registeredByUserId: userId, name: `AuditDev3-${tag}`, status: "active" })
           .returning({ id: devices.id }));
       const lease3 = await withTenant(orgId, (tx) =>
         leaseIdentifiers(tx, authAdmin(), { deviceId: d3.id, categoryId: catSeqId }));
@@ -608,7 +608,7 @@ describe("M2 — Offline Identifiers (lease/release/force-release/register-offli
 
       // generate (pelo register-offline-loose)
       const [d4] = await withTenant(orgId, (tx) =>
-        tx.insert(devices).values({ tenantId: orgId, userId, name: `AuditDev4-${tag}`, status: "active" })
+        tx.insert(devices).values({ tenantId: orgId, registeredByUserId: userId, name: `AuditDev4-${tag}`, status: "active" })
           .returning({ id: devices.id }));
       const genned = await withTenant(orgId, (tx) =>
         generateIdentifier(tx, authUser(), { categoryId: catNoSeqId, sectorId }, "10.0.0.6"));
@@ -627,7 +627,7 @@ describe("M2 — Offline Identifiers (lease/release/force-release/register-offli
     test("(a) register-offline-loose: mesmo idempotencyKey devolve mesmo identificador", async () => {
       const key = `loose-idem-${tag}-a`;
       const [d] = await withTenant(orgId, (tx) =>
-        tx.insert(devices).values({ tenantId: orgId, userId, name: `IdemLooseA-${tag}`, status: "active" })
+        tx.insert(devices).values({ tenantId: orgId, registeredByUserId: userId, name: `IdemLooseA-${tag}`, status: "active" })
           .returning({ id: devices.id }));
 
       const first = await withTenant(orgId, (tx) =>
@@ -648,7 +648,7 @@ describe("M2 — Offline Identifiers (lease/release/force-release/register-offli
     test("(b) register-offline: mesmo idempotencyKey devolve mesmos identificadores e não avança usedUpTo", async () => {
       const key = `offline-idem-${tag}-b`;
       const [d] = await withTenant(orgId, (tx) =>
-        tx.insert(devices).values({ tenantId: orgId, userId, name: `IdemOffB-${tag}`, status: "active" })
+        tx.insert(devices).values({ tenantId: orgId, registeredByUserId: userId, name: `IdemOffB-${tag}`, status: "active" })
           .returning({ id: devices.id }));
 
       const [lease] = await db.insert(identifierLeases).values({
@@ -681,7 +681,7 @@ describe("M2 — Offline Identifiers (lease/release/force-release/register-offli
     test("(c) concorrência com mesmo idempotencyKey: só uma linha criada", async () => {
       const key = `concurrent-idem-${tag}-c`;
       const [d] = await withTenant(orgId, (tx) =>
-        tx.insert(devices).values({ tenantId: orgId, userId, name: `IdemConcC-${tag}`, status: "active" })
+        tx.insert(devices).values({ tenantId: orgId, registeredByUserId: userId, name: `IdemConcC-${tag}`, status: "active" })
           .returning({ id: devices.id }));
 
       const results = await Promise.all([
@@ -706,7 +706,7 @@ describe("M2 — Offline Identifiers (lease/release/force-release/register-offli
       const key1 = `distinct-idem-${tag}-d1`;
       const key2 = `distinct-idem-${tag}-d2`;
       const [d] = await withTenant(orgId, (tx) =>
-        tx.insert(devices).values({ tenantId: orgId, userId, name: `IdemDistD-${tag}`, status: "active" })
+        tx.insert(devices).values({ tenantId: orgId, registeredByUserId: userId, name: `IdemDistD-${tag}`, status: "active" })
           .returning({ id: devices.id }));
 
       const [r1, r2] = await Promise.all([
@@ -727,7 +727,7 @@ describe("M2 — Offline Identifiers (lease/release/force-release/register-offli
     test("(e) concorrência: mesma idempotencyKey, categorias diferentes — só um idempotency_record criado", async () => {
       const key = `cross-cat-idem-${tag}-e`;
       const [d] = await withTenant(orgId, (tx) =>
-        tx.insert(devices).values({ tenantId: orgId, userId, name: `IdemCrossE-${tag}`, status: "active" })
+        tx.insert(devices).values({ tenantId: orgId, registeredByUserId: userId, name: `IdemCrossE-${tag}`, status: "active" })
           .returning({ id: devices.id }));
 
       const cat2Id = `TST-NOSEQ2-${tag}`;

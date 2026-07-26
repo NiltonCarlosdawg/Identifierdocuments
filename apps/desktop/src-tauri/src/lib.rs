@@ -51,6 +51,7 @@ pub fn run() {
             identifiers::get_leases,
             identifiers::generate_offline_identifier,
             identifiers::request_lease,
+            identifiers::get_or_register_device_id,
             sync::set_sync_credentials,
             sync::set_api_base_url,
             sync::get_api_base_url,

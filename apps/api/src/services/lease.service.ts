@@ -257,7 +257,7 @@ export async function registerOfflineIdentifiers(
           visibility: ident.visibility ?? "public",
           status: "active" as const,
           origin: ident.origin ?? "physical",
-          createdBy: device.userId,
+          createdBy: device.registeredByUserId,
         };
       }),
     ).returning();

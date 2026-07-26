@@ -1,5 +1,6 @@
 import { useState, useCallback } from "react";
 import { sync, api } from "../../infrastructure/di/container";
+import { useDeviceStore } from "../stores/deviceStore";
 
 export interface GenerateInput {
   categoryId: string;
@@ -17,6 +18,9 @@ export interface GenerateResult {
 
 function mapOfflineError(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err);
+  if (msg.includes("OFFLINE_NO_DEVICE")) {
+    return "Dispositivo não registado. Conecte-se à internet uma vez para ativar a geração offline neste dispositivo.";
+  }
   if (msg.includes("Lease revogado") || msg.includes("Lease não") || msg.includes("lease não")) {
     return "Lease revogado. Reconecte para obter um novo lease.";
   }
@@ -65,12 +69,19 @@ export function useGenerateIdentifier() {
         return r;
       }
 
+      const deviceId = useDeviceStore.getState().deviceId;
+      if (!deviceId) {
+        const errMsg = useDeviceStore.getState().deviceIdError || "Dispositivo não identificado. Conecte-se à internet para registar este dispositivo.";
+        throw new Error(errMsg);
+      }
+
       const { invoke } = await import("@tauri-apps/api/core");
       const pending = await invoke<{
         identifier: string;
         sequence: number;
         fiscal: boolean;
       }>("generate_offline_identifier", {
+        deviceId,
         categoryId: input.categoryId,
         issuedTo: input.issuedTo || null,
         description: input.description || null,
