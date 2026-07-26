@@ -124,12 +124,29 @@ export const documents = pgTable("documents", {
   index("documents_tenant_idx").on(t.tenantId),
 ]);
 
+export const documentAccessRequests = pgTable("document_access_requests", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  tenantId: uuid("tenant_id").notNull().references(() => organizations.id),
+  documentId: uuid("document_id").notNull().references(() => documents.id),
+  requesterId: uuid("requester_id").notNull().references(() => users.id),
+  status: text("status", { enum: ["pending", "approved", "denied", "cancelled"] }).notNull().default("pending"),
+  resolvedBy: uuid("resolved_by").references(() => users.id),
+  resolvedAt: timestamp("resolved_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  index("dar_tenant_idx").on(t.tenantId),
+  index("dar_document_idx").on(t.documentId),
+  index("dar_requester_idx").on(t.requesterId),
+  index("dar_status_idx").on(t.status),
+]);
+
 export const documentShares = pgTable("document_shares", {
   id: uuid("id").primaryKey().defaultRandom(),
   documentId: uuid("document_id").notNull().references(() => documents.id),
   sharedBy: uuid("shared_by").notNull().references(() => users.id),
   sharedWithSectorId: uuid("shared_with_sector_id").references(() => sectors.id),
   sharedWithUserId: uuid("shared_with_user_id").references(() => users.id),
+  sourceRequestId: uuid("source_request_id").references(() => documentAccessRequests.id),
   // "pending_approval": partilha cross-sector criada mas ainda sem aprovação do
   // supervisor do sector destino — não deve conceder acesso enquanto não passar a "active".
   status: text("status", { enum: ["pending_approval", "active"] }).notNull().default("active"),
@@ -140,6 +157,7 @@ export const documentShares = pgTable("document_shares", {
   index("document_shares_user_idx").on(t.sharedWithUserId),
   index("document_shares_sector_idx").on(t.sharedWithSectorId),
   index("document_shares_status_idx").on(t.status),
+  index("document_shares_source_request_idx").on(t.sourceRequestId),
 ]);
 
 export const approvals = pgTable("approvals", {
@@ -194,14 +212,18 @@ export const classifierFeedback = pgTable("classifier_feedback", {
 export const devices = pgTable("devices", {
   id: uuid("id").primaryKey().defaultRandom(),
   tenantId: uuid("tenant_id").notNull().references(() => organizations.id),
-  userId: uuid("user_id").references(() => users.id),
+  sectorId: uuid("sector_id").references(() => sectors.id),
+  registeredByUserId: uuid("registered_by_user_id").references(() => users.id),
   name: text("name").notNull(),
-  status: text("status", { enum: ["active", "force_released"] }).notNull().default("active"),
+  status: text("status", { enum: ["active", "inactive"] }).notNull().default("active"),
   lastSeenAt: timestamp("last_seen_at"),
+  deactivatedAt: timestamp("deactivated_at"),
+  deactivatedBy: uuid("deactivated_by").references(() => users.id),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [
   index("devices_tenant_idx").on(t.tenantId),
-  index("devices_user_idx").on(t.userId),
+  index("devices_sector_idx").on(t.sectorId),
+  index("devices_status_idx").on(t.status),
 ]);
 
 export const identifierLeases = pgTable("identifier_leases", {
@@ -316,11 +338,19 @@ export const documentRelations = relations(documents, ({ one, many }) => ({
   approvals: many(approvals),
 }));
 
+export const documentAccessRequestRelations = relations(documentAccessRequests, ({ one }) => ({
+  tenant: one(organizations, { fields: [documentAccessRequests.tenantId], references: [organizations.id] }),
+  document: one(documents, { fields: [documentAccessRequests.documentId], references: [documents.id] }),
+  requester: one(users, { fields: [documentAccessRequests.requesterId], references: [users.id] }),
+  resolver: one(users, { fields: [documentAccessRequests.resolvedBy], references: [users.id] }),
+}));
+
 export const documentShareRelations = relations(documentShares, ({ one }) => ({
   document: one(documents, { fields: [documentShares.documentId], references: [documents.id] }),
   sharer: one(users, { fields: [documentShares.sharedBy], references: [users.id], relationName: "sharedByShares" }),
   sector: one(sectors, { fields: [documentShares.sharedWithSectorId], references: [sectors.id] }),
   user: one(users, { fields: [documentShares.sharedWithUserId], references: [users.id] }),
+  sourceRequest: one(documentAccessRequests, { fields: [documentShares.sourceRequestId], references: [documentAccessRequests.id] }),
 }));
 
 export const approvalRelations = relations(approvals, ({ one }) => ({
@@ -333,7 +363,9 @@ export const approvalRelations = relations(approvals, ({ one }) => ({
 
 export const deviceRelations = relations(devices, ({ one }) => ({
   organization: one(organizations, { fields: [devices.tenantId], references: [organizations.id] }),
-  registeredBy: one(users, { fields: [devices.userId], references: [users.id] }),
+  sector: one(sectors, { fields: [devices.sectorId], references: [sectors.id] }),
+  registeredBy: one(users, { fields: [devices.registeredByUserId], references: [users.id], relationName: "registeredDevices" }),
+  deactivator: one(users, { fields: [devices.deactivatedBy], references: [users.id], relationName: "deactivatedDevices" }),
 }));
 
 export const identifierLeaseRelations = relations(identifierLeases, ({ one }) => ({

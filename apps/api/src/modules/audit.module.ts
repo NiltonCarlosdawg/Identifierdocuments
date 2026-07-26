@@ -1,8 +1,8 @@
 import { Elysia, t } from "elysia";
 import { db } from "../db";
-import { auditLogs } from "../db/schema";
+import { auditLogs, users } from "../db/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
-import { requireAuth, requireRole } from "../middleware/auth";
+import { requireAuth, getFreshRoles } from "../middleware/auth";
 import { checkRateLimit } from "../middleware/rateLimit";
 import { withTenant } from "../db/withTenant";
 import { safeError } from "../lib/errors";
@@ -17,11 +17,27 @@ const CSV_BATCH = 1000;
 
 export const auditModule = new Elysia({ prefix: "/audit" })
   .use(requireAuth())
-  .use(requireRole("ORG_ADMIN"))
 
-  .get("/", async ({ query, tenantId }) => {
+  .get("/", async ({ query, tenantId, auth }) => {
     return withTenant(tenantId, async (tx) => {
+      const roleNames = await getFreshRoles(auth!.userId, tenantId);
+      const isAdmin = roleNames.includes("ORG_ADMIN");
+
       const conditions = [eq(auditLogs.tenantId, tenantId)];
+      if (!isAdmin) {
+        const me = await tx.query.users.findFirst({
+          where: eq(users.id, auth!.userId),
+          columns: { sectorId: true },
+        });
+        if (!me?.sectorId) {
+          return { data: [], meta: { total: 0, page: 1, limit: 50 } };
+        }
+        const sectorUserIds = await tx
+          .select({ id: users.id })
+          .from(users)
+          .where(and(eq(users.tenantId, tenantId), eq(users.sectorId, me.sectorId)));
+        conditions.push(sql`${auditLogs.userId} = ANY(${sectorUserIds.map(u => u.id)})`);
+      }
       if (query.action) conditions.push(eq(auditLogs.action, query.action));
       if (query.resource) conditions.push(eq(auditLogs.resource, query.resource));
 
@@ -58,14 +74,20 @@ export const auditModule = new Elysia({ prefix: "/audit" })
       page: t.Optional(t.String()),
       limit: t.Optional(t.String()),
     }),
-    detail: { summary: "Listar logs de auditoria", tags: ["Auditoria"] },
+    detail: { summary: "Listar logs de auditoria (filtrados por sector conforme role)", tags: ["Auditoria"] },
   })
 
-  .get("/export", async ({ query, tenantId, set, request }) => {
+  .get("/export", async ({ query, tenantId, set, request, auth }) => {
     const ip = request.headers.get("x-forwarded-for") || "unknown";
     if (!(await checkRateLimit(`audit:export:${ip}:${tenantId}`, 5, 3_600_000))) {
       set.status = 429;
       return { error: { code: "RATE_LIMITED", message: "Limite de exportações excedido. Tente novamente dentro de 1 hora." } };
+    }
+
+    const roleNames = await getFreshRoles(auth!.userId, tenantId);
+    if (!roleNames.includes("ORG_ADMIN")) {
+      set.status = 403;
+      return { error: { code: "FORBIDDEN", message: "Apenas administradores podem exportar auditoria." } };
     }
 
     // NOTA: usa db.query.* directamente (sem withTenant) porque withTenant

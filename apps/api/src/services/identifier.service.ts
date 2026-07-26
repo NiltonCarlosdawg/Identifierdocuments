@@ -175,7 +175,7 @@ export async function listIdentifiers(tx: DB, auth: AuthPayload, filters: {
 
   const allRows = await tx.query.identifiers.findMany({
     where: and(...conditions),
-    with: { category: true, document: true, sector: true },
+    with: { category: true, document: true, sector: true, createdByUser: true },
     orderBy: desc(identifiers.createdAt),
   });
 

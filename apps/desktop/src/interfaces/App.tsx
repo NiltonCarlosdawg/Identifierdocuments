@@ -4,6 +4,7 @@ import { decodeJwtUser } from "../domain/entities/User";
 import type { StoredUser } from "../domain/entities/User";
 import { useAuthStore } from "./stores/authStore";
 import { useAppConfigStore } from "./stores/configStore";
+import { useDeviceStore } from "./stores/deviceStore";
 import { api, sync } from "../infrastructure/di/container";
 import Layout from "./components/Layout";
 import Login from "./pages/Login";
@@ -63,6 +64,9 @@ export default function App() {
         const res = await api.get<{ data: StoredUser | null }>("/auth/me");
         if (res.data === null) { logout(); return; }
         setUser(res.data);
+        if (sync.isAvailable()) {
+          useDeviceStore.getState().initialize().catch(() => {});
+        }
       } catch (err: any) {
         if (err?.message === "Sessão expirada") logout();
       }
