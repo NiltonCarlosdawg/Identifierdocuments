@@ -1052,6 +1052,7 @@ mod tests {
         let state = SyncState {
             db_path: db_path.clone(),
             uploads_dir: dir.clone(),
+            downloads_dir: dir.clone(),
             api_base_url: std::sync::Mutex::new("http://localhost:3000".to_string()),
             auth_token: std::sync::Mutex::new(None),
             syncing: std::sync::Mutex::new(false),
@@ -1318,6 +1319,7 @@ mod tests {
         let state = SyncState {
             db_path: db_path.clone(),
             uploads_dir: dir.clone(),
+            downloads_dir: dir.clone(),
             api_base_url: std::sync::Mutex::new("http://localhost:3000".to_string()),
             auth_token: std::sync::Mutex::new(None),
             syncing: std::sync::Mutex::new(false),
@@ -1346,6 +1348,7 @@ mod tests {
         let state2 = SyncState {
             db_path,
             uploads_dir: dir.clone(),
+            downloads_dir: dir.clone(),
             api_base_url: std::sync::Mutex::new("http://localhost:3000".to_string()),
             auth_token: std::sync::Mutex::new(None),
             syncing: std::sync::Mutex::new(false),
@@ -1382,6 +1385,7 @@ mod tests {
         let state = SyncState {
             db_path: db_path.clone(),
             uploads_dir: dir.clone(),
+            downloads_dir: dir.clone(),
             api_base_url: std::sync::Mutex::new("http://localhost:3000".to_string()),
             auth_token: std::sync::Mutex::new(None),
             syncing: std::sync::Mutex::new(false),
@@ -1396,6 +1400,7 @@ mod tests {
         let _state2 = SyncState {
             db_path: db_path.clone(),
             uploads_dir: dir.clone(),
+            downloads_dir: dir.clone(),
             api_base_url: std::sync::Mutex::new("http://localhost:3000".to_string()),
             auth_token: std::sync::Mutex::new(None),
             syncing: std::sync::Mutex::new(false),

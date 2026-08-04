@@ -907,6 +907,7 @@ pub struct QueueItem {
 pub struct SyncState {
     pub db_path: PathBuf,
     pub uploads_dir: PathBuf,
+    pub downloads_dir: PathBuf,
     pub api_base_url: Mutex<String>,
     pub auth_token: Mutex<Option<String>>,
     pub syncing: Mutex<bool>,
@@ -1503,6 +1504,127 @@ pub async fn attach_document_native(
     upload_document(&api_base_url, &token, &path, filename, &identifier, source).await
 }
 
+fn doc_cache_dir(downloads_dir: &PathBuf, document_param: &str) -> PathBuf {
+    downloads_dir.join(sanitize_filename(document_param))
+}
+
+fn first_file_in_dir(dir: &Path) -> Option<PathBuf> {
+    let entries = std::fs::read_dir(dir).ok()?;
+    entries.flatten().map(|e| e.path()).find(|p| p.is_file())
+}
+
+fn parse_content_disposition_filename(value: &str) -> String {
+    if let Some(idx) = value.find("filename*=UTF-8''") {
+        return value[idx + "filename*=UTF-8''".len()..]
+            .split(';')
+            .next()
+            .unwrap_or("")
+            .trim_matches('"')
+            .to_string();
+    }
+    if let Some(idx) = value.find("filename=") {
+        return value[idx + "filename=".len()..]
+            .split(';')
+            .next()
+            .unwrap_or("")
+            .trim_matches('"')
+            .trim()
+            .to_string();
+    }
+    String::new()
+}
+
+const MAX_CACHE_BYTES: usize = 52_428_800;
+
+async fn download_document_file(
+    api_base_url: &str,
+    token: &str,
+    document_param: &str,
+) -> Result<(Vec<u8>, String), String> {
+    let client = build_tls_client(120)?;
+    let res = client
+        .get(format!("{api_base_url}/documents/{document_param}/download"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let status = res.status();
+    if !status.is_success() {
+        return Err(format!("Download falhou (HTTP {status})."));
+    }
+    let filename = res
+        .headers()
+        .get(reqwest::header::CONTENT_DISPOSITION)
+        .and_then(|v| v.to_str().ok())
+        .map(parse_content_disposition_filename)
+        .unwrap_or_default();
+    let bytes = res.bytes().await.map_err(|e| e.to_string())?.to_vec();
+    Ok((bytes, filename))
+}
+
+#[tauri::command]
+pub async fn download_document_offline(
+    state: State<'_, SyncState>,
+    document_param: String,
+    filename: String,
+) -> Result<String, String> {
+    let cache_dir = doc_cache_dir(&state.downloads_dir, &document_param);
+    if let Some(existing) = first_file_in_dir(&cache_dir) {
+        return Ok(existing.to_string_lossy().to_string());
+    }
+
+    let api_base_url = state.api_base_url.lock().map_err(|e| e.to_string())?.clone();
+    let token = state
+        .auth_token
+        .lock()
+        .map_err(|e| e.to_string())?
+        .clone()
+        .ok_or_else(|| "Sessão não autenticada.".to_string())?;
+
+    if !check_online(&api_base_url).await {
+        return Err("Documento não disponível offline — ainda não foi descarregado.".to_string());
+    }
+
+    let (bytes, server_filename) = download_document_file(&api_base_url, &token, &document_param).await?;
+    if bytes.len() > MAX_CACHE_BYTES {
+        return Err("Ficheiro demasiado grande para a cache offline (máx. 50MB).".to_string());
+    }
+
+    std::fs::create_dir_all(&cache_dir).map_err(|e| e.to_string())?;
+    let safe_name = if server_filename.is_empty() {
+        sanitize_filename(&filename)
+    } else {
+        sanitize_filename(&server_filename)
+    };
+    if safe_name.is_empty() {
+        return Err("Nome de ficheiro inválido.".to_string());
+    }
+    let dest = cache_dir.join(safe_name);
+    std::fs::write(&dest, &bytes).map_err(|e| e.to_string())?;
+    Ok(dest.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub fn is_document_cached(state: State<'_, SyncState>, document_param: String) -> Result<bool, String> {
+    Ok(first_file_in_dir(&doc_cache_dir(&state.downloads_dir, &document_param)).is_some())
+}
+
+#[tauri::command]
+pub fn open_local_file(path: String) -> Result<(), String> {
+    let result = if cfg!(target_os = "windows") {
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", &path])
+            .spawn()
+    } else if cfg!(target_os = "macos") {
+        std::process::Command::new("open").arg(&path).spawn()
+    } else {
+        std::process::Command::new("xdg-open").arg(&path).spawn()
+    };
+    result
+        .map(|_| ())
+        .map_err(|e| format!("Erro ao abrir o ficheiro: {e}"))
+}
+
 #[cfg(test)]
 mod tests {
     // NOTA: Os testes full_cycle_{success,failure}_* testam a função pura
@@ -2052,6 +2174,7 @@ mod tests {
         let state = SyncState {
             db_path: db_path.clone(),
             uploads_dir: dir.clone(),
+            downloads_dir: dir.clone(),
             api_base_url: std::sync::Mutex::new("http://localhost:3000".to_string()),
             auth_token: std::sync::Mutex::new(None),
             syncing: std::sync::Mutex::new(false),

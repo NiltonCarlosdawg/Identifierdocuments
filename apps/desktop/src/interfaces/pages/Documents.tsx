@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { api, sync } from "../../infrastructure/di/container";
 import { PageHeader, Modal, StatusChip, EmptyState, Pagination, OfflineNotice } from "../components/docid-ui";
 import { useOfflineCache } from "../hooks/useOfflineCache";
@@ -18,6 +18,7 @@ export default function Documents() {
   const [showUpload, setShowUpload] = useState(false);
   const [selected, setSelected] = useState<DocRow | null>(null);
   const [search, setSearch] = useState("");
+  const [downloadError, setDownloadError] = useState("");
 
   const { loading, error, isStale, cachedAt, refresh } = useOfflineCache<{ data: DocRow[]; meta: { total: number; page: number; limit: number } }>({
     endpoint: "/documents",
@@ -28,6 +29,18 @@ export default function Documents() {
     onData: result => { setRows(result.data); setMeta(result.meta); },
   });
 
+  const handleOpen = async (row: DocRow) => {
+    setDownloadError("");
+    if (!sync.isAvailable()) { window.open(row.fileUrl, "_blank"); return; }
+    try {
+      const path = await sync.downloadOffline(row.id, row.filename);
+      if (path) { await sync.openLocalFile(path); return; }
+      window.open(row.fileUrl, "_blank");
+    } catch (err: any) {
+      setDownloadError(err?.message || "Documento não disponível offline.");
+    }
+  };
+
   return (
     <div>
       <PageHeader title="Documentos" description="Gerir os documentos associados a identificadores" actions={
@@ -35,6 +48,7 @@ export default function Documents() {
       } />
       {error && <div className="mb-4 rounded-lg border border-docid-error/30 bg-docid-error/10 p-3 text-sm text-docid-error">{error}</div>}
       {isStale && <OfflineNotice cachedAt={cachedAt} onRetry={refresh} />}
+      {downloadError && <div className="mb-4 rounded-lg border border-docid-tertiary/30 bg-docid-tertiary/10 p-3 text-sm text-docid-tertiary">{downloadError}</div>}
       <div className="mb-4 flex items-center gap-3">
         <div className="relative flex-1 max-w-xs"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-docid-outline" /><input value={search} onChange={e => setSearch(e.target.value)} className="docid-input w-full pl-9" placeholder="Pesquisar documento..." /></div>
       </div>
@@ -54,7 +68,7 @@ export default function Documents() {
                 <td><StatusChip tone={row.status === "active" ? "success" : row.status === "cancelled" ? "error" : "neutral"}>{row.status}</StatusChip></td>
                 <td className="text-xs text-docid-muted">{row.uploadedBy || "-"}</td>
                 <td className="text-xs text-docid-muted">{new Date(row.createdAt).toLocaleDateString("pt-AO")}</td>
-                <td><button onClick={e => { e.stopPropagation(); window.open(row.fileUrl, "_blank"); }} className="rounded p-1 text-docid-muted hover:text-docid-text"><Download className="h-4 w-4" /></button></td>
+                <td><button onClick={e => { e.stopPropagation(); handleOpen(row); }} className="rounded p-1 text-docid-muted hover:text-docid-text"><Download className="h-4 w-4" /></button></td>
               </tr>
             ))}</tbody>
           </table>
@@ -63,7 +77,7 @@ export default function Documents() {
       </div>
 
       {showUpload && <UploadModal onClose={() => setShowUpload(false)} onDone={() => { setShowUpload(false); refresh(); }} />}
-      {selected && <DetailModal row={selected} onClose={() => setSelected(null)} onDone={() => refresh()} />}
+      {selected && <DetailModal row={selected} onClose={() => setSelected(null)} onDone={() => refresh()} onDownload={() => handleOpen(selected)} />}
     </div>
   );
 }
@@ -206,20 +220,38 @@ function UploadModal({ onClose, onDone }: { onClose: () => void; onDone: () => v
   );
 }
 
-function DetailModal({ row, onClose, onDone }: { row: DocRow; onClose: () => void; onDone: () => void }) {
+function DetailModal({ row, onClose, onDone, onDownload }: { row: DocRow; onClose: () => void; onDone: () => void; onDownload: () => Promise<void> }) {
   const [showShare, setShowShare] = useState(false);
+  const [offlineAvailable, setOfflineAvailable] = useState<boolean | null>(null);
   const identCode = row.identifier?.identifier || row.id;
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!sync.isAvailable()) { setOfflineAvailable(false); return; }
+    sync.isDocumentCached(row.id).then(v => { if (!cancelled) setOfflineAvailable(v); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [row.id]);
 
   return (
     <>
       <Modal title="Detalhe do Documento" onClose={onClose} footer={
         <div className="flex gap-2">
-          <button onClick={() => window.open(row.fileUrl, "_blank")} className="docid-button-secondary"><Download className="h-4 w-4" /> Descarregar</button>
+          <button onClick={onDownload} className="docid-button-secondary"><Download className="h-4 w-4" /> Descarregar</button>
           <button onClick={() => setShowShare(true)} className="docid-button-primary"><Share2 className="h-4 w-4" /> Partilhar</button>
         </div>
       }>
         <div className="space-y-4">
-          <div><p className="text-sm font-medium">{row.filename}</p><p className="text-xs text-docid-muted">{(row.fileSize / 1024 / 1024).toFixed(2)} MB · {row.mimeType}</p></div>
+          <div>
+            <div className="flex items-center gap-2">
+              <p className="text-sm font-medium">{row.filename}</p>
+              {offlineAvailable !== null && (
+                <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${offlineAvailable ? "bg-docid-secondary/10 text-docid-secondary" : "bg-docid-surface-high text-docid-muted"}`}>
+                  {offlineAvailable ? "Disponível offline" : "Não disponível offline"}
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-docid-muted">{(row.fileSize / 1024 / 1024).toFixed(2)} MB · {row.mimeType}</p>
+          </div>
           <div className="grid grid-cols-2 gap-4 text-sm">
             <div><p className="text-xs text-docid-muted">Identificador</p><p className="font-mono text-xs font-medium">{row.identifier?.identifier || "-"}</p></div>
             <div><p className="text-xs text-docid-muted">Categoria</p><p className="font-medium">{row.identifier?.categoryName || "-"}</p></div>

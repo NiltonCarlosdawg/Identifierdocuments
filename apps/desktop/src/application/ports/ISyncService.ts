@@ -15,5 +15,8 @@ export interface ISyncService {
   retryItem(id: string): Promise<void>;
   forceSync(): Promise<number>;
   clearUploaded(): Promise<number>;
+  downloadOffline(documentParam: string, filename: string): Promise<string | null>;
+  openLocalFile(path: string): Promise<void>;
+  isDocumentCached(documentParam: string): Promise<boolean>;
   onSyncEvent(handler: (event: string, payload?: unknown) => void): Promise<UnlistenFn>;
 }

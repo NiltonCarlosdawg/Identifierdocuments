@@ -522,10 +522,40 @@ aplicadas posteriormente a itens aqui marcados como completos)*
 - [ ] **P1** Verificação manual em runtime: offline anexar enfileira; online
   envia automaticamente (flush no `run_sync_cycle`) e sai da fila
 
-### Fora de âmbito (Fases 3–4 do plano — trabalho futuro)
-- [ ] **P2** Fase 3: download offline de documentos (cache de ficheiros em disco)
+### Fora de âmbito (Fase 4 do plano — trabalho futuro)
 - [ ] **P2** Fase 4: fila de escritas offline (idempotência, ordem, conflitos)
 
+
+---
+
+## FASE 11 — Download Offline de Documentos *(Fase 3 do plano offline)*
+> **Objectivo:** permitir abrir/baixar documentos já sincronizados sem rede.
+> Antes, `Documents.tsx` abria `window.open(fileUrl)` — falhava offline. Agora
+> o ficheiro é descarregado e guardado em disco (cache local) e aberto com a
+> app padrão do SO.
+
+### 11.1 — Comandos Rust (cache local em disco)
+- [x] **P0** `SyncState.downloads_dir` (`app_data/downloads`), populado no `lib.rs`
+- [x] **P0** `download_document_offline(param, filename)`: devolve o caminho local se já
+  em cache; senão descarrega de `GET /documents/{param}/download` (Bearer token) e
+  guarda em `downloads/{param_sanitizado}/{ficheiro}`; erro claro se offline e não
+  cacheado; limite de 50MB
+- [x] **P0** `is_document_cached(param)`: verifica existência do ficheiro em cache
+- [x] **P0** `open_local_file(path)`: abre com a app padrão do SO (`xdg-open`/`open`/`start`)
+  — sem dependência nova (std::process)
+- [x] **P0** Comandos registados em `lib.rs`
+
+### 11.2 — Frontend
+- [x] **P0** Porta `ISyncService` + `TauriSyncAdapter` + `SyncService`:
+  `downloadOffline`, `openLocalFile`, `isDocumentCached`
+- [x] **P0** `Documents.tsx`: botão de download (linha + detalhe) tenta cache local
+  via `downloadOffline` + `openLocalFile`; em erro mostra banner "não disponível
+  offline"; browser continua `window.open(fileUrl)`
+- [x] **P0** `DetailModal`: indicador "Disponível offline" / "Não disponível offline"
+  via `isDocumentCached`
+- [ ] **P1** Verificação manual em runtime: abrir documento online → reabrir offline
+  abre do disco; documento nunca visto mostra "Não disponível offline"
+- [ ] **P1** Evicção da cache de downloads (limite de idade/tamanho total)
 
 ---
 
@@ -598,6 +628,7 @@ aplicadas posteriormente a itens aqui marcados como completos)*
 | **8** | Seed offline da geração de identificadores | ✅ Completo — lacuna corrigida: caches (categorias/tenant) e leases semeados no ciclo de sync + `ensure_offline_lease`/`cache_categories` no frontend; verificação manual em runtime pendente |
 | **9** | Upload offline ligado à UI | ✅ Completo — `isNetworkError`, `enqueueFromPath`, fallback de rede no `UploadModal` do Documents; verificação manual em runtime pendente |
 | **10** | Cache de endpoints auxiliares | ✅ Completo — TTLs `/categories` + `/sectors/:id/members` (match dinâmico), `useCachedAux`, dropdowns/maps de sectores/utilizadores com fallback de cache; verificação manual em runtime pendente |
+| **11** | Download offline de documentos | ✅ Completo — cache de ficheiros em disco (`downloads_dir`), `download_document_offline`/`is_document_cached`/`open_local_file`, abertura com app do SO, indicador de disponibilidade offline no detalhe; verificação manual em runtime pendente |
 
 > Consultar `README.md` para visão geral do produto e arquitectura; este
 > ficheiro é o documento vivo de estado por fase.

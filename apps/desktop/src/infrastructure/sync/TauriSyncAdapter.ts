@@ -32,6 +32,21 @@ export class TauriSyncAdapter implements ISyncService {
   async retryItem(id: string): Promise<void> { if (!isTauri()) return; const { invoke } = await import("@tauri-apps/api/core"); await invoke("retry_queue_item", { id }); await invoke("force_sync"); }
   async forceSync(): Promise<number> { if (!isTauri()) return 0; const { invoke } = await import("@tauri-apps/api/core"); return invoke<number>("force_sync"); }
   async clearUploaded(): Promise<number> { if (!isTauri()) return 0; const { invoke } = await import("@tauri-apps/api/core"); return invoke<number>("clear_uploaded"); }
+  async downloadOffline(documentParam: string, filename: string): Promise<string | null> {
+    if (!isTauri()) return null;
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<string>("download_document_offline", { documentParam, filename });
+  }
+  async openLocalFile(path: string): Promise<void> {
+    if (!isTauri()) return;
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("open_local_file", { path });
+  }
+  async isDocumentCached(documentParam: string): Promise<boolean> {
+    if (!isTauri()) return false;
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<boolean>("is_document_cached", { documentParam });
+  }
   async onSyncEvent(handler: (event: string, payload?: unknown) => void): Promise<UnlistenFn> {
     if (!isTauri()) return () => {};
     const { listen } = await import("@tauri-apps/api/event");

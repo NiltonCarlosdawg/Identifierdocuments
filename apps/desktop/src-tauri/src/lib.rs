@@ -19,10 +19,12 @@ pub fn run() {
             let app_data = app.path().app_data_dir().expect("app data dir");
             let db_path = app_data.join("offline.db");
             let uploads_dir = app_data.join("uploads");
+            let downloads_dir = app_data.join("downloads");
 
             app.manage(SyncState {
                 db_path,
                 uploads_dir,
+                downloads_dir,
                 api_base_url: std::sync::Mutex::new("http://localhost:3000".to_string()),
                 // Note: A16 requires HTTPS validation — URL setters in sync/mod.rs
                 // already validate scheme at runtime (see set_api_base_url).
@@ -66,6 +68,9 @@ pub fn run() {
             sync::retry_queue_item,
             sync::force_sync,
             sync::attach_document_native,
+            sync::download_document_offline,
+            sync::is_document_cached,
+            sync::open_local_file,
             text_extraction::extract_text_command,
             watcher::start_watcher,
             watcher::stop_watcher,
