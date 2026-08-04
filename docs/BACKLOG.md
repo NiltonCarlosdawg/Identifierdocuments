@@ -13,7 +13,10 @@
 > semeados). Fase 9 — Upload Offline Ligado à UI — completa (upload que falha
 > por rede é enfileirado). Fase 10 — Cache de Endpoints Auxiliares — completa.
 > Fase 11 — Download Offline de Documentos — completa. Fase 12 — Fila de
-> Escritas Offline — completa.**
+> Escritas Offline — completa. Ronda de "itens fáceis" do backlog concluída:
+> `GET /tenants/me/stats`, `GET /roles/:id/users`, widgets do Dashboard (fila
+> offline, aprovações pendentes, documentos recentes), prompt few-shot do
+> classificador e evicção da cache de downloads (30 dias).**
 
 ---
 
@@ -70,7 +73,7 @@ aplicadas posteriormente a itens aqui marcados como completos)*
 - [x] **P0** `GET /tenants/me`
 - [x] **P1** `PATCH /tenants/me`
 - [x] **P1** `PATCH /tenants/me/identifier-prefix`
-- [ ] **P2** `GET /tenants/me/stats`
+- [x] **P2** `GET /tenants/me/stats` — reutiliza `collectStats` do módulo de stats (ORG_ADMIN)
 
 ### 1.6 — Módulo Sectores
 - [x] **P0** `POST /sectors`
@@ -97,7 +100,7 @@ aplicadas posteriormente a itens aqui marcados como completos)*
 - [x] **P1** `POST /roles`
 - [x] **P1** `PATCH /roles/:id/permissions`
 - [x] **P1** `DELETE /roles/:id`
-- [ ] **P2** `GET /roles/:id/users`
+- [x] **P2** `GET /roles/:id/users` — devolve utilizadores com o role (email, nome, sector, `grantedAt`)
 
 ### 1.9 — Migrar Módulos Existentes para Multi-tenant
 - [x] **P0** Todos os itens desta secção — sem alteração
@@ -141,9 +144,9 @@ aplicadas posteriormente a itens aqui marcados como completos)*
 ### 2.4 — Dashboard
 - [x] **P0** Cards de estatísticas
 - [ ] **P1** Gráfico de actividade
-- [ ] **P1** Lista de documentos recentes
-- [ ] **P1** Lista de aprovações pendentes no dashboard
-- [ ] **P2** Widget de fila offline no dashboard
+- [x] **P1** Lista de documentos recentes — painel com os últimos 5 (`/documents?limit=5`)
+- [x] **P1** Lista de aprovações pendentes no dashboard — painel com `/approvals?status=pending`
+- [x] **P2** Widget de fila offline no dashboard — contador de pendentes + abre o painel da fila
 
 ### 2.5 — Módulo Identificadores (UI)
 - [x] **P0** Todos os itens desta secção — implementados (`Identifiers.tsx`)
@@ -160,7 +163,7 @@ aplicadas posteriormente a itens aqui marcados como completos)*
 ### 2.8 — Gestão de Utilizadores & Sectores (UI)
 - [x] **P1** Todos os itens principais — implementados (`Users.tsx`, `Sectors.tsx`)
 - [ ] **P2** Página de perfil dedicada por utilizador (fora do próprio perfil)
-- [ ] **P2** Transferir utilizador entre sectores — via UI de edição, sem fluxo dedicado
+- [x] **P2** Transferir utilizador entre sectores — via UI de edição, sem fluxo dedicado
 
 ---
 
@@ -234,7 +237,7 @@ aplicadas posteriormente a itens aqui marcados como completos)*
 - [x] **P0** Prompt de classificação
 - [x] **P0** UI de sugestão com barra de confiança (`ClassifierSuggestion.tsx`)
 - [x] **P0** Utilizador pode confirmar ou seleccionar categoria manualmente
-- [ ] **P1** Melhorar prompt com exemplos few-shot
+- [x] **P1** Melhorar prompt com exemplos few-shot — 3 exemplos (factura, acta, contrato) no `SYSTEM_PROMPT`
 - [x] **P1** Registo de feedback (`POST /classifier/feedback`, tabela
   `classifier_feedback`, com validação de categoria e de posse do
   documento pelo tenant)
@@ -560,7 +563,9 @@ aplicadas posteriormente a itens aqui marcados como completos)*
   via `isDocumentCached`
 - [ ] **P1** Verificação manual em runtime: abrir documento online → reabrir offline
   abre do disco; documento nunca visto mostra "Não disponível offline"
-- [ ] **P1** Evicção da cache de downloads (limite de idade/tamanho total)
+- [x] **P1** Evicção da cache de downloads — **decisão do utilizador: só idade (30 dias)**;
+  `evict_expired_downloads` remove ficheiros com mais de 30 dias e pastas vazias,
+  chamado (limitado a 1×/hora) no `run_sync_cycle_inner`
 
 ---
 
@@ -644,7 +649,8 @@ aplicadas posteriormente a itens aqui marcados como completos)*
   sucesso/falha até `MAX_ATTEMPTS`; sincronização de identificadores
   (agrupamento, state transitions, `lease_needs_renewal`, `apply_lease_renewal`,
   `fetch_active_leases`); Fase 12: `classify_write_status`, `compute_write_outcome`
-  e persistência da fila de escritas — 104 testes Rust no total
+   e persistência da fila de escritas; Fase 11 evicção da cache de downloads —
+   107 testes Rust no total
 - [x] **P1** Rate limiting nos endpoints públicos — **estendido** aos novos
   endpoints de exportação (5/hora)
 - [x] **P1** Rate limiting tolerante a falhas de Redis (v1.1.5) — quando o Redis
@@ -679,8 +685,9 @@ aplicadas posteriormente a itens aqui marcados como completos)*
 | **8** | Seed offline da geração de identificadores | ✅ Completo — lacuna corrigida: caches (categorias/tenant) e leases semeados no ciclo de sync + `ensure_offline_lease`/`cache_categories` no frontend; verificação manual em runtime pendente |
 | **9** | Upload offline ligado à UI | ✅ Completo — `isNetworkError`, `enqueueFromPath`, fallback de rede no `UploadModal` do Documents; verificação manual em runtime pendente |
 | **10** | Cache de endpoints auxiliares | ✅ Completo — TTLs `/categories` + `/sectors/:id/members` (match dinâmico), `useCachedAux`, dropdowns/maps de sectores/utilizadores com fallback de cache; verificação manual em runtime pendente |
-| **11** | Download offline de documentos | ✅ Completo — cache de ficheiros em disco (`downloads_dir`), `download_document_offline`/`is_document_cached`/`open_local_file`, abertura com app do SO, indicador de disponibilidade offline no detalhe; verificação manual em runtime pendente |
+| **11** | Download offline de documentos | ✅ Completo — cache de ficheiros em disco (`downloads_dir`), `download_document_offline`/`is_document_cached`/`open_local_file`, abertura com app do SO, indicador de disponibilidade offline no detalhe, evicção por idade (30 dias); verificação manual em runtime pendente |
 | **12** | Fila de escritas offline | ✅ Completo — tabela `local_write_queue`, comandos enqueue/get/remove/retry, replay FIFO com idempotência (`ALREADY_RESOLVED`/conflitos/401), interceptor no `HttpApiClient`, painel + badge de escritas no Layout; verificação manual em runtime pendente |
+| **13** | Itens fáceis do backlog | ✅ Completo — `GET /tenants/me/stats`, `GET /roles/:id/users`, widgets do Dashboard (fila offline, aprovações pendentes, documentos recentes), prompt few-shot do classificador, evicção da cache de downloads |
 
 > Consultar `README.md` para visão geral do produto e arquitectura; este
 > ficheiro é o documento vivo de estado por fase.

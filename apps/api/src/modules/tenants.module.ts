@@ -4,6 +4,8 @@ import { organizations, sectors, users, roles, userRoles } from "../db/schema";
 import { eq, and, isNull } from "drizzle-orm";
 import { requireAuth, requireRole } from "../middleware/auth";
 import { checkRateLimit } from "../middleware/rateLimit";
+import { collectStats } from "./stats.module";
+import { safeError } from "../lib/errors";
 
 export const tenantsModule = new Elysia({ prefix: "/tenants" })
 
@@ -121,6 +123,18 @@ export const tenantsModule = new Elysia({ prefix: "/tenants" })
   })
 
   .use(requireRole("ORG_ADMIN"))
+
+  .get("/me/stats", async ({ auth, set }) => {
+    try {
+      const stats = await collectStats(auth!.tenantId);
+      return { data: stats };
+    } catch (err: any) {
+      set.status = 400;
+      return { error: { code: "STATS_ERROR", message: safeError(err) } };
+    }
+  }, {
+    detail: { summary: "Estatísticas da organização", tags: ["Organizações"] },
+  })
 
   .patch("/me", async ({ auth, body, set }) => {
     try {

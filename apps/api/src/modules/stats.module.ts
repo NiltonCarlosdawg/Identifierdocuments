@@ -7,7 +7,7 @@ import { checkRateLimit } from "../middleware/rateLimit";
 import { withTenant } from "../db/withTenant";
 import { safeError } from "../lib/errors";
 
-async function collectStats(tenantId: string, sectorId?: string) {
+export async function collectStats(tenantId: string, sectorId?: string) {
   return withTenant(tenantId, async (tx) => {
     const idConditions = [eq(identifiers.tenantId, tenantId)];
     if (sectorId) idConditions.push(eq(identifiers.sectorId, sectorId));

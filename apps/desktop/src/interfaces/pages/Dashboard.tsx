@@ -1,8 +1,9 @@
-import { useState } from "react";
-import { Fingerprint, FileText, AlertTriangle, CheckCircle, XCircle, Clock, Hash } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Fingerprint, FileText, AlertTriangle, CheckCircle, XCircle, Clock, Hash, CloudOff, Upload, Inbox, FolderOpen, ArrowRight } from "lucide-react";
 import { api } from "../../infrastructure/di/container";
 import { useAuthStore } from "../stores/authStore";
 import { useOfflineCache } from "../hooks/useOfflineCache";
+import { pendingCount, useQueueStore } from "../stores/queueStore";
 import { PageHeader, MetricCard, EmptyState, OfflineNotice } from "../components/docid-ui";
 
 interface StatsData {
@@ -15,6 +16,25 @@ interface StatsData {
     total: number;
     verificationFailures: number;
   };
+}
+
+interface ApprovalRow {
+  id: string;
+  type: string;
+  status: string;
+  requestedAt: string;
+  sector: { id: string; name: string } | null;
+  supervisor: { id: string; fullName: string } | null;
+  document: { id: string; identifier: { identifier: string } | null } | null;
+}
+
+interface DocRow {
+  id: string;
+  filename: string;
+  status: string;
+  createdAt: string;
+  uploadedBy: string | null;
+  identifier: { id: string; identifier: string } | null;
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -41,6 +61,16 @@ const STATUS_TONES: Record<string, string> = {
 export default function Dashboard() {
   const user = useAuthStore(s => s.user);
   const [stats, setStats] = useState<StatsData | null>(null);
+  const [approvals, setApprovals] = useState<ApprovalRow[]>([]);
+  const [recentDocs, setRecentDocs] = useState<DocRow[]>([]);
+
+  const queueItems = useQueueStore(s => s.items);
+  const queueOnline = useQueueStore(s => s.online);
+  const queueRefresh = useQueueStore(s => s.refresh);
+  const setQueuePanelOpen = useQueueStore(s => s.setPanelOpen);
+  const queuePending = pendingCount(queueItems);
+
+  useEffect(() => { queueRefresh().catch(() => {}); }, [queueRefresh]);
 
   const { loading, error, isStale, cachedAt, refresh } = useOfflineCache<StatsData>({
     endpoint: "/stats",
@@ -49,6 +79,26 @@ export default function Dashboard() {
       return res.data;
     },
     onData: data => setStats(data),
+  });
+
+  useOfflineCache<ApprovalRow[]>({
+    endpoint: "/approvals",
+    params: "status=pending",
+    fetcher: async () => {
+      const res = await api.get<{ data: ApprovalRow[] }>("/approvals?status=pending");
+      return res.data || [];
+    },
+    onData: setApprovals,
+  });
+
+  useOfflineCache<DocRow[]>({
+    endpoint: "/documents",
+    params: "limit=5",
+    fetcher: async () => {
+      const res = await api.get<{ data: DocRow[]; meta: { total: number; page: number; limit: number } }>("/documents?page=1&limit=5");
+      return res.data || [];
+    },
+    onData: setRecentDocs,
   });
 
   return (
@@ -111,6 +161,76 @@ export default function Dashboard() {
               icon={CheckCircle}
               accent="text-docid-secondary"
             />
+          </div>
+
+          <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
+            <div className="docid-panel p-5">
+              <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-docid-muted">
+                <CloudOff className="h-4 w-4" /> Fila Offline
+              </h2>
+              <button
+                onClick={() => setQueuePanelOpen(true)}
+                className="flex w-full items-center justify-between rounded-lg border border-docid-border bg-docid-surface-low px-4 py-3 text-left hover:bg-docid-surface-high"
+              >
+                <span className="flex items-center gap-3">
+                  <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-docid-surface-highest text-docid-text">
+                    {queueOnline ? <Upload className="h-4 w-4" /> : <CloudOff className="h-4 w-4 text-orange-500" />}
+                  </span>
+                  <span>
+                    <span className="block text-lg font-semibold text-docid-text">{queuePending}</span>
+                    <span className="block text-xs text-docid-muted">{queuePending === 1 ? "ficheiro pendente" : "ficheiros pendentes"}</span>
+                  </span>
+                </span>
+                <span className="flex items-center gap-1 text-xs text-docid-muted">Ver fila <ArrowRight className="h-3.5 w-3.5" /></span>
+              </button>
+              {!queueOnline && <p className="mt-3 text-xs text-docid-muted">Sem ligação — os envios ficam em fila e serão sincronizados automaticamente.</p>}
+            </div>
+
+            <div className="docid-panel p-5">
+              <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-docid-muted">
+                <Inbox className="h-4 w-4" /> Aprovações Pendentes
+              </h2>
+              {approvals.length === 0 ? (
+                <p className="text-sm text-docid-muted">Nenhuma aprovação pendente.</p>
+              ) : (
+                <ul className="space-y-2">
+                  {approvals.slice(0, 4).map(a => (
+                    <li key={a.id} className="flex items-center justify-between gap-2 rounded-lg bg-docid-surface-low px-3 py-2 text-sm">
+                      <span className="min-w-0 flex-1 truncate font-mono text-xs font-medium text-docid-text">
+                        {a.document?.identifier?.identifier || a.document?.id?.slice(0, 8) || a.id.slice(0, 8)}
+                      </span>
+                      <span className="shrink-0 text-xs text-docid-muted">
+                        {a.supervisor?.fullName || a.sector?.name || "—"}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <div className="mt-3 flex items-center gap-1 text-xs text-docid-secondary">
+                {approvals.length > 4 && <span>{approvals.length} no total</span>}
+              </div>
+            </div>
+
+            <div className="docid-panel p-5">
+              <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-docid-muted">
+                <FolderOpen className="h-4 w-4" /> Documentos Recentes
+              </h2>
+              {recentDocs.length === 0 ? (
+                <p className="text-sm text-docid-muted">Nenhum documento recente.</p>
+              ) : (
+                <ul className="space-y-2">
+                  {recentDocs.slice(0, 4).map(d => (
+                    <li key={d.id} className="flex items-center justify-between gap-2 rounded-lg bg-docid-surface-low px-3 py-2 text-sm">
+                      <span className="min-w-0 flex-1 truncate text-xs font-medium text-docid-text">{d.filename}</span>
+                      <span className="shrink-0 text-xs text-docid-muted">{new Date(d.createdAt).toLocaleDateString("pt-AO")}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <div className="mt-3 flex items-center gap-1 text-xs text-docid-secondary">
+                {recentDocs.length > 4 && <span>{recentDocs.length} no total</span>}
+              </div>
+            </div>
           </div>
 
           <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">

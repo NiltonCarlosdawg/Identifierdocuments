@@ -46,7 +46,23 @@ ESP — Especificação Técnica [Técnico]
 MAN — Manual de Utilização [Técnico]
 REP — Relatório Técnico [Técnico]
 TAS — Termo de Aceitação / Entrega [Técnico]
-PLN — Plano de Projecto [Técnico]`;
+PLN — Plano de Projecto [Técnico]
+
+Exemplos de classificação:
+
+1) Nome do ficheiro: FACTURA_2025-04-12.pdf
+   Conteúdo: "FACTURA Nº FT/2025/0412. Cliente: Empresa XYZ, NIF 503123456. Descrição: Serviços de consultoria, 40h x 50 EUR = 2.000,00 EUR. IVA 23% = 460,00 EUR. Total a pagar: 2.460,00 EUR. Validade: 30 dias."
+   Resposta: { "categoryId": "FAT", "confidence": 0.99, "reasoning": "Documento com estrutura clássica de factura: número, cliente, linhas com valores e IVA, total a pagar." }
+
+2) Nome do ficheiro: ATA_REUNIAO_MENSAL.docx
+   Conteúdo: "Acta da reunião de 03/02/2026. Presentes: José, Maria e Ana. Ordem de trabalhos: 1. Aprovação do orçamento do trimestre; 2. Estatuto de obras do novo armazém. Deliberou-se aprovar o ponto 1 por unanimidade."
+   Resposta: { "categoryId": "ATA", "confidence": 0.96, "reasoning": "Texto é uma acta de reunião: participantes, ordem de trabalhos e deliberações." }
+
+3) Nome do ficheiro: Contrato_Jorge_Santos.pdf
+   Conteúdo: "CONTRATO DE TRABALHO. Ao abrigo do Código do Trabalho, a empresa recruta Jorge Santos, NIF 502987654, para as funções de Técnico de Informática. Período experimental de 6 meses. Salário base mensal de 1.250,00 EUR."
+   Resposta: { "categoryId": "CTR", "confidence": 0.98, "reasoning": "Contrato de trabalho individual com funções, período experimental e salário, ao abrigo do Código do Trabalho." }
+
+Classifique o documento seguinte seguindo o mesmo formato. Responda APENAS com o JSON, sem texto adicional.`;
 
 export interface ClassificationResult {
   categoryId: string;

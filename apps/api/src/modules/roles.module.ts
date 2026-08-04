@@ -1,6 +1,6 @@
 import { Elysia, t } from "elysia";
 import { db } from "../db";
-import { roles, rolePermissions } from "../db/schema";
+import { roles, rolePermissions, users } from "../db/schema";
 import { eq, and, or, isNull } from "drizzle-orm";
 import { requireAuth, requireRole } from "../middleware/auth";
 import { withTenant } from "../db/withTenant";
@@ -21,6 +21,39 @@ export const rolesModule = new Elysia({ prefix: "/roles" })
       return { data: rows };
     });
   }, { detail: { summary: "Listar roles", tags: ["Roles"] } })
+
+  .use(requireRole("ORG_ADMIN"))
+  .get("/:id/users", async ({ params, set, tenantId }) => {
+    return withTenant(tenantId, async (tx) => {
+      const role = await tx.query.roles.findFirst({ where: eq(roles.id, params.id) });
+      if (!role || (role.tenantId !== null && role.tenantId !== tenantId)) {
+        set.status = 404; return { error: { code: "NOT_FOUND", message: "Role não encontrado." } };
+      }
+      const rows = await tx.query.users.findMany({
+        where: eq(users.tenantId, tenantId),
+        with: { sector: true, userRoles: { with: { role: true } } },
+        columns: { passwordHash: false },
+      });
+      const data = rows
+        .filter(u => u.userRoles.some(ur => ur.roleId === params.id))
+        .map(u => {
+          const match = u.userRoles.find(ur => ur.roleId === params.id);
+          return {
+            userId: u.id,
+            sectorId: u.sectorId,
+            email: u.email,
+            fullName: u.fullName,
+            isActive: u.isActive,
+            sectorName: u.sector?.name ?? null,
+            grantedAt: match?.createdAt ?? null,
+          };
+        });
+      return { data };
+    });
+  }, {
+    params: t.Object({ id: t.String() }),
+    detail: { summary: "Listar utilizadores com um role", tags: ["Roles"] },
+  })
 
   .use(requireRole("ORG_ADMIN"))
   .post("/", async ({ body, set, tenantId }) => {

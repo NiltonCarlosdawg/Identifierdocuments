@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 use tauri::{AppHandle, Emitter, Manager, State};
 use uuid::Uuid;
 
@@ -1357,6 +1357,8 @@ pub async fn run_sync_cycle(app: &AppHandle, state: &SyncState) -> Result<usize,
 }
 
 async fn run_sync_cycle_inner(app: &AppHandle, state: &SyncState) -> Result<usize, String> {
+    maybe_evict_download_cache(&state.downloads_dir);
+
     let api_base_url = state.api_base_url.lock().map_err(|e| e.to_string())?.clone();
     let token = state
         .auth_token
@@ -1994,6 +1996,75 @@ pub fn open_local_file(path: String) -> Result<(), String> {
     result
         .map(|_| ())
         .map_err(|e| format!("Erro ao abrir o ficheiro: {e}"))
+}
+
+const DOWNLOAD_CACHE_MAX_AGE_DAYS: u64 = 30;
+const DOWNLOAD_CACHE_EVICT_INTERVAL: Duration = Duration::from_secs(3600);
+
+static LAST_DOWNLOAD_EVICTION: Mutex<Option<SystemTime>> = Mutex::new(None);
+
+fn evict_expired_downloads(downloads_dir: &Path) -> Result<usize, String> {
+    let cutoff = SystemTime::now()
+        .checked_sub(Duration::from_secs(DOWNLOAD_CACHE_MAX_AGE_DAYS * 24 * 3600))
+        .ok_or("Erro de relógio do sistema.")?;
+    if !downloads_dir.exists() {
+        return Ok(0);
+    }
+
+    let mut removed = 0usize;
+    let mut doc_dirs: Vec<PathBuf> = Vec::new();
+    for entry in std::fs::read_dir(downloads_dir).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        if entry.path().is_dir() {
+            doc_dirs.push(entry.path());
+        }
+    }
+
+    for dir in doc_dirs {
+        for entry in std::fs::read_dir(&dir).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let modified = std::fs::metadata(&path)
+                .and_then(|m| m.modified())
+                .ok()
+                .map_or(false, |m| m < cutoff);
+            if modified && std::fs::remove_file(&path).is_ok() {
+                removed += 1;
+            }
+        }
+        let is_empty = std::fs::read_dir(&dir)
+            .map(|mut it| it.next().is_none())
+            .unwrap_or(false);
+        if is_empty {
+            let _ = std::fs::remove_dir(&dir);
+        }
+    }
+
+    Ok(removed)
+}
+
+fn maybe_evict_download_cache(downloads_dir: &Path) {
+    let now = SystemTime::now();
+    let due = {
+        let mut last = LAST_DOWNLOAD_EVICTION.lock().unwrap_or_else(|p| p.into_inner());
+        let fresh = last
+            .map(|t| now.duration_since(t).map(|d| d < DOWNLOAD_CACHE_EVICT_INTERVAL).unwrap_or(false))
+            .unwrap_or(false);
+        if fresh {
+            false
+        } else {
+            *last = Some(now);
+            true
+        }
+    };
+    if due {
+        if let Err(e) = evict_expired_downloads(downloads_dir) {
+            eprintln!("evict_expired_downloads: {e}");
+        }
+    }
 }
 
 #[cfg(test)]
@@ -3429,5 +3500,64 @@ mod tests {
             .unwrap();
         assert_eq!(status, "pending");
         fs::remove_dir_all(&_dir).ok();
+    }
+
+    // --- evict_expired_downloads ---
+
+    #[test]
+    fn evict_downloads_removes_old_files_and_keeps_recent() {
+        let dir = tmp_uploads();
+        let doc_dir = dir.join("VL-FAT-0001");
+        fs::create_dir_all(&doc_dir).unwrap();
+        let old_file = doc_dir.join("antigo.pdf");
+        let recent_file = doc_dir.join("recente.pdf");
+        fs::write(&old_file, "x").unwrap();
+        fs::write(&recent_file, "y").unwrap();
+
+        let now = std::time::SystemTime::now();
+        let old_time = now
+            .checked_sub(Duration::from_secs(45 * 24 * 3600))
+            .unwrap();
+        fs::File::options()
+            .write(true)
+            .open(&old_file)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(old_time.into()))
+            .unwrap();
+
+        let removed = evict_expired_downloads(&dir).unwrap();
+        assert_eq!(removed, 1);
+        assert!(!old_file.exists());
+        assert!(recent_file.exists());
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn evict_downloads_prunes_empty_doc_dir() {
+        let dir = tmp_uploads();
+        let doc_dir = dir.join("VL-CTR-0002");
+        fs::create_dir_all(&doc_dir).unwrap();
+        let old_file = doc_dir.join("velho.pdf");
+        fs::write(&old_file, "x").unwrap();
+        let old_time = std::time::SystemTime::now()
+            .checked_sub(Duration::from_secs(40 * 24 * 3600))
+            .unwrap();
+        fs::File::options()
+            .write(true)
+            .open(&old_file)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(old_time.into()))
+            .unwrap();
+
+        evict_expired_downloads(&dir).unwrap();
+        assert!(!old_file.exists());
+        assert!(!doc_dir.exists(), "pasta vazia deve ser removida");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn evict_downloads_missing_dir_is_ok() {
+        let dir = std::env::temp_dir().join(format!("docid_test_missing_{}", Uuid::new_v4()));
+        assert_eq!(evict_expired_downloads(&dir).unwrap(), 0);
     }
 }
