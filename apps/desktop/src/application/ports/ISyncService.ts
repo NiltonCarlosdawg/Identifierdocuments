@@ -1,4 +1,5 @@
 import type { QueueItem } from "../../domain/entities/QueueItem";
+import type { WriteItem } from "../../domain/entities/WriteItem";
 export type UnlistenFn = () => void;
 
 export interface ISyncService {
@@ -18,5 +19,9 @@ export interface ISyncService {
   downloadOffline(documentParam: string, filename: string): Promise<string | null>;
   openLocalFile(path: string): Promise<void>;
   isDocumentCached(documentParam: string): Promise<boolean>;
+  getWriteQueue(): Promise<WriteItem[]>;
+  enqueueWrite(method: string, path: string, body: string | null, idempotencyKey: string, resourceKey?: string): Promise<WriteItem | null>;
+  removeWriteItem(id: string): Promise<void>;
+  retryWriteItem(id: string): Promise<void>;
   onSyncEvent(handler: (event: string, payload?: unknown) => void): Promise<UnlistenFn>;
 }

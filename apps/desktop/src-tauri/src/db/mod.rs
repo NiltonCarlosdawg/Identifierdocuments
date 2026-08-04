@@ -193,6 +193,28 @@ fn init_schema(conn: &Connection) -> Result<()> {
             device_name    TEXT NOT NULL,
             registered_at  TEXT NOT NULL
         );
+
+        -- ============================================================
+        -- Tabela 7: Fila de escritas offline
+        -- (mutações genéricas: POST/PATCH/PUT/DELETE enfileiradas quando
+        --  a rede falha; replay FIFO no ciclo de sync)
+        -- ============================================================
+        CREATE TABLE IF NOT EXISTS local_write_queue (
+            id               TEXT PRIMARY KEY,
+            method           TEXT NOT NULL CHECK (method IN ('POST','PATCH','PUT','DELETE')),
+            path             TEXT NOT NULL,
+            body             TEXT,
+            idempotency_key  TEXT NOT NULL UNIQUE,
+            resource_key     TEXT,
+            status           TEXT NOT NULL DEFAULT 'pending'
+                             CHECK (status IN ('pending','applying','done','failed','conflict')),
+            attempts         INTEGER NOT NULL DEFAULT 0,
+            last_error       TEXT,
+            created_at       TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_write_status
+            ON local_write_queue(status);
         ",
     )?;
     Ok(())

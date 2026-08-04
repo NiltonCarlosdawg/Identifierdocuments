@@ -1,5 +1,6 @@
 import type { ISyncService, UnlistenFn } from "../ports/ISyncService";
 import type { QueueItem } from "../../domain/entities/QueueItem";
+import type { WriteItem } from "../../domain/entities/WriteItem";
 
 export class SyncService implements ISyncService {
   private isTauri = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -55,6 +56,10 @@ export class SyncService implements ISyncService {
   async downloadOffline(_documentParam: string, _filename: string): Promise<string | null> { return null; }
   async openLocalFile(_path: string): Promise<void> {}
   async isDocumentCached(_documentParam: string): Promise<boolean> { return false; }
+  async getWriteQueue(): Promise<WriteItem[]> { return []; }
+  async enqueueWrite(_method: string, _path: string, _body: string | null, _idempotencyKey: string, _resourceKey?: string): Promise<WriteItem | null> { return null; }
+  async removeWriteItem(_id: string): Promise<void> {}
+  async retryWriteItem(_id: string): Promise<void> {}
   async onSyncEvent(handler: (event: string, payload?: unknown) => void): Promise<UnlistenFn> {
     if (!this.isTauri()) return () => {};
     const { listen } = await import("@tauri-apps/api/event");

@@ -17,8 +17,8 @@ const authRepo: IAuthRepository = {
 
 const getBaseUrl = () => useAppConfigStore.getState().apiBaseUrl;
 
-export const api = new HttpApiClient(authRepo, getBaseUrl);
-export { offlineCache } from "../storage/OfflineCache";
 export const sync = new TauriSyncAdapter();
+export const api = new HttpApiClient(authRepo, getBaseUrl, sync);
+export { offlineCache } from "../storage/OfflineCache";
 export const scanner = new TauriScannerAdapter();
 export const watcher = new TauriWatcherAdapter();

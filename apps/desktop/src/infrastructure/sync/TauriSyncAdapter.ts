@@ -1,5 +1,6 @@
 import type { ISyncService, UnlistenFn } from "../../application/ports/ISyncService";
 import type { QueueItem } from "../../domain/entities/QueueItem";
+import type { WriteItem } from "../../domain/entities/WriteItem";
 const isTauri = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 export class TauriSyncAdapter implements ISyncService {
@@ -47,6 +48,14 @@ export class TauriSyncAdapter implements ISyncService {
     const { invoke } = await import("@tauri-apps/api/core");
     return invoke<boolean>("is_document_cached", { documentParam });
   }
+  async getWriteQueue(): Promise<WriteItem[]> { if (!isTauri()) return []; const { invoke } = await import("@tauri-apps/api/core"); return invoke<WriteItem[]>("get_write_queue"); }
+  async enqueueWrite(method: string, path: string, body: string | null, idempotencyKey: string, resourceKey?: string): Promise<WriteItem | null> {
+    if (!isTauri()) return null;
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<WriteItem>("enqueue_write", { method, path, body, idempotencyKey, resourceKey });
+  }
+  async removeWriteItem(id: string): Promise<void> { if (!isTauri()) return; const { invoke } = await import("@tauri-apps/api/core"); await invoke("remove_write_item", { id }); }
+  async retryWriteItem(id: string): Promise<void> { if (!isTauri()) return; const { invoke } = await import("@tauri-apps/api/core"); await invoke("retry_write_item", { id }); await invoke("force_sync"); }
   async onSyncEvent(handler: (event: string, payload?: unknown) => void): Promise<UnlistenFn> {
     if (!isTauri()) return () => {};
     const { listen } = await import("@tauri-apps/api/event");

@@ -11,7 +11,9 @@
 > listagens offline a partir de cache encriptada). Fase 8 — Seed Offline —
 > completa (corrige a lacuna da geração offline: caches e leases agora são
 > semeados). Fase 9 — Upload Offline Ligado à UI — completa (upload que falha
-> por rede é enfileirado).**
+> por rede é enfileirado). Fase 10 — Cache de Endpoints Auxiliares — completa.
+> Fase 11 — Download Offline de Documentos — completa. Fase 12 — Fila de
+> Escritas Offline — completa.**
 
 ---
 
@@ -459,11 +461,13 @@ aplicadas posteriormente a itens aqui marcados como completos)*
   refresh e sobrescreve a cache; TTL como fallback
 
 ### Fora de âmbito (trabalho futuro)
-- [ ] **P2** Enfileiramento de escritas offline (fila de pedidos) — Opção C
+- [x] **P2** Enfileiramento de escritas offline (fila de pedidos) — Opção C —
+  **feito na Fase 12**
 - [ ] **P2** Upload offline via `attach_document_native` (Rust) — faz HTTP
-  directo, sem fila
-- [ ] **P2** Cache de endpoints auxiliares (categorias no GenerateModal, listas
-  de sectores/utilizadores nos dropdowns de Users/Audit)
+  directo, sem fila (o fallback de rede do `UploadModal` enfileira via
+  `enqueueFromPath` — Fase 9)
+- [x] **P2** Cache de endpoints auxiliares (categorias no GenerateModal, listas
+  de sectores/utilizadores nos dropdowns de Users/Audit) — **feito na Fase 10**
 
 ---
 
@@ -523,7 +527,8 @@ aplicadas posteriormente a itens aqui marcados como completos)*
   envia automaticamente (flush no `run_sync_cycle`) e sai da fila
 
 ### Fora de âmbito (Fase 4 do plano — trabalho futuro)
-- [ ] **P2** Fase 4: fila de escritas offline (idempotência, ordem, conflitos)
+- [x] **P2** Fase 4: fila de escritas offline (idempotência, ordem, conflitos) —
+  **feita na Fase 12**
 
 
 ---
@@ -587,13 +592,59 @@ aplicadas posteriormente a itens aqui marcados como completos)*
 
 ---
 
+## FASE 12 — Fila de Escritas Offline *(Fase 4 do plano offline)*
+> **Objectivo:** enfileirar mutações (sectores, users, aprovações, cancelar
+> identificador, etc.) quando a rede falha, e aplicá-las automaticamente quando
+> a ligação voltar — com idempotência, ordem FIFO e tratamento de conflitos.
+> Âmbito completo (todas as mutações), conforme decisão do utilizador.
+
+### 12.1 — Persistência (Rust/SQLite)
+- [x] **P0** Tabela `local_write_queue` em `db/mod.rs`: `method` (CHECK
+  POST/PATCH/PUT/DELETE), `path`, `body`, `idempotency_key` (UNIQUE),
+  `resource_key`, `status` (pending/applying/done/failed/conflict), `attempts`,
+  `last_error`, `created_at`; índice `idx_write_status`
+- [x] **P0** `WriteItem` + `row_to_write_item` + `fetch_writes_pending` +
+  `insert_write` + `reset_stuck_writes` (recovery de itens presos em `applying`)
+- [x] **P0** Comandos Tauri: `enqueue_write` (idempotente — devolve o item já
+  existente para a mesma `idempotency_key`), `get_write_queue`,
+  `remove_write_item`, `retry_write_item`; registados em `lib.rs`
+
+### 12.2 — Replay (Rust)
+- [x] **P0** `apply_write_http`: envio genérico do método/path/body com Bearer +
+  header `Idempotency-Key`, timeout 120s
+- [x] **P0** `classify_write_status`: 2xx→done; `ALREADY_RESOLVED`→done (estado
+  do servidor manda); 400/404/409/410→conflict; 403/422→failed (permanente);
+  401→AuthExpired (pausa); 408/425/429/5xx→transitório (retry)
+- [x] **P0** `compute_write_outcome`: transições puras e testáveis; tentativas
+  máx. `MAX_WRITE_ATTEMPTS=5`; backoff exponencial
+- [x] **P0** `replay_write_queue`: FIFO sem paralelismo, reset de `applying`,
+  pausa com pedido de re-login em sessão expirada, limpeza de `done` no fim
+- [x] **P0** Integração no `run_sync_cycle_inner` (após sync de identificadores)
+  e contagem de pendentes na fila de escritas no `start_background_sync`
+
+### 12.3 — Frontend
+- [x] **P0** Entidade `WriteItem` + `activeWriteCount` (`domain/entities`)
+- [x] **P0** Porta `ISyncService` + `TauriSyncAdapter`/`SyncService`:
+  `getWriteQueue`, `enqueueWrite`, `removeWriteItem`, `retryWriteItem`
+- [x] **P0** Interceptor no `HttpApiClient`: em erro de rede em POST/PATCH/PUT/
+  DELETE (não-FormData) enfileira via `sync.enqueueWrite` (idempotency + resource
+  key derivada do path) e devolve feedback "ficou pendente e será sincronizado"
+- [x] **P0** `writeQueueStore` + `WriteQueuePanel`/`WriteQueueBadge` (análogos ao
+  painel de uploads) integrados no `Layout`
+- [ ] **P1** Verificação manual em runtime: mutação offline fica pendente com
+  feedback; ao voltar a ligação o replay aplica e a fila esvazia; duplicados não
+  criam registos repetidos (idempotência/ALREADY_RESOLVED)
+
+---
+
 ## Débito Técnico & Qualidade
 - [x] **P1** Testes de integração para endpoints críticos
 - [x] **P1** Testes do motor de sync offline — **feito**: `compute_upload_outcome`
   (função pura), `reset_stuck_items` (crash recovery), ciclo completo
   sucesso/falha até `MAX_ATTEMPTS`; sincronização de identificadores
   (agrupamento, state transitions, `lease_needs_renewal`, `apply_lease_renewal`,
-  `fetch_active_leases`); 90 testes Rust no total
+  `fetch_active_leases`); Fase 12: `classify_write_status`, `compute_write_outcome`
+  e persistência da fila de escritas — 104 testes Rust no total
 - [x] **P1** Rate limiting nos endpoints públicos — **estendido** aos novos
   endpoints de exportação (5/hora)
 - [x] **P1** Rate limiting tolerante a falhas de Redis (v1.1.5) — quando o Redis
@@ -629,6 +680,7 @@ aplicadas posteriormente a itens aqui marcados como completos)*
 | **9** | Upload offline ligado à UI | ✅ Completo — `isNetworkError`, `enqueueFromPath`, fallback de rede no `UploadModal` do Documents; verificação manual em runtime pendente |
 | **10** | Cache de endpoints auxiliares | ✅ Completo — TTLs `/categories` + `/sectors/:id/members` (match dinâmico), `useCachedAux`, dropdowns/maps de sectores/utilizadores com fallback de cache; verificação manual em runtime pendente |
 | **11** | Download offline de documentos | ✅ Completo — cache de ficheiros em disco (`downloads_dir`), `download_document_offline`/`is_document_cached`/`open_local_file`, abertura com app do SO, indicador de disponibilidade offline no detalhe; verificação manual em runtime pendente |
+| **12** | Fila de escritas offline | ✅ Completo — tabela `local_write_queue`, comandos enqueue/get/remove/retry, replay FIFO com idempotência (`ALREADY_RESOLVED`/conflitos/401), interceptor no `HttpApiClient`, painel + badge de escritas no Layout; verificação manual em runtime pendente |
 
 > Consultar `README.md` para visão geral do produto e arquitectura; este
 > ficheiro é o documento vivo de estado por fase.
