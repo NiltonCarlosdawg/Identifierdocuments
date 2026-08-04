@@ -43,6 +43,11 @@ export class SyncService implements ISyncService {
     const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
     return invoke<QueueItem>("enqueue_upload_bytes", { filename: file.name, bytes, identifier, tenantId, userId });
   }
+  async enqueueFromPath(path: string, identifier: string, tenantId: string, userId: string): Promise<QueueItem | null> {
+    if (!this.isTauri()) return null;
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<QueueItem>("enqueue_upload", { sourcePath: path, identifier, tenantId, userId });
+  }
   async removeItem(id: string): Promise<void> { if (!this.isTauri()) return; const { invoke } = await import("@tauri-apps/api/core"); await invoke("remove_queue_item", { id }); }
   async retryItem(id: string): Promise<void> { if (!this.isTauri()) return; const { invoke } = await import("@tauri-apps/api/core"); await invoke("retry_queue_item", { id }); await invoke("force_sync"); }
   async forceSync(): Promise<number> { if (!this.isTauri()) return 0; const { invoke } = await import("@tauri-apps/api/core"); return invoke<number>("force_sync"); }

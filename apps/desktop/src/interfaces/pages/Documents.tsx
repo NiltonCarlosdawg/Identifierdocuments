@@ -1,6 +1,10 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState } from "react";
 import { api, sync } from "../../infrastructure/di/container";
-import { PageHeader, Modal, StatusChip, EmptyState, Pagination } from "../components/docid-ui";
+import { PageHeader, Modal, StatusChip, EmptyState, Pagination, OfflineNotice } from "../components/docid-ui";
+import { useOfflineCache } from "../hooks/useOfflineCache";
+import { mapError, isNetworkError } from "../../shared/errors/mapError";
+import { useAuthStore } from "../stores/authStore";
+import { useQueueStore } from "../stores/queueStore";
 import ShareDocumentModal from "../components/ShareDocumentModal";
 import ClassifierSuggestion from "../components/ClassifierSuggestion";
 import type { ClassifierResult } from "../hooks/useClassifier";
@@ -11,23 +15,18 @@ interface DocRow { id: string; filename: string; fileSize: number; mimeType: str
 export default function Documents() {
   const [rows, setRows] = useState<DocRow[]>([]);
   const [meta, setMeta] = useState({ total: 0, page: 1, limit: 20 });
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
   const [showUpload, setShowUpload] = useState(false);
   const [selected, setSelected] = useState<DocRow | null>(null);
   const [search, setSearch] = useState("");
 
-  const load = useCallback(async (page = 1) => {
-    setLoading(true); setError("");
-    try {
-      const res = await api.get<{ data: DocRow[]; meta: { total: number; page: number; limit: number } }>(`/documents?page=${page}&limit=20`);
-      setRows(res.data || []);
-      setMeta(res.meta || { total: 0, page: 1, limit: 20 });
-    } catch {}
-    finally { setLoading(false); }
-  }, []);
-
-  useEffect(() => { load(); }, [load]);
+  const { loading, error, isStale, cachedAt, refresh } = useOfflineCache<{ data: DocRow[]; meta: { total: number; page: number; limit: number } }>({
+    endpoint: "/documents",
+    fetcher: async () => {
+      const res = await api.get<{ data: DocRow[]; meta: { total: number; page: number; limit: number } }>("/documents?page=1&limit=20");
+      return { data: res.data || [], meta: res.meta || { total: 0, page: 1, limit: 20 } };
+    },
+    onData: result => { setRows(result.data); setMeta(result.meta); },
+  });
 
   return (
     <div>
@@ -35,6 +34,7 @@ export default function Documents() {
         <button onClick={() => setShowUpload(true)} className="docid-button-primary"><Upload className="h-4 w-4" /> Anexar</button>
       } />
       {error && <div className="mb-4 rounded-lg border border-docid-error/30 bg-docid-error/10 p-3 text-sm text-docid-error">{error}</div>}
+      {isStale && <OfflineNotice cachedAt={cachedAt} onRetry={refresh} />}
       <div className="mb-4 flex items-center gap-3">
         <div className="relative flex-1 max-w-xs"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-docid-outline" /><input value={search} onChange={e => setSearch(e.target.value)} className="docid-input w-full pl-9" placeholder="Pesquisar documento..." /></div>
       </div>
@@ -62,8 +62,8 @@ export default function Documents() {
         <Pagination totalLabel={`${meta.total} documento(s)`} />
       </div>
 
-      {showUpload && <UploadModal onClose={() => setShowUpload(false)} onDone={() => { setShowUpload(false); load(); }} />}
-      {selected && <DetailModal row={selected} onClose={() => setSelected(null)} onDone={() => load()} />}
+      {showUpload && <UploadModal onClose={() => setShowUpload(false)} onDone={() => { setShowUpload(false); refresh(); }} />}
+      {selected && <DetailModal row={selected} onClose={() => setSelected(null)} onDone={() => refresh()} />}
     </div>
   );
 }
@@ -76,6 +76,7 @@ function UploadModal({ onClose, onDone }: { onClose: () => void; onDone: () => v
   const [tauriFilename, setTauriFilename] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [queued, setQueued] = useState(false);
   const [classifierText, setClassifierText] = useState("");
   const [classifierResult, setClassifierResult] = useState<ClassifierResult | null>(null);
   const [feedbackSent, setFeedbackSent] = useState(false);
@@ -100,7 +101,7 @@ function UploadModal({ onClose, onDone }: { onClose: () => void; onDone: () => v
       setExtracting(false);
     } catch (err: any) {
       setExtracting(false);
-      setError(err.message || "Erro ao seleccionar ou extrair ficheiro.");
+      setError(mapError(err, "Erro ao seleccionar ou extrair ficheiro."));
     }
   };
 
@@ -125,23 +126,38 @@ function UploadModal({ onClose, onDone }: { onClose: () => void; onDone: () => v
 
   const handleUpload = async () => {
     if (!hasFile || !identifier.trim()) return;
-    setError(""); setLoading(true);
+    setError(""); setLoading(true); setQueued(false);
+    const user = useAuthStore.getState().user;
     try {
       if (isTauri && tauriFilePath) {
-        const { invoke } = await import("@tauri-apps/api/core");
-        await invoke("attach_document_native", {
-          path: tauriFilePath,
-          identifier: identifier.trim(),
-          uploadSource: "manual",
-        });
-      } else if (file) {
+        try {
+          const { invoke } = await import("@tauri-apps/api/core");
+          await invoke("attach_document_native", {
+            path: tauriFilePath,
+            identifier: identifier.trim(),
+            uploadSource: "manual",
+          });
+        } catch (err: any) {
+          if (!isNetworkError(err)) throw err;
+          if (!user?.tenantId || !user?.id) throw err;
+          const item = await sync.enqueueFromPath(tauriFilePath, identifier.trim(), user.tenantId, user.id);
+          if (!item) throw err;
+          useQueueStore.getState().refresh().catch(() => {});
+          setQueued(true);
+          setLoading(false);
+          return;
+        }
+        onDone();
+        return;
+      }
+      if (file) {
         const fd = new FormData();
         fd.append("identifier", identifier.trim());
         fd.append("file", file);
         await api.post("/documents/attach", fd);
       }
       onDone();
-    } catch (err: any) { setError(err.message || "Erro ao anexar documento."); } finally { setLoading(false); }
+    } catch (err: any) { setError(mapError(err, "Erro ao anexar documento.")); } finally { setLoading(false); }
   };
 
   const hasFile = isTauri ? !!tauriFilePath : !!file;
@@ -149,9 +165,14 @@ function UploadModal({ onClose, onDone }: { onClose: () => void; onDone: () => v
   const fileInfo = isTauri ? tauriFilePath.split("/").pop() || tauriFilePath : file ? `${(file.size / 1024 / 1024).toFixed(2)} MB — ${file.type || "tipo desconhecido"}` : "";
 
   return (
-    <Modal title="Anexar Documento" onClose={onClose} footer={<><button onClick={onClose} className="docid-button-secondary">Cancelar</button><button onClick={handleUpload} disabled={loading || !hasFile || !identifier.trim() || !feedbackSent} className="docid-button-primary">{loading ? "A enviar..." : "Anexar"}</button></>}>
+    <Modal title="Anexar Documento" onClose={onClose} footer={
+      queued
+        ? <button onClick={onClose} className="docid-button-primary">Concluir</button>
+        : <><button onClick={onClose} className="docid-button-secondary">Cancelar</button><button onClick={handleUpload} disabled={loading || !hasFile || !identifier.trim() || !feedbackSent} className="docid-button-primary">{loading ? "A enviar..." : "Anexar"}</button></>
+    }>
       <div className="space-y-4">
         {error && <div className="rounded-lg border border-docid-error/30 bg-docid-error/10 p-3 text-sm text-docid-error">{error}</div>}
+        {queued && <div className="rounded-lg border border-docid-secondary/30 bg-docid-secondary/10 p-3 text-sm text-docid-secondary">Guardado na fila offline — será enviado automaticamente quando houver ligação.</div>}
 
         {!isTauri && <div className="rounded-lg border border-docid-tertiary/30 bg-docid-tertiary/10 p-3 text-xs text-docid-tertiary">Extracção de texto só disponível na app desktop.</div>}
 

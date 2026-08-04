@@ -1,8 +1,10 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { useAuthStore } from "../stores/authStore";
 import { useAppConfigStore } from "../stores/configStore";
 import { useWatcherStore } from "../stores/watcherStore";
-import { PageHeader } from "../components/docid-ui";
+import { PageHeader, OfflineNotice } from "../components/docid-ui";
+import { useOfflineCache } from "../hooks/useOfflineCache";
+import { mapError } from "../../shared/errors/mapError";
 import { sync, api } from "../../infrastructure/di/container";
 import { Server, Sun, Moon, Save, RotateCcw, FolderPlus, Trash2, Play, Square, Eye, RefreshCw, Building2, Bell, Download, Smartphone, AlertTriangle } from "lucide-react";
 
@@ -115,7 +117,6 @@ function OrganizationTab() {
   const [name, setName] = useState("");
   const [prefix, setPrefix] = useState("");
   const [batchSize, setBatchSize] = useState(50);
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
@@ -123,21 +124,19 @@ function OrganizationTab() {
   const [exportingStats, setExportingStats] = useState(false);
   const [exportError, setExportError] = useState("");
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await api.get<{ data: { name: string; slug: string; identifierPrefix: string; plan: string; identifierLeaseBatchSize: number | null } }>("/tenants/me");
-        setOrg(res.data);
-        setName(res.data.name);
-        setPrefix(res.data.identifierPrefix);
-        setBatchSize(res.data.identifierLeaseBatchSize ?? 50);
-      } catch (e: any) {
-        setError(e.message);
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, []);
+  const { loading, error: loadError, isStale, cachedAt, refresh } = useOfflineCache<{ name: string; slug: string; identifierPrefix: string; plan: string; identifierLeaseBatchSize: number | null }>({
+    endpoint: "/tenants/me",
+    fetcher: async () => {
+      const res = await api.get<{ data: { name: string; slug: string; identifierPrefix: string; plan: string; identifierLeaseBatchSize: number | null } }>("/tenants/me");
+      return res.data;
+    },
+    onData: data => {
+      setOrg(data);
+      setName(data.name);
+      setPrefix(data.identifierPrefix);
+      setBatchSize(data.identifierLeaseBatchSize ?? 50);
+    },
+  });
 
   const handleSave = async () => {
     setSaving(true);
@@ -152,7 +151,7 @@ function OrganizationTab() {
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch (e: any) {
-      setError(e.message);
+      setError(mapError(e, "Erro ao guardar dados da organização."));
     } finally {
       setSaving(false);
     }
@@ -177,7 +176,7 @@ function OrganizationTab() {
       const blob = await api.getBlob(path);
       if (blob) downloadBlob(blob, filename);
     } catch (e: any) {
-      setExportError(e.message === "Erro 429" ? "Limite de exportações excedido (5/hora). Tente novamente dentro de 1 hora." : e.message);
+      setExportError(e.message === "Erro 429" ? "Limite de exportações excedido (5/hora). Tente novamente dentro de 1 hora." : mapError(e));
     } finally {
       setter(false);
     }
@@ -187,9 +186,10 @@ function OrganizationTab() {
 
   return (
     <div className="space-y-6 max-w-xl">
+      {isStale && <OfflineNotice cachedAt={cachedAt} onRetry={refresh} />}
       <div className="docid-panel p-6 space-y-5">
         <h3 className="text-sm font-semibold text-docid-text">Dados da Organização</h3>
-        {error && <p className="text-xs text-docid-error">{error}</p>}
+        {(error || loadError) && <p className="text-xs text-docid-error">{error || loadError}</p>}
         <div>
           <label className="mb-1.5 block text-xs font-semibold text-docid-muted">Nome</label>
           <input value={name} onChange={e => setName(e.target.value)} className="docid-input w-full" />
@@ -264,34 +264,31 @@ function DevicesTab() {
   const isOrgAdmin = user?.roles?.includes("ORG_ADMIN") ?? false;
   const [devices, setDevices] = useState<DeviceRow[]>([]);
   const [leases, setLeases] = useState<LeaseRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const [writeError, setWriteError] = useState("");
   const [releasing, setReleasing] = useState<string | null>(null);
   const [deactivating, setDeactivating] = useState<string | null>(null);
   const [isTauri] = useState(() => sync.isAvailable());
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
-    setError("");
+  const { loading, error: loadError, isStale, cachedAt, refresh } = useOfflineCache<DeviceRow[]>({
+    endpoint: "/devices",
+    fetcher: async () => {
+      const res = await api.get<{ data: DeviceRow[] }>("/devices");
+      return res.data || [];
+    },
+    onData: setDevices,
+  });
+
+  const reloadLeases = async () => {
+    if (!isTauri) return;
     try {
-      const [devRes] = await Promise.all([
-        api.get<{ data: DeviceRow[] }>("/devices"),
-      ]);
-      setDevices(devRes.data);
+      const { invoke } = await import("@tauri-apps/api/core");
+      setLeases(await invoke<LeaseRow[]>("get_leases"));
+    } catch {}
+  };
 
-      if (isTauri) {
-        const { invoke } = await import("@tauri-apps/api/core");
-        const result = await invoke<LeaseRow[]>("get_leases");
-        setLeases(result);
-      }
-    } catch (e: any) {
-      setError(e.message || "Erro ao carregar dados.");
-    } finally {
-      setLoading(false);
-    }
-  }, [isTauri]);
+  const handleRefresh = async () => { await refresh(); await reloadLeases(); };
 
-  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => { reloadLeases(); }, [isTauri]);
 
   const calcUsage = (lease: LeaseRow) => {
     const total = lease.end_seq - lease.start_seq + 1;
@@ -303,12 +300,12 @@ function DevicesTab() {
     if (!confirm(`Tem a certeza que deseja desactivar o dispositivo "${device.name}"?\n\nEsta acção impede que o dispositivo gere novos identificadores offline. As leases activas neste dispositivo não serão afectadas.`)) return;
 
     setDeactivating(device.id);
-    setError("");
+    setWriteError("");
     try {
       await api.patch(`/devices/${device.id}/deactivate`, {});
-      await loadData();
+      await handleRefresh();
     } catch (e: any) {
-      setError(e.message || "Erro ao desactivar dispositivo.");
+      setWriteError(mapError(e, "Erro ao desactivar dispositivo."));
     } finally {
       setDeactivating(null);
     }
@@ -318,7 +315,7 @@ function DevicesTab() {
     if (!confirm(`Tem a certeza? Esta acção é irreversível.\n\nLease: ${lease.id}\nCategoria: ${lease.category_id}\nSector: ${lease.sector_id}\nIntervalo: ${lease.start_seq}–${lease.end_seq}\n\nOs identificadores pendentes associados a este lease serão marcados como conflito.`)) return;
 
     setReleasing(lease.id);
-    setError("");
+    setWriteError("");
     try {
       await api.post("/identifiers/force-release", { leaseId: lease.id });
 
@@ -327,9 +324,9 @@ function DevicesTab() {
         await invoke("mark_lease_remote_released", { leaseId: lease.id });
       }
 
-      await loadData();
+      await handleRefresh();
     } catch (e: any) {
-      setError(e.message || "Erro ao forçar libertação.");
+      setWriteError(mapError(e, "Erro ao forçar libertação."));
     } finally {
       setReleasing(null);
     }
@@ -337,12 +334,13 @@ function DevicesTab() {
 
   return (
     <div className="space-y-6 max-w-xl">
-      {error && <div className="rounded-lg border border-docid-error/30 bg-docid-error/10 p-3 text-sm text-docid-error">{error}</div>}
+      {isStale && <OfflineNotice cachedAt={cachedAt} onRetry={refresh} />}
+      {(loadError || writeError) && <div className="rounded-lg border border-docid-error/30 bg-docid-error/10 p-3 text-sm text-docid-error">{loadError || writeError}</div>}
 
       <div className="docid-panel p-6 space-y-4">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-semibold text-docid-text">Dispositivos Registados</h3>
-          <button onClick={loadData} className="docid-button-secondary text-xs" disabled={loading}>
+          <button onClick={handleRefresh} className="docid-button-secondary text-xs" disabled={loading}>
             <RefreshCw className={`h-3 w-3 ${loading ? "animate-spin" : ""}`} /> Actualizar
           </button>
         </div>
@@ -486,22 +484,16 @@ function DevicesTab() {
 
 function NotificationsTab() {
   const [prefs, setPrefs] = useState<Record<string, boolean>>({});
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
-  const [error, setError] = useState("");
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await api.get<{ notificationPreferences?: Record<string, boolean> }>("/auth/me");
-        setPrefs(res.notificationPreferences ?? {});
-      } catch (e: any) {
-        setError(e.message);
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, []);
+  const { loading, error, isStale, cachedAt, refresh } = useOfflineCache<Record<string, boolean>>({
+    endpoint: "/auth/me",
+    fetcher: async () => {
+      const res = await api.get<{ notificationPreferences?: Record<string, boolean> }>("/auth/me");
+      return res.notificationPreferences ?? {};
+    },
+    onData: setPrefs,
+  });
 
   const handleToggle = async (key: string) => {
     const newVal = !prefs[key];
@@ -530,6 +522,7 @@ function NotificationsTab() {
     <div className="docid-panel p-6 max-w-xl space-y-5">
       <h3 className="text-sm font-semibold text-docid-text">Preferências de Notificação</h3>
       <p className="text-xs text-docid-muted">Seleccione para que eventos pretende ser notificado.</p>
+      {isStale && <OfflineNotice cachedAt={cachedAt} onRetry={refresh} />}
       {error && <p className="text-xs text-docid-error">{error}</p>}
       {items.map(({ key, label, desc }) => (
         <label key={key} className="flex items-center justify-between gap-4 rounded-lg border border-docid-border p-4 hover:bg-docid-surface-high cursor-pointer">

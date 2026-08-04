@@ -4,10 +4,14 @@
 > Critério de prioridade: P0 = bloqueante | P1 = essencial | P2 = importante | P3 = nice-to-have
 >
 > **Estado: Fases 1-4 completas e validadas E2E. Fase 5 maioritariamente completa
-> (falta preview de PDF/multi-página no scanner e cache do classificador). Fase 6
-> — Geração Offline de Identificadores — backend completo, motor de sync nativo
-> implementado (agrupamento, HTTP, response handling, renovação de lease),
-> geração offline funcional, UI pendente.**
+> (falta preview de PDF/multi-página no scanner, cache do classificador e a UI
+> detalhada de 3-opções do watcher). Fase 6 — Geração Offline de Identificadores
+> — completa (backend, motor de sync nativo, renovação de lease, UI e registo de
+> dispositivos). Fase 7 — Cache Offline de Leitura — completa (leitura de
+> listagens offline a partir de cache encriptada). Fase 8 — Seed Offline —
+> completa (corrige a lacuna da geração offline: caches e leases agora são
+> semeados). Fase 9 — Upload Offline Ligado à UI — completa (upload que falha
+> por rede é enfileirado).**
 
 ---
 
@@ -404,6 +408,127 @@ aplicadas posteriormente a itens aqui marcados como completos)*
   local) para conflitos e falhados
 - [x] **P1** Badge de contagem total no separador Pendentes
 
+### 6.8 — Registo e Identificação de Dispositivos (M5)
+- [x] **P1** Registo automático do dispositivo no arranque — comando Rust
+  `get_or_register_device_id` (`identifiers.rs`) devolve identidade estável por
+  instalação (`device_id` + `device_name`), consumido por `deviceStore.ts`
+- [x] **P1** Schema `devices` actualizado (migração 0013): `registeredByUserId`,
+  status `active`/`inactive`, `deactivatedAt`/`deactivatedBy`
+- [x] **P1** `PATCH /devices/:id/deactivate` — desactiva um dispositivo (impede
+  nova geração offline; leases activos mantêm-se); UI em Settings →
+  "Dispositivos" com botão "Desactivar" restrito a `ORG_ADMIN`
+
+---
+
+## FASE 7 — Cache Offline de Leitura *(nova fase, fora do plano original)*
+> **Objectivo:** resolver o P0 reportado — as páginas de listagem ficavam vazias
+> ou com erro "Failed to fetch" quando a API estava inacessível. Com a sessão a
+> sobreviver offline (JWT persistido + decode local, sem `/auth/me` bloqueante),
+> a leitura passa a servir dados em cache encriptada quando não há ligação.
+
+### 7.1 — Armazenamento seguro
+- [x] **P0** `OfflineCache` (Tauri): AES-GCM com IV aleatório por escrita
+  (`crypto.getRandomValues(12)`), store `docid-cache`, chave de sessão de 32
+  bytes guardada em `docid-secure`
+- [x] **P0** Entrada `{ version, cachedAt, ttlMs, data }`; versionamento
+  `CACHE_VERSION = 1` por chave (`cache:v1:{tenant}:{user}:{endpoint}:{params}`)
+- [x] **P0** TTL por endpoint (`CACHE_TTLS`, 1h–7d) + limite LRU de 50 chaves
+- [x] **P0** Sem lock concorrente — last-write-wins documentado
+
+### 7.2 — Hook e integração
+- [x] **P0** `useOfflineCache`: fetcher + cache; em falha de rede serve a entrada
+  em cache (`isStale` + `cachedAt`), senão mostra erro amigável; `enabled` para
+  gating (ex.: vista "Pendentes")
+- [x] **P0** `mapError`: converte "Failed to fetch"/NetworkError em mensagem PT
+  ("Sem ligação à API…"), preservando mensagens do servidor e fallbacks
+- [x] **P0** Integrado nas 8 páginas de leitura: Dashboard (`/stats`),
+  Identifiers (`/identifiers`), Documents (`/documents`), Approvals (`/approvals`),
+  Sectors (`/sectors`), Users (`/users`), Audit (`/audit`), Settings
+  (`/tenants/me`, `/devices`, `/auth/me`)
+- [x] **P1** `OfflineNotice` — aviso âmbar "a mostrar dados em cache de {data}"
+  com botão "Tentar novamente" quando offline com cache
+- [x] **P1** `mapError` aplicado a todos os catches de escrita (sectores,
+  utilizadores, aprovações, configurações, cancelar identificador, anexar
+  documento, perfil, login, onboarding)
+
+### 7.3 — Ciclo de vida
+- [x] **P1** Logout limpa a cache e a chave de encriptação
+  (`authStore.logout` → `clearAll` + `clearKey`)
+- [x] **P1** Arranque purga chaves de versões antigas (`purgeStaleVersions`)
+- [x] **P2** Invalidação write-through: após escrita bem-sucedida a página faz
+  refresh e sobrescreve a cache; TTL como fallback
+
+### Fora de âmbito (trabalho futuro)
+- [ ] **P2** Enfileiramento de escritas offline (fila de pedidos) — Opção C
+- [ ] **P2** Upload offline via `attach_document_native` (Rust) — faz HTTP
+  directo, sem fila
+- [ ] **P2** Cache de endpoints auxiliares (categorias no GenerateModal, listas
+  de sectores/utilizadores nos dropdowns de Users/Audit)
+
+---
+
+## FASE 8 — Seed Offline da Geração de Identificadores *(nova fase, fora do plano original)*
+> **Objectivo:** corrigir a lacuna confirmada — a geração offline de
+> identificadores **nunca funcionou em produção**: `cache_categories`,
+> `cache_tenant_state` e `request_lease` estavam registados no Tauri mas nunca
+> eram invocados, e o motor de sync só renovava leases existentes. Plano completo
+> em `.opencode/plans/plano-offline-completo.md` (Fases 0–4).
+
+### 8.1 — Seed no motor de sync
+- [x] **P0** `seed_offline_caches` (Rust, `sync/mod.rs`): no ciclo de sync, quando
+  online, faz `GET /categories` → upsert em `local_category_cache` e
+  `GET /tenants/me` → upsert em `local_tenant_state` (org_prefix + batch size)
+- [x] **P0** `seed_missing_leases` (Rust, `sync/mod.rs`): reserva leases iniciais
+  para combinações (categoria, sector) já em uso (pendentes/contadores) sem lease
+  activo, via `request_lease_inner`
+- [x] **P0** `request_lease_inner` extraído do comando `request_lease`
+  (reutilizável pelo sync e pelo novo comando)
+
+### 8.2 — Frontend (belt & suspenders)
+- [x] **P0** `Identifiers.tsx`: após carregar categorias online, invoca
+  `cache_categories` (frescura sem depender do timing do sync)
+- [x] **P0** `useGenerateIdentifier.ts`: no caminho online, invoca
+  `ensure_offline_lease(categoryId, sectorId)` antes de gerar — garante lease
+  para (categoria fiscal, sector) caso não exista
+- [x] **P0** Comando Rust `ensure_offline_lease`: retorna `false` para categorias
+  não-sequenciais, `true` se já existe lease activo, senão reserva um; tolerante
+  a corridas (re-check após erro)
+
+### Critério de aceitação
+- App usada online alguns minutos → `generate_offline_identifier` gera
+  identificadores fiscais e não-fiscais sem "Categoria não encontrada" nem
+  "Sem lease activo". **Verificação manual pendente (runtime).**
+
+---
+
+## FASE 9 — Upload Offline Ligado à UI *(Fase 1 do plano offline)*
+> **Objectivo:** quando um upload de documento falha por falta de rede na app
+> desktop, enfileirar localmente (fila offline já existente) em vez de apenas
+> mostrar erro. Infra de fila existia mas nenhuma página a usava.
+
+### 9.1 — Detecção de erro de rede + enqueue
+- [x] **P0** `isNetworkError` (`shared/errors/mapError.ts`): reconhece erros de
+  rede do browser (`Failed to fetch`) e do Rust/reqwest (`error sending
+  request`, `timed out`, `dns error`, `tls`, `connection`, etc.); `mapError`
+  reutiliza-o
+- [x] **P0** `enqueueFromPath` adicionado à porta `ISyncService` e às duas
+  implementações (`TauriSyncAdapter`/`SyncService`) → comando `enqueue_upload`
+  (copia o ficheiro para a fila local)
+- [x] **P0** `Documents.tsx` (UploadModal): em erro de rede no
+  `attach_document_native`, enfileira via `sync.enqueueFromPath(path,
+  identifier, tenantId, userId)`; mostra "Guardado na fila offline — será
+  enviado automaticamente quando houver ligação"; actualiza o badge da fila
+- [x] **P0** Erros de negócio (validação/422/permissões) **não** são enfileirados
+- [ ] **P1** Verificação manual em runtime: offline anexar enfileira; online
+  envia automaticamente (flush no `run_sync_cycle`) e sai da fila
+
+### Fora de âmbito (Fases 2–4 do plano — trabalho futuro)
+- [ ] **P2** Fase 2: cache de endpoints auxiliares (`/categories`, `/sectors/:id/members`, dropdowns)
+- [ ] **P2** Fase 3: download offline de documentos (cache de ficheiros em disco)
+- [ ] **P2** Fase 4: fila de escritas offline (idempotência, ordem, conflitos)
+
+
+
 ---
 
 ## Débito Técnico & Qualidade
@@ -415,6 +540,12 @@ aplicadas posteriormente a itens aqui marcados como completos)*
   `fetch_active_leases`); 90 testes Rust no total
 - [x] **P1** Rate limiting nos endpoints públicos — **estendido** aos novos
   endpoints de exportação (5/hora)
+- [x] **P1** Rate limiting tolerante a falhas de Redis (v1.1.5) — quando o Redis
+  está indisponível: `connect()` explícito + flag `redisUnavailable`; um único
+  warn por processo em vez de stack trace por request
+- [x] **P1** Robustez offline das listagens — em falha de rede as páginas mostram
+  ecrãs vazios em vez de "Failed to fetch" (v1.1.5); depois substituído pela
+  Fase 7 (leitura com dados em cache)
 - [x] **P1** Sanitização de nomes de ficheiro no upload (path traversal) —
   também aplicado ao `attach_document_native` (Rust)
 - [ ] **P1** Logs estruturados na API (pino ou similar)
@@ -436,7 +567,10 @@ aplicadas posteriormente a itens aqui marcados como completos)*
 | **4** | Partilha + Aprovações + SSE | ✅ Completo |
 | **5** | Scanner + IA + File Watcher + Settings | 🔄 Quase completo — falta preview PDF/multi-página no scanner, cache do classificador, e a UI detalhada de 3-opções do watcher |
 | **5.6** | Correcções de segurança (hardening) | ✅ Completo — RLS, advisory lock, roles frescas, tratamento de erro uniforme, suite de testes de carga |
-| **6** | Geração offline de identificadores | ✅ Backend completo (M0–M2), motor de sync nativo + testes (M3), UI completa (M4 + M4.5); classificação legal de categorias pendente de confirmação profissional |
+| **6** | Geração offline de identificadores | ✅ Completo — backend (M0–M2), motor de sync nativo + testes (M3), UI (M4 + M4.5), registo de dispositivos (M5); classificação legal de categorias pendente de confirmação profissional |
+| **7** | Cache offline de leitura | ✅ Completo — `OfflineCache` encriptado (AES-GCM), hook nas 8 páginas, `mapError`, limpeza no logout; resolve o P0 de ecrãs vazios offline |
+| **8** | Seed offline da geração de identificadores | ✅ Completo — lacuna corrigida: caches (categorias/tenant) e leases semeados no ciclo de sync + `ensure_offline_lease`/`cache_categories` no frontend; verificação manual em runtime pendente |
+| **9** | Upload offline ligado à UI | ✅ Completo — `isNetworkError`, `enqueueFromPath`, fallback de rede no `UploadModal` do Documents; verificação manual em runtime pendente |
 
 > Consultar `README.md` para visão geral do produto e arquitectura; este
 > ficheiro é o documento vivo de estado por fase.

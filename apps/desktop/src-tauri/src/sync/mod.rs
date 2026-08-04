@@ -712,6 +712,184 @@ async fn renew_exhausted_leases(state: &SyncState) -> Result<usize, String> {
     Ok(renewed)
 }
 
+// ============================================================
+// Offline seeding — popula caches locais enquanto online
+// ============================================================
+
+async fn seed_offline_caches(
+    state: &SyncState,
+    api_base_url: &str,
+    token: &str,
+) -> Result<(), String> {
+    let client = build_tls_client(30)?;
+
+    // 1. Categorias → local_category_cache
+    let cat_resp = client
+        .get(format!("{api_base_url}/categories"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(|e| format!("Erro ao buscar categorias: {e}"))?;
+
+    if cat_resp.status().is_success() {
+        let body: serde_json::Value = cat_resp
+            .json()
+            .await
+            .map_err(|e| format!("Resposta inválida de /categories: {e}"))?;
+        let groups = body
+            .get("data")
+            .and_then(|d| d.get("groups"))
+            .and_then(|g| g.as_object())
+            .cloned()
+            .unwrap_or_default();
+
+        let conn = state.conn()?;
+        let now = Utc::now().to_rfc3339();
+        for cats in groups.values() {
+            let Some(arr) = cats.as_array() else {
+                continue;
+            };
+            for cat in arr {
+                let Some(id) = cat.get("id").and_then(|v| v.as_str()) else {
+                    continue;
+                };
+                let Some(prefix) = cat.get("prefix").and_then(|v| v.as_str()) else {
+                    continue;
+                };
+                let req_seq = cat
+                    .get("requiresSequential")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                conn.execute(
+                    "INSERT INTO local_category_cache (category_id, prefix, requires_sequential, last_synced_at)
+                     VALUES (?1, ?2, ?3, ?4)
+                     ON CONFLICT(category_id) DO UPDATE SET
+                        prefix = excluded.prefix,
+                        requires_sequential = excluded.requires_sequential,
+                        last_synced_at = excluded.last_synced_at",
+                    params![id, prefix, req_seq as i32, now],
+                )
+                .map_err(|e| e.to_string())?;
+            }
+        }
+    }
+
+    // 2. Estado do tenant → local_tenant_state
+    let ten_resp = client
+        .get(format!("{api_base_url}/tenants/me"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(|e| format!("Erro ao buscar estado do tenant: {e}"))?;
+
+    if ten_resp.status().is_success() {
+        let body: serde_json::Value = ten_resp
+            .json()
+            .await
+            .map_err(|e| format!("Resposta inválida de /tenants/me: {e}"))?;
+        let data = body.get("data").cloned().unwrap_or_default();
+        let tenant_id = data.get("id").and_then(|v| v.as_str()).unwrap_or("");
+        if !tenant_id.is_empty() {
+            let org_prefix = data
+                .get("identifierPrefix")
+                .and_then(|v| v.as_str())
+                .unwrap_or("VL");
+            let lease_batch_size = data
+                .get("identifierLeaseBatchSize")
+                .and_then(|v| v.as_i64())
+                .map(|v| v as i32)
+                .unwrap_or(50);
+            let conn = state.conn()?;
+            let now = Utc::now().to_rfc3339();
+            conn.execute(
+                "INSERT INTO local_tenant_state (tenant_id, org_prefix, lease_batch_size, last_sync_at)
+                 VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(tenant_id) DO UPDATE SET
+                    org_prefix = excluded.org_prefix,
+                    lease_batch_size = COALESCE(excluded.lease_batch_size, local_tenant_state.lease_batch_size),
+                    last_sync_at = excluded.last_sync_at",
+                params![tenant_id, org_prefix, lease_batch_size, now],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+    }
+
+    Ok(())
+}
+
+async fn seed_missing_leases(state: &SyncState) -> Result<usize, String> {
+    let conn = state.conn()?;
+
+    // Combinações (categoria, sector) já em uso, sem lease activo
+    let combos: Vec<(String, String)> = {
+        let mut stmt = conn
+            .prepare(
+                "SELECT category_id, sector_id FROM local_pending_identifiers
+                 WHERE status = 'pending'
+                 UNION
+                 SELECT category_id, sector_id FROM local_loose_counters",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        rows
+    };
+
+    let device_id: Option<String> = conn
+        .query_row(
+            "SELECT device_id FROM local_device_identity LIMIT 1",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .ok();
+
+    let Some(device_id) = device_id else {
+        return Ok(0);
+    };
+
+    let mut seeded = 0usize;
+    for (category_id, sector_id) in combos {
+        let mut conn = state.conn()?;
+        let requires_sequential: i32 = conn
+            .query_row(
+                "SELECT requires_sequential FROM local_category_cache WHERE category_id = ?1",
+                params![category_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+        if requires_sequential == 0 {
+            continue;
+        }
+        let has_active: i32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM local_identifier_lease
+                 WHERE category_id = ?1 AND sector_id = ?2 AND status = 'active'",
+                params![category_id, sector_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+        if has_active > 0 {
+            continue;
+        }
+        match crate::commands::identifiers::request_lease_inner(
+            state,
+            category_id.clone(),
+            device_id.clone(),
+            sector_id.clone(),
+        )
+        .await
+        {
+            Ok(_) => seeded += 1,
+            Err(e) => eprintln!("Erro ao reservar lease para {category_id}/{sector_id}: {e}"),
+        }
+    }
+
+    Ok(seeded)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueueItem {
     pub id: String,
@@ -916,6 +1094,12 @@ async fn run_sync_cycle_inner(app: &AppHandle, state: &SyncState) -> Result<usiz
         return Ok(0);
     }
 
+    // Seed de caches offline (categorias + estado do tenant) e leases em falta
+    if let Err(e) = seed_offline_caches(state, &api_base_url, &token).await {
+        eprintln!("seed_offline_caches: {e}");
+    }
+    let seeded_leases = seed_missing_leases(state).await.unwrap_or(0);
+
     let conn = state.conn()?;
 
     // Crash recovery: reset items stuck in 'uploading' back to 'pending'
@@ -929,7 +1113,7 @@ async fn run_sync_cycle_inner(app: &AppHandle, state: &SyncState) -> Result<usiz
         .await
         .unwrap_or(0);
 
-    let total_renewed_or_synced = renewed + identifiers_synced;
+    let total_renewed_or_synced = renewed + identifiers_synced + seeded_leases;
 
     let items: Vec<QueueItem> = conn
         .prepare(

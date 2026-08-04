@@ -5,7 +5,7 @@ import type { StoredUser } from "../domain/entities/User";
 import { useAuthStore } from "./stores/authStore";
 import { useAppConfigStore } from "./stores/configStore";
 import { useDeviceStore } from "./stores/deviceStore";
-import { api, sync } from "../infrastructure/di/container";
+import { api, sync, offlineCache } from "../infrastructure/di/container";
 import Layout from "./components/Layout";
 import Login from "./pages/Login";
 import Onboarding from "./pages/Onboarding";
@@ -56,6 +56,10 @@ export default function App() {
       if (decoded) setUser({ id: decoded.userId, email: "", fullName: "", tenantId: decoded.tenantId, sectorId: decoded.sectorId, sectorName: null, roles: decoded.roles, organization: null });
     }
   }, [token, user, setUser]);
+
+  useEffect(() => {
+    offlineCache.purgeStaleVersions().catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!token) return;

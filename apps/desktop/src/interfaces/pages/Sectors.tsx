@@ -1,6 +1,8 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { api } from "../../infrastructure/di/container";
-import { PageHeader, Modal, StatusChip, EmptyState, Pagination } from "../components/docid-ui";
+import { PageHeader, Modal, StatusChip, EmptyState, Pagination, OfflineNotice } from "../components/docid-ui";
+import { useOfflineCache } from "../hooks/useOfflineCache";
+import { mapError } from "../../shared/errors/mapError";
 import { Search, Plus, Users, Pencil, Trash2 } from "lucide-react";
 
 interface SectorRow { id: string; name: string; code: string; supervisorName: string | null; supervisorId: string | null; memberCount: number; createdAt: string; }
@@ -8,24 +10,20 @@ interface User { id: string; fullName: string; }
 
 export default function Sectors() {
   const [rows, setRows] = useState<SectorRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [showCreate, setShowCreate] = useState(false);
   const [selected, setSelected] = useState<SectorRow | null>(null);
   const [members, setMembers] = useState<User[]>([]);
   const [showMembers, setShowMembers] = useState<SectorRow | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true); setError("");
-    try {
+  const { loading, error, isStale, cachedAt, refresh } = useOfflineCache<SectorRow[]>({
+    endpoint: "/sectors",
+    fetcher: async () => {
       const res = await api.get<{ data: SectorRow[] }>("/sectors");
-      setRows(res.data || []);
-    } catch (err: any) { setError(err.message || "Erro ao carregar sectores."); }
-    finally { setLoading(false); }
-  }, []);
-
-  useEffect(() => { load(); }, [load]);
+      return res.data || [];
+    },
+    onData: setRows,
+  });
 
   const filtered = rows.filter(r => !search || r.name.toLowerCase().includes(search.toLowerCase()) || r.code.toLowerCase().includes(search.toLowerCase()));
 
@@ -41,6 +39,7 @@ export default function Sectors() {
     <div>
       <PageHeader title="Sectores" description="Gerir os sectores da organização" actions={<button onClick={() => setShowCreate(true)} className="docid-button-primary"><Plus className="h-4 w-4" /> Criar sector</button>} />
       {error && <div className="mb-4 rounded-lg border border-docid-error/30 bg-docid-error/10 p-3 text-sm text-docid-error">{error}</div>}
+      {isStale && <OfflineNotice cachedAt={cachedAt} onRetry={refresh} />}
       <div className="mb-4 flex items-center gap-3">
         <div className="relative flex-1 max-w-xs"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-docid-outline" /><input value={search} onChange={e => setSearch(e.target.value)} className="docid-input w-full pl-9" placeholder="Pesquisar sector..." /></div>
       </div>
@@ -69,8 +68,8 @@ export default function Sectors() {
           ))}
         </div>
       )}
-      {showCreate && <CreateSectorModal onClose={() => setShowCreate(false)} onDone={() => { setShowCreate(false); load(); }} />}
-      {selected && <EditSectorModal sector={selected} onClose={() => setSelected(null)} onDone={() => { setSelected(null); load(); }} />}
+      {showCreate && <CreateSectorModal onClose={() => setShowCreate(false)} onDone={() => { setShowCreate(false); refresh(); }} />}
+      {selected && <EditSectorModal sector={selected} onClose={() => setSelected(null)} onDone={() => { setSelected(null); refresh(); }} />}
       {showMembers && <MembersModal sector={showMembers} members={members} onClose={() => { setShowMembers(null); setMembers([]); }} />}
     </div>
   );
@@ -88,7 +87,7 @@ function CreateSectorModal({ onClose, onDone }: { onClose: () => void; onDone: (
     try {
       await api.post("/sectors", { name: name.trim(), code: code.trim().toUpperCase() });
       onDone();
-    } catch (err: any) { setError(err.message || "Erro ao criar sector."); } finally { setLoading(false); }
+    } catch (err: any) { setError(mapError(err, "Erro ao criar sector.")); } finally { setLoading(false); }
   };
 
   return (
@@ -130,13 +129,13 @@ function EditSectorModal({ sector, onClose, onDone }: { sector: SectorRow; onClo
         await api.patch(`/sectors/${sector.id}/supervisor`, { supervisorId: supervisorId || undefined });
       }
       onDone();
-    } catch (err: any) { setError(err.message || "Erro ao actualizar sector."); } finally { setLoading(false); }
+    } catch (err: any) { setError(mapError(err, "Erro ao actualizar sector.")); } finally { setLoading(false); }
   };
 
   const handleDelete = async () => {
     if (!confirm(`Tem a certeza que deseja eliminar o sector "${sector.name}"?`)) return;
     setLoading(true);
-    try { await api.delete(`/sectors/${sector.id}`); onDone(); } catch (err: any) { setError(err.message); setLoading(false); }
+    try { await api.delete(`/sectors/${sector.id}`); onDone(); } catch (err: any) { setError(mapError(err, "Erro ao eliminar sector.")); setLoading(false); }
   };
 
   return (

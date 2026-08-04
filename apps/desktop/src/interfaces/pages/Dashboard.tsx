@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import { Fingerprint, FileText, AlertTriangle, CheckCircle, XCircle, Clock, Hash } from "lucide-react";
 import { api } from "../../infrastructure/di/container";
 import { useAuthStore } from "../stores/authStore";
-import { PageHeader, MetricCard, EmptyState } from "../components/docid-ui";
+import { useOfflineCache } from "../hooks/useOfflineCache";
+import { PageHeader, MetricCard, EmptyState, OfflineNotice } from "../components/docid-ui";
 
 interface StatsData {
   identifiers: {
@@ -40,22 +41,15 @@ const STATUS_TONES: Record<string, string> = {
 export default function Dashboard() {
   const user = useAuthStore(s => s.user);
   const [stats, setStats] = useState<StatsData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError("");
-    try {
+  const { loading, error, isStale, cachedAt, refresh } = useOfflineCache<StatsData>({
+    endpoint: "/stats",
+    fetcher: async () => {
       const res = await api.get<{ data: StatsData }>("/stats");
-      setStats(res.data);
-    } catch {
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { load(); }, [load]);
+      return res.data;
+    },
+    onData: data => setStats(data),
+  });
 
   return (
     <div>
@@ -67,9 +61,11 @@ export default function Dashboard() {
       {error && (
         <div className="mb-6 rounded-lg border border-docid-error/30 bg-docid-error/10 px-4 py-3 text-sm text-docid-error">
           {error}
-          <button onClick={load} className="ml-2 underline">Tentar novamente</button>
+          <button onClick={refresh} className="ml-2 underline">Tentar novamente</button>
         </div>
       )}
+
+      {isStale && <OfflineNotice cachedAt={cachedAt} onRetry={refresh} />}
 
       {loading && !stats && (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">

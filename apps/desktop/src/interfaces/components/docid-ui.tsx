@@ -1,5 +1,5 @@
 import type { ComponentType, ReactNode } from "react";
-import { X } from "lucide-react";
+import { X, WifiOff } from "lucide-react";
 
 export function PageHeader({ title, description, actions }: { title: string; description?: string; actions?: ReactNode }) {
   return (
@@ -49,4 +49,17 @@ export function Modal({ title, children, footer, onClose, maxWidth = "max-w-2xl"
 
 export function Pagination({ totalLabel }: { totalLabel: string }) {
   return <div className="flex items-center justify-between border-t border-docid-border px-4 py-3 text-sm text-docid-muted"><span>{totalLabel}</span></div>;
+}
+
+export function OfflineNotice({ cachedAt, onRetry }: { cachedAt: string | null; onRetry: () => void }) {
+  return (
+    <div className="mb-4 flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-500">
+      <WifiOff className="h-4 w-4 shrink-0" />
+      <span>
+        Sem ligação à API — a mostrar dados em cache
+        {cachedAt ? ` de ${new Date(cachedAt).toLocaleString("pt-AO")}` : ""}.
+      </span>
+      <button onClick={onRetry} className="ml-auto shrink-0 underline">Tentar novamente</button>
+    </div>
+  );
 }

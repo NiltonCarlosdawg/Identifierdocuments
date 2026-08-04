@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../../infrastructure/di/container";
+import { mapError } from "../../shared/errors/mapError";
 import { Building2, UserCheck, CheckCircle2, ArrowRight, ArrowLeft, FileText, Eye, EyeOff, Lock, Mail, User } from "lucide-react";
 
 type Step = "org" | "admin" | "confirm";
@@ -43,7 +44,7 @@ export default function Onboarding() {
       });
 
       navigate("/login?created=1", { replace: true });
-    } catch (err: any) { setError(err.message || "Erro ao criar organização."); } finally { setLoading(false); }
+    } catch (err: any) { setError(mapError(err, "Erro ao criar organização.")); } finally { setLoading(false); }
   };
 
   return (

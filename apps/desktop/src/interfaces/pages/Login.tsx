@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuthStore } from "../stores/authStore";
 import { api, sync } from "../../infrastructure/di/container";
+import { mapError } from "../../shared/errors/mapError";
 import { Eye, EyeOff, FileText, Lock, LogIn, Mail } from "lucide-react";
 
 export default function Login() {
@@ -22,7 +23,7 @@ export default function Login() {
       login(res.data.token, res.data.user);
       await sync.setCredentials(res.data.token);
       navigate("/");
-    } catch (err: any) { setError(err.message || "Credenciais inválidas"); } finally { setLoading(false); }
+    } catch (err: any) { setError(mapError(err, "Credenciais inválidas")); } finally { setLoading(false); }
   };
 
   return (

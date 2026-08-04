@@ -1,6 +1,8 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { api } from "../../infrastructure/di/container";
-import { PageHeader, Modal, StatusChip, EmptyState, Pagination } from "../components/docid-ui";
+import { PageHeader, Modal, StatusChip, EmptyState, Pagination, OfflineNotice } from "../components/docid-ui";
+import { useOfflineCache } from "../hooks/useOfflineCache";
+import { mapError } from "../../shared/errors/mapError";
 import { UsersIcon, Search, Plus, Shield, RefreshCw } from "lucide-react";
 
 interface UserRow { id: string; email: string; fullName: string; isActive: boolean; sectorId: string | null; sectorName: string | null; roles: { id: string; name: string }[]; createdAt: string; }
@@ -9,32 +11,29 @@ interface Sector { id: string; name: string; }
 export default function Users() {
   const [rows, setRows] = useState<UserRow[]>([]);
   const [meta, setMeta] = useState({ total: 0, page: 1, limit: 20 });
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [sectorFilter, setSectorFilter] = useState("");
   const [sectors, setSectors] = useState<Sector[]>([]);
   const [showCreate, setShowCreate] = useState(false);
   const [selected, setSelected] = useState<UserRow | null>(null);
 
-  const load = useCallback(async (page = 1) => {
-    setLoading(true); setError("");
-    try {
-      const params = new URLSearchParams({ page: String(page), limit: "20" });
-      if (sectorFilter) params.set("sectorId", sectorFilter);
-      const res = await api.get<{ data: UserRow[]; meta: { total: number; page: number; limit: number } }>(`/users?${params}`);
-      setRows(res.data || []);
-      setMeta(res.meta || { total: 0, page: 1, limit: 20 });
-    } catch (err: any) { setError(err.message || "Erro ao carregar utilizadores."); }
-    finally { setLoading(false); }
-  }, [sectorFilter]);
+  const listParams = sectorFilter ? `page=1&limit=20&sectorId=${encodeURIComponent(sectorFilter)}` : "page=1&limit=20";
 
-  const loadSectors = useCallback(async () => {
+  const { loading, error, isStale, cachedAt, refresh } = useOfflineCache<{ data: UserRow[]; meta: { total: number; page: number; limit: number } }>({
+    endpoint: "/users",
+    params: listParams,
+    fetcher: async () => {
+      const res = await api.get<{ data: UserRow[]; meta: { total: number; page: number; limit: number } }>(`/users?${listParams}`);
+      return { data: res.data || [], meta: res.meta || { total: 0, page: 1, limit: 20 } };
+    },
+    onData: result => { setRows(result.data); setMeta(result.meta); },
+  });
+
+  const loadSectors = async () => {
     try { const res = await api.get<{ data: Sector[] }>("/sectors"); setSectors(res.data || []); } catch {}
-  }, []);
+  };
 
-  useEffect(() => { loadSectors(); }, [loadSectors]);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { loadSectors(); }, []);
 
   const filtered = rows.filter(r => !search || r.fullName.toLowerCase().includes(search.toLowerCase()) || r.email.toLowerCase().includes(search.toLowerCase()));
 
@@ -42,6 +41,7 @@ export default function Users() {
     <div>
       <PageHeader title="Utilizadores" description="Gerir contas de utilizador da organização" actions={<button onClick={() => setShowCreate(true)} className="docid-button-primary"><Plus className="h-4 w-4" /> Criar utilizador</button>} />
       {error && <div className="mb-4 rounded-lg border border-docid-error/30 bg-docid-error/10 p-3 text-sm text-docid-error">{error}</div>}
+      {isStale && <OfflineNotice cachedAt={cachedAt} onRetry={refresh} />}
       <div className="mb-4 flex items-center gap-3">
         <div className="relative flex-1 max-w-xs"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-docid-outline" /><input value={search} onChange={e => setSearch(e.target.value)} className="docid-input w-full pl-9" placeholder="Pesquisar utilizador..." /></div>
         <select value={sectorFilter} onChange={e => setSectorFilter(e.target.value)} className="docid-input w-48 text-sm"><option value="">Todos os sectores</option>{sectors.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
@@ -69,8 +69,8 @@ export default function Users() {
         )}
         <Pagination totalLabel={`${meta?.total ?? 0} utilizador(es)`} />
       </div>
-      {showCreate && <CreateUserModal sectors={sectors} onClose={() => setShowCreate(false)} onDone={() => { setShowCreate(false); load(); }} />}
-      {selected && <DetailUserModal user={selected} sectors={sectors} onClose={() => setSelected(null)} onDone={() => { setSelected(null); load(); }} />}
+      {showCreate && <CreateUserModal sectors={sectors} onClose={() => setShowCreate(false)} onDone={() => { setShowCreate(false); refresh(); }} />}
+      {selected && <DetailUserModal user={selected} sectors={sectors} onClose={() => setSelected(null)} onDone={() => { setSelected(null); refresh(); }} />}
     </div>
   );
 }
@@ -89,7 +89,7 @@ function CreateUserModal({ sectors, onClose, onDone }: { sectors: Sector[]; onCl
     try {
       await api.post("/users", { fullName: fullName.trim(), email: email.trim(), password, sectorId: sectorId || undefined });
       onDone();
-    } catch (err: any) { setError(err.message || "Erro ao criar utilizador."); } finally { setLoading(false); }
+    } catch (err: any) { setError(mapError(err, "Erro ao criar utilizador.")); } finally { setLoading(false); }
   };
 
   return (
@@ -122,13 +122,13 @@ function DetailUserModal({ user, sectors, onClose, onDone }: { user: UserRow; se
         await api.patch(`/users/${user.id}/sector`, { sectorId: sectorId || null });
       }
       onDone();
-    } catch (err: any) { setError(err.message || "Erro ao actualizar utilizador."); } finally { setLoading(false); }
+    } catch (err: any) { setError(mapError(err, "Erro ao actualizar utilizador.")); } finally { setLoading(false); }
   };
 
   const handleDeactivate = async () => {
     if (!confirm("Tem a certeza que deseja desactivar este utilizador?")) return;
     setLoading(true);
-    try { await api.delete(`/users/${user.id}`); onDone(); } catch (err: any) { setError(err.message); setLoading(false); }
+    try { await api.delete(`/users/${user.id}`); onDone(); } catch (err: any) { setError(mapError(err, "Erro ao desactivar utilizador.")); setLoading(false); }
   };
 
   return (

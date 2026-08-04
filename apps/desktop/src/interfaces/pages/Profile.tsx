@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useAuthStore } from "../stores/authStore";
 import { useAppConfigStore } from "../stores/configStore";
 import { api } from "../../infrastructure/di/container";
+import { mapError } from "../../shared/errors/mapError";
 import { PageHeader } from "../components/docid-ui";
 import { User, Lock, Save, Sun, Moon } from "lucide-react";
 
@@ -25,7 +26,7 @@ export default function Profile() {
     try {
       await api.patch("/auth/me", { fullName: fullName.trim() });
       setSaveMsg("Nome actualizado.");
-    } catch (err: any) { setSaveMsg(err.message || "Erro ao actualizar."); } finally { setSaving(false); }
+    } catch (err: any) { setSaveMsg(mapError(err, "Erro ao actualizar.")); } finally { setSaving(false); }
   };
 
   const handleChangePassword = async (e: React.FormEvent) => {
@@ -38,7 +39,7 @@ export default function Profile() {
       await api.patch("/auth/me/password", { currentPassword, newPassword });
       setPwSuccess("Password alterada com sucesso.");
       setCurrentPassword(""); setNewPassword(""); setConfirmPassword("");
-    } catch (err: any) { setPwError(err.message || "Erro ao alterar password."); } finally { setPwLoading(false); }
+    } catch (err: any) { setPwError(mapError(err, "Erro ao alterar password.")); } finally { setPwLoading(false); }
   };
 
   if (!user) return <div className="flex items-center justify-center py-16 text-sm text-docid-muted">A carregar perfil...</div>;
