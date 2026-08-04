@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { api } from "../../infrastructure/di/container";
 import { PageHeader, Modal, EmptyState, Pagination, OfflineNotice } from "../components/docid-ui";
 import { useOfflineCache } from "../hooks/useOfflineCache";
+import { useCachedAux } from "../hooks/useCachedAux";
 import { History, Search, Filter, ChevronDown, ChevronRight, User, Globe, Clock, Tag, Fingerprint, HardDrive, Info } from "lucide-react";
 
 interface AuditLog {
@@ -73,18 +74,24 @@ export default function Audit() {
   const [sectorMap, setSectorMap] = useState<Record<string, string>>({});
   const [userMap, setUserMap] = useState<Record<string, string>>({});
 
+  const fetchAux = useCachedAux();
+
   useEffect(() => {
-    api.get<{ data: Sector[] }>("/sectors").then(r => {
-      const m: Record<string, string> = {};
-      (r.data || []).forEach(s => { m[s.id] = s.name; });
-      setSectorMap(m);
-    }).catch(() => {});
-    api.get<{ data: User[] }>("/users").then(r => {
-      const m: Record<string, string> = {};
-      (r.data || []).forEach(u => { m[u.id] = u.fullName; });
-      setUserMap(m);
-    }).catch(() => {});
-  }, []);
+    (async () => {
+      const sectors = await fetchAux<Sector[]>("/sectors");
+      if (sectors) {
+        const m: Record<string, string> = {};
+        sectors.forEach(s => { m[s.id] = s.name; });
+        setSectorMap(m);
+      }
+      const users = await fetchAux<User[]>("/users");
+      if (users) {
+        const m: Record<string, string> = {};
+        users.forEach(u => { m[u.id] = u.fullName; });
+        setUserMap(m);
+      }
+    })();
+  }, [fetchAux]);
 
   const listParams = (() => {
     const p = new URLSearchParams({ page: "1", limit: "50" });

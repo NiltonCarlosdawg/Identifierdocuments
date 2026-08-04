@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { api } from "../../infrastructure/di/container";
 import { PageHeader, Modal, StatusChip, EmptyState, Pagination, OfflineNotice } from "../components/docid-ui";
 import { useOfflineCache } from "../hooks/useOfflineCache";
+import { useCachedAux } from "../hooks/useCachedAux";
 import { mapError } from "../../shared/errors/mapError";
 import { Search, Plus, Users, Pencil, Trash2 } from "lucide-react";
 
@@ -27,12 +28,14 @@ export default function Sectors() {
 
   const filtered = rows.filter(r => !search || r.name.toLowerCase().includes(search.toLowerCase()) || r.code.toLowerCase().includes(search.toLowerCase()));
 
+  const fetchAux = useCachedAux();
+
   const handleViewMembers = async (sector: SectorRow) => {
-    try {
-      const res = await api.get<{ data: User[] }>(`/sectors/${sector.id}/members`);
-      setMembers(res.data || []);
+    const members = await fetchAux<User[]>(`/sectors/${sector.id}/members`, sector.id);
+    if (members) {
+      setMembers(members);
       setShowMembers(sector);
-    } catch {}
+    }
   };
 
   return (
@@ -110,15 +113,15 @@ function EditSectorModal({ sector, onClose, onDone }: { sector: SectorRow; onClo
   const [memberLoading, setMemberLoading] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const fetchAux = useCachedAux();
 
   useEffect(() => {
     (async () => {
-      try {
-        const res = await api.get<{ data: User[] }>(`/sectors/${sector.id}/members`);
-        setMembers(res.data || []);
-      } catch {} finally { setMemberLoading(false); }
+      const members = await fetchAux<User[]>(`/sectors/${sector.id}/members`, sector.id);
+      if (members) setMembers(members);
+      setMemberLoading(false);
     })();
-  }, [sector.id]);
+  }, [fetchAux, sector.id]);
 
   const handleSave = async () => {
     if (!name.trim() || !code.trim()) return;

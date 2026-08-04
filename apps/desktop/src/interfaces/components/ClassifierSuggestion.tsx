@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { api } from "../../infrastructure/di/container";
 import { useClassifier } from "../hooks/useClassifier";
+import { useOfflineCache } from "../hooks/useOfflineCache";
 import type { ClassifierResult } from "../hooks/useClassifier";
 import { Sparkles, Check, X, RefreshCw, Brain } from "lucide-react";
 
@@ -34,11 +35,16 @@ export default function ClassifierSuggestion({ text, filename, onSelect, onCance
     }
   }, [data, onClassified]);
 
-  useEffect(() => {
-    api.get<{ data: { groups: Record<string, Category[]> } }>("/categories")
-      .then(r => { const all: Category[] = []; for (const g of Object.values(r.data?.groups || {})) all.push(...g); setCategories(all); })
-      .catch(() => {});
-  }, []);
+  useOfflineCache<Category[]>({
+    endpoint: "/categories",
+    fetcher: async () => {
+      const res = await api.get<{ data: { groups: Record<string, Category[]> } }>("/categories");
+      const all: Category[] = [];
+      for (const g of Object.values(res.data?.groups || {})) all.push(...g);
+      return all;
+    },
+    onData: setCategories,
+  });
 
   const handleRetry = useCallback(() => { classify(text, filename); }, [classify, text, filename]);
 

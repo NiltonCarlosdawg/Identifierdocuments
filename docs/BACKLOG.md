@@ -522,12 +522,38 @@ aplicadas posteriormente a itens aqui marcados como completos)*
 - [ ] **P1** Verificação manual em runtime: offline anexar enfileira; online
   envia automaticamente (flush no `run_sync_cycle`) e sai da fila
 
-### Fora de âmbito (Fases 2–4 do plano — trabalho futuro)
-- [ ] **P2** Fase 2: cache de endpoints auxiliares (`/categories`, `/sectors/:id/members`, dropdowns)
+### Fora de âmbito (Fases 3–4 do plano — trabalho futuro)
 - [ ] **P2** Fase 3: download offline de documentos (cache de ficheiros em disco)
 - [ ] **P2** Fase 4: fila de escritas offline (idempotência, ordem, conflitos)
 
 
+---
+
+## FASE 10 — Cache de Endpoints Auxiliares *(Fase 2 do plano offline)*
+> **Objectivo:** estender a cache offline de leitura (Fase 7) aos endpoints
+> auxiliares que ainda a não usavam — `/categories`, `/sectors/:id/members` e
+> os dropdowns de sectores/utilizadores. Offline, dropdowns e listagens
+> auxiliares mostram dados em cache em vez de vazios.
+
+### 10.1 — TTLs e infra de cache
+- [x] **P0** `CACHE_TTLS` (`OfflineCache.ts`): novas entradas `/categories` (1h) e
+  `/sectors/:id/members` (1h)
+- [x] **P0** `ttlFor` com match dinâmico: padrões com `:id` (ex. `/sectors/:id/members`)
+  casam com endpoints concretos (`/sectors/abc/members`)
+
+### 10.2 — `/categories` via `useOfflineCache`
+- [x] **P0** `Identifiers.tsx`: carga de categorias passa a `useOfflineCache` (mantém o
+  invoke `cache_categories` no fetcher — belt & suspenders da Fase 8)
+- [x] **P0** `ClassifierSuggestion.tsx`: dropdown manual de categorias com fallback de cache
+
+### 10.3 — Dropdowns e listagens auxiliares
+- [x] **P0** Novo hook `useCachedAux` (fetch + `offlineCache.set` no sucesso; fallback
+  `offlineCache.get` em falha; contexto do `authStore`)
+- [x] **P0** `Sectors.tsx`: `/sectors/:id/members` com cache (detalhe de membros + edição de sector)
+- [x] **P0** `Users.tsx`: `/sectors` do filtro com cache
+- [x] **P0** `Audit.tsx`: `/sectors` + `/users` dos maps de nomes com cache
+- [x] **P0** `ShareDocumentModal.tsx`: `/sectors` + `/users` dos dropdowns com cache
+- [ ] **P1** Verificação manual em runtime: offline dropdowns e membros mostram dados em cache
 
 ---
 
@@ -571,6 +597,7 @@ aplicadas posteriormente a itens aqui marcados como completos)*
 | **7** | Cache offline de leitura | ✅ Completo — `OfflineCache` encriptado (AES-GCM), hook nas 8 páginas, `mapError`, limpeza no logout; resolve o P0 de ecrãs vazios offline |
 | **8** | Seed offline da geração de identificadores | ✅ Completo — lacuna corrigida: caches (categorias/tenant) e leases semeados no ciclo de sync + `ensure_offline_lease`/`cache_categories` no frontend; verificação manual em runtime pendente |
 | **9** | Upload offline ligado à UI | ✅ Completo — `isNetworkError`, `enqueueFromPath`, fallback de rede no `UploadModal` do Documents; verificação manual em runtime pendente |
+| **10** | Cache de endpoints auxiliares | ✅ Completo — TTLs `/categories` + `/sectors/:id/members` (match dinâmico), `useCachedAux`, dropdowns/maps de sectores/utilizadores com fallback de cache; verificação manual em runtime pendente |
 
 > Consultar `README.md` para visão geral do produto e arquitectura; este
 > ficheiro é o documento vivo de estado por fase.

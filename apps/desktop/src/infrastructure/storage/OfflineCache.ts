@@ -19,6 +19,8 @@ export const CACHE_TTLS: Record<string, number> = {
   "/tenants/me": 24 * 60 * 60 * 1000,
   "/devices": 60 * 60 * 1000,
   "/auth/me": 60 * 60 * 1000,
+  "/categories": 60 * 60 * 1000,
+  "/sectors/:id/members": 60 * 60 * 1000,
 };
 
 const isTauri = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -70,7 +72,13 @@ export class OfflineCache {
   constructor(private readonly ttlByEndpoint: Record<string, number> = {}) {}
 
   private ttlFor(endpoint: string): number {
-    return this.ttlByEndpoint[endpoint] ?? DEFAULT_TTL_MS;
+    if (this.ttlByEndpoint[endpoint] != null) return this.ttlByEndpoint[endpoint];
+    for (const [pattern, ttl] of Object.entries(this.ttlByEndpoint)) {
+      if (!pattern.includes(":")) continue;
+      const segments = pattern.split("/").map(s => (s.startsWith(":") ? "[^/]+" : s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+      if (new RegExp(`^${segments.join("/")}$`).test(endpoint)) return ttl;
+    }
+    return DEFAULT_TTL_MS;
   }
 
   private keyFor(context: CacheContext, endpoint: string, params?: string): string {

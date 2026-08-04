@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../../infrastructure/di/container";
 import { Modal } from "./docid-ui";
+import { useCachedAux } from "../hooks/useCachedAux";
 
 interface Props { identifier: string; onClose: () => void; onShared: () => void; }
 
@@ -12,8 +13,12 @@ export default function ShareDocumentModal({ identifier, onClose, onShared }: Pr
   const [userId, setUserId] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const fetchAux = useCachedAux();
 
-  useEffect(() => { api.get<any>("/sectors").then(r => setSectors(r.data || [])); api.get<any>("/users").then(r => setUsers(r.data || [])); }, []);
+  useEffect(() => {
+    fetchAux<any[]>("/sectors").then(d => { if (d) setSectors(d); });
+    fetchAux<any[]>("/users").then(d => { if (d) setUsers(d); });
+  }, [fetchAux]);
 
   const handleShare = async () => {
     setError(""); setLoading(true);

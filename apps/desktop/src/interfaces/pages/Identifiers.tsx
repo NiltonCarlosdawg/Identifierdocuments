@@ -43,21 +43,22 @@ export default function Identifiers() {
     onData: result => { setRows(result.data); setMeta(result.meta); },
   });
 
-  useEffect(() => {
-    api.get<{ data: { groups: Record<string, Category[]> } }>("/categories")
-      .then(async r => {
-        const all: Category[] = [];
-        for (const g of Object.values(r.data?.groups || {})) all.push(...g);
-        setCategories(all);
-        if (sync.isAvailable()) {
-          try {
-            const { invoke } = await import("@tauri-apps/api/core");
-            await invoke("cache_categories", { categories: all.map(c => ({ category_id: c.id, prefix: c.prefix, requires_sequential: c.requiresSequential })) });
-          } catch { /* best effort — o sync também sementeia */ }
-        }
-      })
-      .catch(() => {});
-  }, []);
+  useOfflineCache<Category[]>({
+    endpoint: "/categories",
+    fetcher: async () => {
+      const res = await api.get<{ data: { groups: Record<string, Category[]> } }>("/categories");
+      const all: Category[] = [];
+      for (const g of Object.values(res.data?.groups || {})) all.push(...g);
+      if (sync.isAvailable()) {
+        try {
+          const { invoke } = await import("@tauri-apps/api/core");
+          await invoke("cache_categories", { categories: all.map(c => ({ category_id: c.id, prefix: c.prefix, requires_sequential: c.requiresSequential })) });
+        } catch { /* best effort — o sync também sementeia */ }
+      }
+      return all;
+    },
+    onData: setCategories,
+  });
 
   return (
     <div>

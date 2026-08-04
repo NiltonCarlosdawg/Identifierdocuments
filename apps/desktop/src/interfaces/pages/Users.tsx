@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { api } from "../../infrastructure/di/container";
 import { PageHeader, Modal, StatusChip, EmptyState, Pagination, OfflineNotice } from "../components/docid-ui";
 import { useOfflineCache } from "../hooks/useOfflineCache";
+import { useCachedAux } from "../hooks/useCachedAux";
 import { mapError } from "../../shared/errors/mapError";
 import { UsersIcon, Search, Plus, Shield, RefreshCw } from "lucide-react";
 
@@ -29,11 +30,14 @@ export default function Users() {
     onData: result => { setRows(result.data); setMeta(result.meta); },
   });
 
-  const loadSectors = async () => {
-    try { const res = await api.get<{ data: Sector[] }>("/sectors"); setSectors(res.data || []); } catch {}
-  };
+  const fetchAux = useCachedAux();
 
-  useEffect(() => { loadSectors(); }, []);
+  useEffect(() => {
+    (async () => {
+      const sectors = await fetchAux<Sector[]>("/sectors");
+      if (sectors) setSectors(sectors);
+    })();
+  }, [fetchAux]);
 
   const filtered = rows.filter(r => !search || r.fullName.toLowerCase().includes(search.toLowerCase()) || r.email.toLowerCase().includes(search.toLowerCase()));
 
