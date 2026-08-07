@@ -5,6 +5,7 @@ import { pendingCount, useQueueStore } from "../stores/queueStore";
 import { useAuthStore } from "../stores/authStore";
 import { CloudOff, RefreshCw, Trash2, RotateCcw, X, Upload, AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
 import { SyncStatusLabels, SyncStatusColors } from "../../domain/value-objects/SyncStatus";
+import { sendNativeNotification } from "../../shared/helpers/notifications";
 
 export default function OfflineQueuePanel() {
   const { items, online, panelOpen, setPanelOpen, refresh, loadQueue } = useQueueStore();
@@ -70,7 +71,7 @@ export function OfflineQueueBadge() {
     const interval = setInterval(refresh, 10000);
     let unlisten: (() => void) | undefined;
     if (sync.isAvailable()) {
-      listen<{ uploaded: number }>("sync:complete", e => { refresh(); if (e.payload.uploaded > 0) { setSyncToast(`${e.payload.uploaded} sincronizado(s)`); setTimeout(() => setSyncToast(null), 4000); } }).then(fn => { unlisten = fn; });
+      listen<{ uploaded: number }>("sync:complete", e => { refresh(); if (e.payload.uploaded > 0) { setSyncToast(`${e.payload.uploaded} sincronizado(s)`); setTimeout(() => setSyncToast(null), 4000); sendNativeNotification("Sincronização concluída", `${e.payload.uploaded} documento(s) enviado(s) para o servidor.`); } }).then(fn => { unlisten = fn; });
     }
     return () => { clearInterval(interval); unlisten?.(); };
   }, [refresh]);

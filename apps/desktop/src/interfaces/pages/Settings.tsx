@@ -6,6 +6,7 @@ import { PageHeader, OfflineNotice } from "../components/docid-ui";
 import { useOfflineCache } from "../hooks/useOfflineCache";
 import { mapError } from "../../shared/errors/mapError";
 import { sync, api } from "../../infrastructure/di/container";
+import { sendNativeNotification } from "../../shared/helpers/notifications";
 import { Server, Sun, Moon, Save, RotateCcw, FolderPlus, Trash2, Play, Square, Eye, RefreshCw, Building2, Bell, Download, Smartphone, AlertTriangle } from "lucide-react";
 
 export default function Settings() {
@@ -547,8 +548,16 @@ function WatcherTab() {
     (async () => {
       if (typeof window !== "undefined" && !("__TAURI_INTERNALS__" in window)) return;
       const { listen } = await import("@tauri-apps/api/event");
-      const f1 = await listen("watcher:file_detected", () => bumpDetected());
-      const f2 = await listen("watcher:identifier_found", () => bumpDetected());
+      const f1 = await listen("watcher:file_detected", (e) => {
+        bumpDetected();
+        const p = e.payload as { path?: string };
+        sendNativeNotification("Documento detectado", `Ficheiro novo em ${p?.path ?? "pasta vigiada"}`);
+      });
+      const f2 = await listen("watcher:identifier_found", (e) => {
+        bumpDetected();
+        const p = e.payload as { path?: string; identifier?: string };
+        sendNativeNotification("Identificador encontrado", `O documento ${p?.path ?? ""} contém ${p?.identifier ?? "um identificador"}`);
+      });
       unlisteners = [f1, f2];
     })();
     return () => unlisteners.forEach(f => f());

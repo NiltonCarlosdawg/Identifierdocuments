@@ -121,7 +121,9 @@ aplicadas posteriormente a itens aqui marcados como completos)*
 - [x] **P0** Configurar `tauri-plugin-sql` (SQLite local)
 - [x] **P0** Configurar `tauri-plugin-fs`
 - [x] **P1** Configurar `@tauri-apps/plugin-dialog` *(diálogo nativo de ficheiro/pasta, necessário para upload nativo e watcher)*
-- [ ] **P1** Configurar `tauri-plugin-notification`
+- [x] **P1** Configurar `tauri-plugin-notification` — plugin registado (Rust +
+  capability `notification:default`) e notificações nativas nos eventos do
+  watcher e na conclusão da sincronização (`shared/helpers/notifications.ts`)
 - [ ] **P1** Configurar `tauri-plugin-updater`
 
 ### 2.2 — Autenticação (UI)
@@ -661,7 +663,9 @@ aplicadas posteriormente a itens aqui marcados como completos)*
   Fase 7 (leitura com dados em cache)
 - [x] **P1** Sanitização de nomes de ficheiro no upload (path traversal) —
   também aplicado ao `attach_document_native` (Rust)
-- [ ] **P1** Logs estruturados na API (pino ou similar)
+- [x] **P1** Logs estruturados na API (pino) — `lib/logger.ts`, logs de request
+  (método/path/status/duração) e de erro estruturados JSON, com redacção de
+  segredos; roda em dev com `LOG_LEVEL`, desactivado em testes
 - [x] **P1** Health check endpoint `GET /health`
 - [x] **P2** Documentação OpenAPI actualizada
 - [x] **P2** Script de seed para dados de demonstração
