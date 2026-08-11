@@ -9,17 +9,19 @@ interface AppConfigState {
   apiBaseUrl: string;
   theme: Theme;
   avatar: string | null;
+  defaultScanner: string | null;
   setApiBaseUrl: (url: string) => void;
   resetApiBaseUrl: () => void;
   setTheme: (theme: Theme) => void;
   toggleTheme: () => void;
   setAvatar: (avatar: string | null) => void;
+  setDefaultScanner: (name: string | null) => void;
 }
 
 export const useAppConfigStore = create<AppConfigState>()(
   persist(
     (set, get) => ({
-      apiBaseUrl: DEFAULT_API_URL, theme: "dark", avatar: null,
+      apiBaseUrl: DEFAULT_API_URL, theme: "dark", avatar: null, defaultScanner: null,
       setApiBaseUrl: (url) => {
         const clean = url.trim().replace(/\/$/, "");
         if (!clean.startsWith("http://") && !clean.startsWith("https://")) return;
@@ -30,6 +32,7 @@ export const useAppConfigStore = create<AppConfigState>()(
       setTheme: (theme) => { set({ theme }); document.documentElement.classList.toggle("dark", theme === "dark"); },
       toggleTheme: () => get().setTheme(get().theme === "dark" ? "light" : "dark"),
       setAvatar: (avatar) => set({ avatar }),
+      setDefaultScanner: (name) => set({ defaultScanner: name }),
     }),
     { name: "docid-config", storage: tauriJsonStorage },
   ),

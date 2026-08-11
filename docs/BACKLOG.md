@@ -260,9 +260,9 @@ aplicadas posteriormente a itens aqui marcados como completos)*
 - [x] **P1** Perfil do utilizador (`Profile.tsx`)
 - [x] **P1** Configurações da organização (nome, prefixo, slug/plano read-only)
 - [x] **P1** Configuração de pastas monitoradas
-- [ ] **P1** Configuração de scanner padrão (persistido) — a página Scanner
-  permite escolher dispositivo por sessão, mas não guarda uma preferência
-  por defeito
+- [x] **P1** Configuração de scanner padrão (persistido) — o scanner escolhido na
+  página Scanner fica persistido em `docid-config` (configStore) e reutilizado
+  como predefinição; selector também disponível em Configurações → Dispositivos
 - [x] **P2** Configuração de notificações — 5 toggles (`PATCH
   /auth/me/notifications-preferences`)
 - [x] **P2** Exportar dados da organização — auditoria (CSV, streaming) e

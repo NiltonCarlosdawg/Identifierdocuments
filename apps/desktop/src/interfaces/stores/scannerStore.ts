@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { scanner } from "../../infrastructure/di/container";
+import { useAppConfigStore } from "./configStore";
 import type { ScannerDevice, ScanOptions } from "../../domain/entities/Scanner";
 
 interface ScannerState {
@@ -28,13 +29,18 @@ export const useScannerStore = create<ScannerState>((set, get) => ({
     set({ error: null });
     try {
       const devices = await scanner.listScanners();
-      set({ devices, selectedDevice: devices[0]?.name ?? null });
+      const preferred = useAppConfigStore.getState().defaultScanner;
+      const exists = preferred && devices.some((d) => d.name === preferred);
+      set({ devices, selectedDevice: exists ? preferred : (devices[0]?.name ?? null) });
     } catch (err: any) {
       set({ error: err.message || "Erro ao listar scanners." });
     }
   },
 
-  selectDevice: (name) => set({ selectedDevice: name }),
+  selectDevice: (name) => {
+    set({ selectedDevice: name });
+    useAppConfigStore.getState().setDefaultScanner(name);
+  },
 
   setOptions: (opts) => set((s) => ({ options: { ...s.options, ...opts } })),
 

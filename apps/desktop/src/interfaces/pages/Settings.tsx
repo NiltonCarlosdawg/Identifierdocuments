@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useAuthStore } from "../stores/authStore";
 import { useAppConfigStore } from "../stores/configStore";
 import { useWatcherStore } from "../stores/watcherStore";
+import { useScannerStore } from "../stores/scannerStore";
 import { PageHeader, OfflineNotice } from "../components/docid-ui";
 import { useOfflineCache } from "../hooks/useOfflineCache";
 import { mapError } from "../../shared/errors/mapError";
@@ -291,6 +292,19 @@ function DevicesTab() {
 
   useEffect(() => { reloadLeases(); }, [isTauri]);
 
+  const scannerDevices = useScannerStore(s => s.devices);
+  const defaultScanner = useScannerStore(s => s.selectedDevice);
+  const loadScanners = useScannerStore(s => s.loadDevices);
+  const selectScanner = useScannerStore(s => s.selectDevice);
+  const [scannerLoaded, setScannerLoaded] = useState(false);
+
+  useEffect(() => {
+    if (isTauri && !scannerLoaded) {
+      loadScanners();
+      setScannerLoaded(true);
+    }
+  }, [isTauri, scannerLoaded, loadScanners]);
+
   const calcUsage = (lease: LeaseRow) => {
     const total = lease.end_seq - lease.start_seq + 1;
     const used = Math.min(lease.next_to_use - lease.start_seq, total);
@@ -404,6 +418,29 @@ function DevicesTab() {
 
       {isTauri && (
         <>
+          <div className="docid-panel p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-docid-text">Scanner Predefinido</h3>
+              <button onClick={loadScanners} className="docid-button-secondary text-xs" disabled={scannerDevices.length === 0}>
+                <RefreshCw className="h-3 w-3" /> Actualizar
+              </button>
+            </div>
+            {scannerDevices.length === 0 ? (
+              <div className="flex flex-col items-center gap-3 py-6 text-center">
+                <Smartphone className="h-8 w-8 text-docid-outline" />
+                <p className="text-sm text-docid-muted">Nenhum scanner encontrado.</p>
+                <button onClick={loadScanners} className="docid-button-secondary text-xs"><RefreshCw className="h-3 w-3" /> Procurar scanners</button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-xs text-docid-muted">Scanner usado por omissão na página Digitalizar.</p>
+                <select value={defaultScanner || ""} onChange={e => selectScanner(e.target.value)} className="docid-input w-full text-sm">
+                  {scannerDevices.map(d => <option key={d.name} value={d.name}>{d.name}</option>)}
+                </select>
+              </div>
+            )}
+          </div>
+
           <div className="docid-panel p-6 space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold text-docid-text">Leases Locais</h3>
