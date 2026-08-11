@@ -420,6 +420,8 @@ function DetailModal({ row, onClose, onCancelled }: { row: IdentifierRow; onClos
         </div>
         {row.document && <div className="rounded-lg border border-docid-border bg-docid-surface-low p-3"><p className="text-xs text-docid-muted mb-1">Documento associado</p><p className="text-sm font-medium">{row.document.filename}</p></div>}
 
+        <HistorySection identifierId={row.id} />
+
         {showCancel && (
           <div className="rounded-lg border border-docid-error/30 bg-docid-error/10 p-4 space-y-3">
             <p className="text-sm font-medium text-docid-error">Cancelar identificador</p>
@@ -430,5 +432,76 @@ function DetailModal({ row, onClose, onCancelled }: { row: IdentifierRow; onClos
         )}
       </div>
     </Modal>
+  );
+}
+
+interface HistoryEvent { id: string; action: string; resource: string; resourceId: string; metadata: string | null; ip: string | null; createdAt: string; userName: string | null; }
+
+const ACTION_LABELS: Record<string, string> = {
+  GENERATE: "Identificador gerado",
+  QUERY: "Consultado",
+  CANCEL: "Cancelado",
+  ATTACH: "Documento associado",
+  SHARE: "Partilhado",
+  APPROVE: "Aprovação",
+};
+
+function HistorySection({ identifierId }: { identifierId: string }) {
+  const [events, setEvents] = useState<HistoryEvent[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true); setError(null);
+      try {
+        const res = await api.get<{ data: HistoryEvent[] }>(`/audit?resource=identifiers&resourceId=${encodeURIComponent(identifierId)}&limit=20`);
+        if (!cancelled) setEvents(res.data || []);
+      } catch (err: any) {
+        if (!cancelled) setError(err.message || "Erro ao carregar histórico.");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [identifierId]);
+
+  const formatMetadata = (action: string, metadata: string | null): string | null => {
+    if (!metadata) return null;
+    try {
+      const m = JSON.parse(metadata);
+      if (action === "CANCEL" && m.reason) return `Motivo: ${m.reason}`;
+      if (action === "GENERATE" && m.identifier) return m.identifier;
+      return null;
+    } catch { return null; }
+  };
+
+  return (
+    <div className="space-y-3">
+      <h4 className="text-sm font-semibold text-docid-text">Histórico de eventos</h4>
+      {loading ? (
+        <p className="text-xs text-docid-muted">A carregar histórico...</p>
+      ) : error ? (
+        <p className="text-xs text-docid-error">{error}</p>
+      ) : events.length === 0 ? (
+        <p className="text-xs text-docid-muted">Sem eventos registados.</p>
+      ) : (
+        <ol className="space-y-3 border-l border-docid-border pl-4">
+          {events.map(ev => (
+            <li key={ev.id} className="relative">
+              <span className="absolute -left-[21px] top-1 h-2.5 w-2.5 rounded-full border-2 border-docid-primary bg-docid-surface" />
+              <div className="flex items-baseline justify-between gap-3">
+                <p className="text-xs font-medium text-docid-text">{ACTION_LABELS[ev.action] ?? ev.action}</p>
+                <p className="shrink-0 text-[11px] text-docid-muted">{new Date(ev.createdAt).toLocaleString("pt-AO")}</p>
+              </div>
+              <p className="mt-0.5 text-[11px] text-docid-muted">
+                por {ev.userName || "—"}{formatMetadata(ev.action, ev.metadata) ? ` · ${formatMetadata(ev.action, ev.metadata)}` : ""}
+              </p>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
   );
 }

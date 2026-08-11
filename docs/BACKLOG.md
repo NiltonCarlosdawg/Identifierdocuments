@@ -152,7 +152,9 @@ aplicadas posteriormente a itens aqui marcados como completos)*
 
 ### 2.5 — Módulo Identificadores (UI)
 - [x] **P0** Todos os itens desta secção — implementados (`Identifiers.tsx`)
-- [ ] **P1** Visualização do histórico de eventos do identificador
+- [x] **P1** Visualização do histórico de eventos do identificador — filtro
+  `resourceId` em `/audit` e timeline no modal de detalhe (geração, consulta,
+  cancelamento, associação de documento)
 
 ### 2.6 — Módulo Documentos (UI)
 - [x] **P0** Listar, upload, detalhe, download — implementados (`Documents.tsx`)
