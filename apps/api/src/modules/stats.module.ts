@@ -1,7 +1,7 @@
 import { Elysia, t } from "elysia";
 import { db } from "../db";
 import { identifiers, documents, auditLogs, categories, users } from "../db/schema";
-import { eq, and, sql, isNotNull } from "drizzle-orm";
+import { eq, and, sql, isNotNull, gte } from "drizzle-orm";
 import { requireAuth, getFreshRoles } from "../middleware/auth";
 import { checkRateLimit } from "../middleware/rateLimit";
 import { withTenant } from "../db/withTenant";
@@ -32,6 +32,30 @@ export async function collectStats(tenantId: string, sectorId?: string) {
       .groupBy(categories.name)
       .orderBy(sql`count DESC`)
       .limit(10);
+
+    const since = new Date(Date.now() - 13 * 24 * 60 * 60 * 1000);
+
+    const idDaily = await tx
+      .select({ day: sql<string>`TO_CHAR(${identifiers.createdAt}, 'YYYY-MM-DD')`, cnt: sql<number>`COUNT(*)` })
+      .from(identifiers)
+      .where(and(eq(identifiers.tenantId, tenantId), gte(identifiers.createdAt, since)))
+      .groupBy(sql`TO_CHAR(${identifiers.createdAt}, 'YYYY-MM-DD')`);
+
+    const docDaily = await tx
+      .select({ day: sql<string>`TO_CHAR(${documents.createdAt}, 'YYYY-MM-DD')`, cnt: sql<number>`COUNT(*)` })
+      .from(documents)
+      .where(and(eq(documents.tenantId, tenantId), gte(documents.createdAt, since)))
+      .groupBy(sql`TO_CHAR(${documents.createdAt}, 'YYYY-MM-DD')`);
+
+    const idByDay = new Map(idDaily.map((r) => [r.day, Number(r.cnt)]));
+    const docByDay = new Map(docDaily.map((r) => [r.day, Number(r.cnt)]));
+
+    const activity: { date: string; identifiers: number; documents: number }[] = [];
+    for (let i = 13; i >= 0; i--) {
+      const d = new Date(Date.now() - i * 24 * 60 * 60 * 1000);
+      const key = d.toISOString().slice(0, 10);
+      activity.push({ date: key, identifiers: idByDay.get(key) ?? 0, documents: docByDay.get(key) ?? 0 });
+    }
 
     let totalDocs: { total: number } = { total: 0 };
     let failedAttach: { total: number } = { total: 0 };
@@ -79,6 +103,7 @@ export async function collectStats(tenantId: string, sectorId?: string) {
         total: Number(totalDocs.total),
         verificationFailures: Number(failedAttach.total),
       },
+      activity,
     };
   });
 }
@@ -98,7 +123,7 @@ export const statsModule = new Elysia({ prefix: "/stats" })
           });
           return u?.sectorId;
         });
-        if (!me) return { data: { identifiers: { total: 0, byStatus: {}, byCategory: [] }, documents: { total: 0, verificationFailures: 0 } } };
+        if (!me) return { data: { identifiers: { total: 0, byStatus: {}, byCategory: [] }, documents: { total: 0, verificationFailures: 0 }, activity: [] } };
         sectorId = me;
       }
       const stats = await collectStats(tenantId, sectorId);

@@ -16,6 +16,7 @@ interface StatsData {
     total: number;
     verificationFailures: number;
   };
+  activity?: { date: string; identifiers: number; documents: number }[];
 }
 
 interface ApprovalRow {
@@ -163,12 +164,17 @@ export default function Dashboard() {
             />
           </div>
 
+          <div className="mt-6 docid-panel p-5">
+            <h2 className="mb-1 text-sm font-semibold uppercase tracking-wider text-docid-muted">Actividade (últimos 14 dias)</h2>
+            <p className="mb-4 text-xs text-docid-muted">Identificadores gerados e documentos associados por dia.</p>
+            <ActivityChart data={stats.activity || []} />
+          </div>
+
           <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
             <div className="docid-panel p-5">
               <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-docid-muted">
                 <CloudOff className="h-4 w-4" /> Fila Offline
-              </h2>
-              <button
+              </h2>              <button
                 onClick={() => setQueuePanelOpen(true)}
                 className="flex w-full items-center justify-between rounded-lg border border-docid-border bg-docid-surface-low px-4 py-3 text-left hover:bg-docid-surface-high"
               >
@@ -302,6 +308,57 @@ export default function Dashboard() {
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+interface ActivityPoint { date: string; identifiers: number; documents: number; }
+
+const CHART_HEIGHT = 140;
+
+function ActivityChart({ data }: { data: ActivityPoint[] }) {
+  if (data.length === 0) {
+    return <p className="text-sm text-docid-muted">Sem dados de actividade.</p>;
+  }
+
+  const max = Math.max(1, ...data.map(d => Math.max(d.identifiers, d.documents)));
+  const step = CHART_HEIGHT / (max || 1);
+  const labelEvery = Math.ceil(data.length / 7);
+
+  return (
+    <div>
+      <div className="flex items-end gap-1" style={{ height: CHART_HEIGHT }}>
+        {data.map(d => {
+          const idH = Math.max(1, Math.round(d.identifiers * step));
+          const docH = Math.max(1, Math.round(d.documents * step));
+          const h = Math.max(idH, docH);
+          const key = d.date.slice(5);
+          return (
+            <div key={d.date} className="group relative flex flex-1 items-end justify-center gap-[2px]">
+              <div className="flex items-end gap-[2px]">
+                <div className="w-[4px] rounded-sm bg-docid-secondary/80 transition-all group-hover:bg-docid-secondary" style={{ height: `${idH}px` }} title={`${key}: ${d.identifiers} identificador(es)`} />
+                <div className="w-[4px] rounded-sm bg-docid-primary-soft/80 transition-all group-hover:bg-docid-primary-soft" style={{ height: `${docH}px` }} title={`${key}: ${d.documents} documento(s)`} />
+              </div>
+              {d.identifiers + d.documents > 0 && (
+                <div className="pointer-events-none absolute -top-1 left-1/2 z-10 -translate-x-1/2 -translate-y-full whitespace-nowrap rounded bg-docid-surface-highest px-1.5 py-0.5 text-[10px] text-docid-text opacity-0 shadow transition-opacity group-hover:opacity-100">
+                  {d.identifiers + d.documents}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <div className="mt-1 flex gap-1">
+        {data.map((d, i) => (
+          <div key={d.date} className="flex-1 text-center">
+            {i % labelEvery === 0 ? <span className="text-[10px] text-docid-muted">{d.date.slice(5)}</span> : null}
+          </div>
+        ))}
+      </div>
+      <div className="mt-3 flex items-center gap-4 text-xs text-docid-muted">
+        <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-docid-secondary/80" /> Identificadores</span>
+        <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-docid-primary-soft/80" /> Documentos</span>
+      </div>
     </div>
   );
 }

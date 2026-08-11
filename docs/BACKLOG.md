@@ -145,7 +145,9 @@ aplicadas posteriormente a itens aqui marcados como completos)*
 
 ### 2.4 — Dashboard
 - [x] **P0** Cards de estatísticas
-- [ ] **P1** Gráfico de actividade
+- [x] **P1** Gráfico de actividade — série temporal dos últimos 14 dias
+  (identificadores + documentos/dia) devolvida por `/stats` e renderizada como
+  bar-chart SVG no Dashboard sem dependência extra
 - [x] **P1** Lista de documentos recentes — painel com os últimos 5 (`/documents?limit=5`)
 - [x] **P1** Lista de aprovações pendentes no dashboard — painel com `/approvals?status=pending`
 - [x] **P2** Widget de fila offline no dashboard — contador de pendentes + abre o painel da fila
