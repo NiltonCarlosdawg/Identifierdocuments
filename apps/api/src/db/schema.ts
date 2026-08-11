@@ -38,6 +38,17 @@ export const users = pgTable("users", {
   uniqueIndex("users_tenant_email_idx").on(t.tenantId, t.email),
 ]);
 
+export const passwordResetTokens = pgTable("password_reset_tokens", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull().references(() => users.id),
+  tokenHash: text("token_hash").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  usedAt: timestamp("used_at", { withTimezone: true }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex("password_reset_token_hash_idx").on(t.tokenHash),
+]);
+
 export const roles = pgTable("roles", {
   id: uuid("id").primaryKey().defaultRandom(),
   tenantId: uuid("tenant_id").references(() => organizations.id),
@@ -300,6 +311,11 @@ export const userRelations = relations(users, ({ one, many }) => ({
   sharedDocuments: many(documentShares, { relationName: "sharedByShares" }),
   approvals: many(approvals),
   auditLogs: many(auditLogs),
+  passwordResetTokens: many(passwordResetTokens),
+}));
+
+export const passwordResetTokenRelations = relations(passwordResetTokens, ({ one }) => ({
+  user: one(users, { fields: [passwordResetTokens.userId], references: [users.id] }),
 }));
 
 export const auditLogRelations = relations(auditLogs, ({ one }) => ({

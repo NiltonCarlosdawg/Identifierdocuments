@@ -1,5 +1,5 @@
 import { Elysia, t } from "elysia";
-import { login, getMe, changePassword, refreshToken } from "../services/auth.service";
+import { login, getMe, changePassword, refreshToken, forgotPassword, resetPassword } from "../services/auth.service";
 import { requireAuth } from "../middleware/auth";
 import { checkRateLimit } from "../middleware/rateLimit";
 import { users } from "../db/schema";
@@ -49,6 +49,38 @@ export const authModule = new Elysia({ prefix: "/auth" })
   }, {
     body: t.Object({ token: t.String() }),
     detail: { summary: "Renovar token", tags: ["Autenticação"] },
+  })
+
+  .post("/forgot-password", async ({ body, request, set }) => {
+    const ip = request.headers.get("x-forwarded-for") || "unknown"; // TODO(security): validar/sanitizar IP; atualmente confia no header
+    const rateLimitKey = `forgot-password:${ip}:${body.email}`;
+    if (!(await checkRateLimit(rateLimitKey, 5, 15 * 60_000))) {
+      set.status = 429;
+      return { error: { code: "RATE_LIMITED", message: "Muitas tentativas. Tente novamente mais tarde." } };
+    }
+    try {
+      const result = await forgotPassword(body.email);
+      return { data: result };
+    } catch (err: any) {
+      set.status = 500;
+      return { error: { code: "INTERNAL_ERROR", message: "Ocorreu um erro ao processar o pedido." } };
+    }
+  }, {
+    body: t.Object({ email: t.String({ format: "email" }) }),
+    detail: { summary: "Pedir código de redefinição de password", tags: ["Autenticação"] },
+  })
+
+  .post("/reset-password", async ({ body, set }) => {
+    try {
+      const result = await resetPassword(body.token, body.newPassword);
+      return { data: result };
+    } catch (err: any) {
+      set.status = 400;
+      return { error: { code: "INVALID_TOKEN", message: err.message } };
+    }
+  }, {
+    body: t.Object({ token: t.String(), newPassword: t.String({ minLength: 6 }) }),
+    detail: { summary: "Repor password com código", tags: ["Autenticação"] },
   })
 
   .use(requireAuth())

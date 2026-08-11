@@ -1,8 +1,20 @@
 import { db } from "../db";
-import { users, organizations, userRoles, roles } from "../db/schema";
-import { eq, and } from "drizzle-orm";
+import { users, organizations, userRoles, roles, passwordResetTokens } from "../db/schema";
+import { eq, and, gt, isNull, sql } from "drizzle-orm";
 import { signToken, verifyTokenWithGrace } from "../middleware/auth";
 import type { AuthPayload } from "../middleware/auth";
+import { sendResetPasswordEmail } from "./mailer.service";
+import { randomBytes, createHash } from "node:crypto";
+
+const RESET_TOKEN_TTL_MS = 15 * 60 * 1000;
+
+function hashToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+function generateResetToken(): string {
+  return randomBytes(32).toString("base64url");
+}
 
 export async function login(email: string, password: string, organizationSlug?: string) {
   let whereCondition: any = eq(users.email, email);
@@ -129,4 +141,46 @@ export async function refreshToken(token: string) {
       organization: user.organization?.name ?? null,
     },
   };
+}
+
+export async function forgotPassword(email: string) {
+  const user = await db.query.users.findFirst({ where: eq(users.email, email) });
+
+  // Resposta uniforme: não revela se o email existe.
+  if (!user || !user.isActive) return { message: "Se o email existir, irá receber um código de redefinição." };
+
+  await db.delete(passwordResetTokens)
+    .where(and(eq(passwordResetTokens.userId, user.id), isNull(passwordResetTokens.usedAt)));
+
+  const token = generateResetToken();
+  await db.insert(passwordResetTokens).values({
+    userId: user.id,
+    tokenHash: hashToken(token),
+    expiresAt: new Date(Date.now() + RESET_TOKEN_TTL_MS),
+  });
+
+  await sendResetPasswordEmail(user.email, token);
+
+  return { message: "Se o email existir, irá receber um código de redefinição." };
+}
+
+export async function resetPassword(token: string, newPassword: string) {
+  const tokenHash = hashToken(token);
+  const rec = await db.query.passwordResetTokens.findFirst({
+    where: and(eq(passwordResetTokens.tokenHash, tokenHash), isNull(passwordResetTokens.usedAt), gt(passwordResetTokens.expiresAt, new Date())),
+  });
+
+  if (!rec) throw new Error("Código inválido ou expirado.");
+
+  const newHash = await Bun.password.hash(newPassword);
+
+  await db.transaction(async (tx) => {
+    await tx.update(users).set({ passwordHash: newHash }).where(eq(users.id, rec.userId));
+    await tx.update(passwordResetTokens)
+      .set({ usedAt: new Date() })
+      .where(eq(passwordResetTokens.id, rec.id));
+    await tx.execute(sql`DELETE FROM ${passwordResetTokens} WHERE user_id = ${rec.userId} AND used_at IS NULL`);
+  });
+
+  return { message: "Password reposta com sucesso." };
 }

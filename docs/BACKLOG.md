@@ -65,8 +65,8 @@ aplicadas posteriormente a itens aqui marcados como completos)*
 - [x] **P1** `GET /auth/me`
 - [x] **P1** `PATCH /auth/me/password`
 - [x] **P1** `PATCH /auth/me/notifications-preferences` *(novo — Fase 5.5)*
-- [ ] **P2** `POST /auth/forgot-password`
-- [ ] **P2** `POST /auth/reset-password`
+- [x] **P2** `POST /auth/forgot-password` *(Fase 14 — token 15min single-use, hash SHA-256, rate-limit 5/15min; SMTP via env; fallback log em dev)*
+- [x] **P2** `POST /auth/reset-password` *(Fase 14 — validação minLength 6, transacção, safeError)*
 
 ### 1.5 — Módulo Organizações (Tenants)
 - [x] **P0** `POST /tenants`
@@ -134,7 +134,7 @@ aplicadas posteriormente a itens aqui marcados como completos)*
 - [x] **P0** Logout + limpeza de sessão
 - [x] **P1** Hidratação do perfil via `GET /auth/me` no arranque *(antes só
   decodificava o JWT localmente — corrigido)*
-- [ ] **P1** Ecrã de "Esqueci a password"
+- [x] **P1** Ecrã de "Esqueci a password" *(Fase 14 — fluxo 2 passos: pedir código → código + nova password; resposta uniforme)*
 
 ### 2.3 — Layout & Navegação
 - [x] **P0** Layout principal + sidebar + header
