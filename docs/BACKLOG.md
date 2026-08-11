@@ -257,7 +257,7 @@ aplicadas posteriormente a itens aqui marcados como completos)*
   confirmação → `POST /tenants` → redirecciona para login com aviso de
   sucesso (sem auto-login, por decisão explícita)
 - [x] **P1** Ecrã de configurações da organização (`Settings` → "Organização")
-- [ ] **P2** Importar utilizadores via CSV
+- [x] **P2** Importar utilizadores via CSV *(Fase 14 — `POST /users/import` ORG_ADMIN, colunas email/full_name/sector/role, password gerada devolvida no relatório; UI em Users)*
 - [ ] **P2** Convite de membros por email (não fazia parte do fluxo simplificado)
 
 ### 5.5 — Configurações & Preferências (UI)

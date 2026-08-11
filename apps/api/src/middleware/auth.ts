@@ -3,7 +3,7 @@ import { jwtVerify } from "jose";
 import { SignJWT } from "jose";
 import { db } from "../db";
 import { userRoles, roles, users } from "../db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, or, isNull } from "drizzle-orm";
 
 const rawSecret = process.env.JWT_SECRET;
 if (!rawSecret) throw new Error("JWT_SECRET environment variable is required");
@@ -84,7 +84,10 @@ export async function getFreshRoles(userId: string, tenantId: string): Promise<s
     .innerJoin(roles, eq(userRoles.roleId, roles.id))
     .where(and(
       eq(userRoles.userId, userId),
-      eq(roles.tenantId, tenantId),
+      or(
+        eq(roles.tenantId, tenantId),
+        isNull(roles.tenantId), // roles de sistema (tenantId null) aplicam-se a todas as organizações
+      ),
     ));
   return rows.map((r) => r.roleName);
 }

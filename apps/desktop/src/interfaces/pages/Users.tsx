@@ -4,7 +4,7 @@ import { PageHeader, Modal, StatusChip, EmptyState, Pagination, OfflineNotice } 
 import { useOfflineCache } from "../hooks/useOfflineCache";
 import { useCachedAux } from "../hooks/useCachedAux";
 import { mapError } from "../../shared/errors/mapError";
-import { UsersIcon, Search, Plus, Shield, RefreshCw } from "lucide-react";
+import { UsersIcon, Search, Plus, Shield, RefreshCw, Upload, Download, CheckCircle2, AlertTriangle, Ban } from "lucide-react";
 
 interface UserRow { id: string; email: string; fullName: string; isActive: boolean; sectorId: string | null; sectorName: string | null; roles: { id: string; name: string }[]; createdAt: string; }
 interface Sector { id: string; name: string; }
@@ -16,6 +16,7 @@ export default function Users() {
   const [sectorFilter, setSectorFilter] = useState("");
   const [sectors, setSectors] = useState<Sector[]>([]);
   const [showCreate, setShowCreate] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const [selected, setSelected] = useState<UserRow | null>(null);
 
   const listParams = sectorFilter ? `page=1&limit=20&sectorId=${encodeURIComponent(sectorFilter)}` : "page=1&limit=20";
@@ -43,7 +44,7 @@ export default function Users() {
 
   return (
     <div>
-      <PageHeader title="Utilizadores" description="Gerir contas de utilizador da organização" actions={<button onClick={() => setShowCreate(true)} className="docid-button-primary"><Plus className="h-4 w-4" /> Criar utilizador</button>} />
+      <PageHeader title="Utilizadores" description="Gerir contas de utilizador da organização" actions={<div className="flex gap-2"><button onClick={() => setShowImport(true)} className="docid-button-secondary"><Upload className="h-4 w-4" /> Importar CSV</button><button onClick={() => setShowCreate(true)} className="docid-button-primary"><Plus className="h-4 w-4" /> Criar utilizador</button></div>} />
       {error && <div className="mb-4 rounded-lg border border-docid-error/30 bg-docid-error/10 p-3 text-sm text-docid-error">{error}</div>}
       {isStale && <OfflineNotice cachedAt={cachedAt} onRetry={refresh} />}
       <div className="mb-4 flex items-center gap-3">
@@ -74,6 +75,7 @@ export default function Users() {
         <Pagination totalLabel={`${meta?.total ?? 0} utilizador(es)`} />
       </div>
       {showCreate && <CreateUserModal sectors={sectors} onClose={() => setShowCreate(false)} onDone={() => { setShowCreate(false); refresh(); }} />}
+      {showImport && <ImportUsersModal onClose={() => setShowImport(false)} onDone={() => { setShowImport(false); refresh(); }} />}
       {selected && <DetailUserModal user={selected} sectors={sectors} onClose={() => setSelected(null)} onDone={() => { setSelected(null); refresh(); }} />}
     </div>
   );
@@ -157,6 +159,100 @@ function DetailUserModal({ user, sectors, onClose, onDone }: { user: UserRow; se
             <div><p className="text-xs text-docid-muted">Estado</p><StatusChip tone={user.isActive ? "success" : "error"}>{user.isActive ? "Activo" : "Inactivo"}</StatusChip></div>
             <div><p className="text-xs text-docid-muted">Criado em</p><p className="font-medium">{new Date(user.createdAt).toLocaleDateString("pt-AO")}</p></div>
             <div className="col-span-2"><p className="text-xs text-docid-muted mb-1">Roles</p><div className="flex flex-wrap gap-1">{(user.roles || []).map(r => <span key={r.id} className="rounded-full bg-docid-primary/10 px-3 py-1 text-xs font-medium text-docid-primary-soft">{r.name}</span>)}</div></div>
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+interface ImportReport { created: { email: string; fullName: string; password: string }[]; skipped: { row: number; reason: string }[]; errors: { row: number; reason: string }[]; }
+
+function ImportUsersModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+  const [fileName, setFileName] = useState("");
+  const [csvText, setCsvText] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [report, setReport] = useState<ImportReport | null>(null);
+
+  const downloadTemplate = () => {
+    const blob = new Blob(["email,full_name,sector,role\nmaria@empresa.com,Maria Santos,Financeiro,MEMBER\njoao@empresa.com,João Lima,Comercial,ORG_ADMIN"], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "modelo-utilizadores.csv"; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setFileName(file.name);
+    setCsvText(await file.text());
+    setReport(null);
+  };
+
+  const handleImport = async () => {
+    if (!csvText.trim()) return;
+    setError(""); setLoading(true);
+    try {
+      const res = await api.post<{ data: ImportReport }>("/users/import", { csv: csvText });
+      setReport(res.data);
+      if (res.data.created.length > 0) onDone();
+    } catch (err: any) { setError(mapError(err, "Erro ao importar utilizadores.")); } finally { setLoading(false); }
+  };
+
+  return (
+    <Modal title="Importar Utilizadores (CSV)" onClose={onClose} footer={
+      report
+        ? <button onClick={onClose} className="docid-button-primary">Concluir</button>
+        : <><button onClick={onClose} className="docid-button-secondary">Cancelar</button><button onClick={handleImport} disabled={loading || !csvText.trim()} className="docid-button-primary">{loading ? "A importar..." : "Importar"}</button></>
+    }>
+      <div className="space-y-4">
+        {error && <div className="rounded-lg border border-docid-error/30 bg-docid-error/10 p-3 text-sm text-docid-error">{error}</div>}
+        {!report && (
+          <>
+            <div className="rounded-lg border border-docid-tertiary/30 bg-docid-tertiary/10 p-3 text-xs text-docid-tertiary">
+              Formato: <code className="font-mono">email,full_name,sector,role</code>. As colunas <code className="font-mono">sector</code> e <code className="font-mono">role</code> são opcionais. Emails duplicados são ignorados. As passwords geradas são devolvidas no relatório.
+            </div>
+            <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-docid-border bg-docid-surface-low p-6 text-center text-sm text-docid-muted transition hover:border-docid-primary/50">
+              <Upload className="h-6 w-6 text-docid-outline" />
+              {fileName || "Escolher ficheiro CSV..."}
+              <input type="file" accept=".csv,text/csv" onChange={handleFile} className="hidden" />
+            </label>
+            {csvText && <textarea value={csvText} onChange={e => { setCsvText(e.target.value); setReport(null); }} className="docid-input h-28 w-full resize-none font-mono text-xs" />}
+            <div className="flex items-center justify-between text-xs text-docid-muted">
+              <span>{((csvText.match(/\n/g) || []).length)} linha(s) detectada(s)</span>
+              <button type="button" onClick={downloadTemplate} className="flex items-center gap-1 text-docid-primary-soft hover:underline"><Download className="h-3 w-3" /> Baixar modelo</button>
+            </div>
+          </>
+        )}
+        {report && (
+          <div className="space-y-3">
+            <div className="grid grid-cols-3 gap-2">
+              <div className="rounded-lg bg-docid-surface-low p-3 text-center"><p className="text-2xl font-bold text-docid-success">{report.created.length}</p><p className="text-xs text-docid-muted">Criados</p></div>
+              <div className="rounded-lg bg-docid-surface-low p-3 text-center"><p className="text-2xl font-bold text-docid-secondary">{report.skipped.length}</p><p className="text-xs text-docid-muted">Ignorados</p></div>
+              <div className="rounded-lg bg-docid-surface-low p-3 text-center"><p className="text-2xl font-bold text-docid-error">{report.errors.length}</p><p className="text-xs text-docid-muted">Erros</p></div>
+            </div>
+            {report.created.length > 0 && (
+              <div>
+                <p className="mb-1 flex items-center gap-1 text-xs font-semibold text-docid-success"><CheckCircle2 className="h-3.5 w-3.5" /> Credenciais geradas — distribua aos utilizadores</p>
+                <div className="max-h-40 overflow-auto rounded-lg border border-docid-border">
+                  <table className="docid-table"><thead><tr><th>Email</th><th>Nome</th><th>Password</th></tr></thead><tbody>{report.created.map(u => <tr key={u.email}><td className="text-xs">{u.email}</td><td className="text-xs">{u.fullName}</td><td className="font-mono text-xs">{u.password}</td></tr>)}</tbody></table>
+                </div>
+              </div>
+            )}
+            {report.skipped.length > 0 && (
+              <div>
+                <p className="mb-1 flex items-center gap-1 text-xs font-semibold text-docid-secondary"><Ban className="h-3.5 w-3.5" /> Linhas ignoradas</p>
+                <div className="max-h-28 overflow-auto rounded-lg border border-docid-border p-2 text-xs text-docid-muted">{report.skipped.map((s, i) => <p key={i} className="py-0.5">Linha {s.row}: {s.reason}</p>)}</div>
+              </div>
+            )}
+            {report.errors.length > 0 && (
+              <div>
+                <p className="mb-1 flex items-center gap-1 text-xs font-semibold text-docid-error"><AlertTriangle className="h-3.5 w-3.5" /> Erros por linha</p>
+                <div className="max-h-28 overflow-auto rounded-lg border border-docid-error/30 p-2 text-xs text-docid-error">{report.errors.map((s, i) => <p key={i} className="py-0.5">Linha {s.row}: {s.reason}</p>)}</div>
+              </div>
+            )}
           </div>
         )}
       </div>
