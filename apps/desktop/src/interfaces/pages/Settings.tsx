@@ -664,7 +664,7 @@ function NotificationsTab() {
 
 function WatcherTab() {
   const navigate = useNavigate();
-  const { folders, running, loading, error, detectedCount, files, reminders, report, loadFolders, addFolder, removeFolder, start, stop, refreshFiles, refreshReminders, refreshReport, setFileStatus, attachDetectedFile, bumpDetected } = useWatcherStore();
+  const { folders, running, loading, error, detectedCount, files, reminders, report, loadFolders, addFolder, removeFolder, start, stop, refreshFiles, refreshReminders, refreshReport, setFileStatus, attachDetectedFile } = useWatcherStore();
   const [busyPath, setBusyPath] = useState<string | null>(null);
   const [actionInfo, setActionInfo] = useState("");
 
@@ -676,11 +676,9 @@ function WatcherTab() {
       if (typeof window !== "undefined" && !("__TAURI_INTERNALS__" in window)) return;
       const { listen } = await import("@tauri-apps/api/event");
       const f1 = await listen("watcher:file_detected", () => {
-        bumpDetected();
         refreshFiles(); refreshReport();
       });
       const f2 = await listen("watcher:identifier_found", () => {
-        bumpDetected();
         refreshFiles(); refreshReport();
       });
       const f3 = await listen("watcher:status_changed", () => {
@@ -689,7 +687,7 @@ function WatcherTab() {
       unlisteners = [f1, f2, f3];
     })();
     return () => unlisteners.forEach(f => f());
-  }, [bumpDetected, refreshFiles, refreshReminders, refreshReport]);
+  }, [refreshFiles, refreshReminders, refreshReport]);
 
   const handleAddFolder = async () => {
     try {

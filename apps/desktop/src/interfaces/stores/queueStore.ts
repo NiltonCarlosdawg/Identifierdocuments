@@ -14,7 +14,9 @@ interface QueueState {
   refresh: () => Promise<void>;
 }
 
-export const useQueueStore = create<QueueState>((set, get) => ({
+let refreshChain: Promise<void> = Promise.resolve();
+
+export const useQueueStore = create<QueueState>()((set, get) => ({
   items: [], online: true, syncing: false, panelOpen: false,
   loadQueue: async () => {
     const items = await sync.getQueue();
@@ -24,7 +26,14 @@ export const useQueueStore = create<QueueState>((set, get) => ({
   },
   checkOnline: async () => set({ online: await sync.isOnline() }),
   setPanelOpen: (open) => set({ panelOpen: open }),
-  refresh: async () => { await get().checkOnline(); await get().loadQueue(); },
+  refresh: async () => {
+    const run = async () => {
+      await get().checkOnline();
+      await get().loadQueue();
+    };
+    refreshChain = refreshChain.then(run, run);
+    await refreshChain;
+  },
 }));
 
 export { pendingCount };

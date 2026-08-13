@@ -31,7 +31,14 @@ export const useAppConfigStore = create<AppConfigState>()(
       setApiBaseUrl: (url) => {
         const clean = url.trim().replace(/\/$/, "");
         if (!clean.startsWith("http://") && !clean.startsWith("https://")) return;
-        if (clean.startsWith("http://") && !clean.includes("localhost") && !clean.includes("127.0.0.1")) return;
+        if (clean.startsWith("http://")) {
+          try {
+            const host = new URL(clean).hostname;
+            if (host !== "localhost" && host !== "127.0.0.1") return;
+          } catch {
+            return;
+          }
+        }
         set({ apiBaseUrl: clean });
       },
       resetApiBaseUrl: () => set({ apiBaseUrl: DEFAULT_API_URL }),

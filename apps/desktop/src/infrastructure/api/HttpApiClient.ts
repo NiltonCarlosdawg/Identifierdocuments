@@ -28,11 +28,24 @@ export class HttpApiClient implements IApiClient {
     return segs.join("/");
   }
 
+  private bodyTextForQueue(body: unknown): string | null {
+    if (body == null) return null;
+    if (body instanceof FormData) return null;
+    // post/patch já passam JSON.stringify — não voltar a serializar.
+    if (typeof body === "string") return body;
+    try {
+      return JSON.stringify(body);
+    } catch {
+      return null;
+    }
+  }
+
   private async enqueueOfflineWrite(method: string, path: string, body: unknown): Promise<boolean> {
     if (!this.sync?.isAvailable()) return false;
     if (body instanceof FormData) return false;
     try {
-      const bodyText = body != null ? JSON.stringify(body) : null;
+      const bodyText = this.bodyTextForQueue(body);
+      if (body != null && bodyText == null) return false;
       const idempotencyKey = `${method}:${path}:${this.generateIdempotencyKey()}`;
       await this.sync.enqueueWrite(method, path, bodyText, idempotencyKey, this.resourceKeyFromPath(path));
       return true;

@@ -66,9 +66,14 @@ export default function App() {
     if (!token) return;
     (async () => {
       try {
-        const res = await api.get<{ data: StoredUser | null }>("/auth/me");
-        if (res.data === null) { logout(); return; }
-        setUser(res.data);
+        const res = await api.get<StoredUser | { data: StoredUser | null } | null>("/auth/me");
+        const me =
+          res == null ? null
+          : typeof res === "object" && res !== null && "data" in res
+            ? (res as { data: StoredUser | null }).data
+            : (res as StoredUser);
+        if (!me || !me.id) { logout(); return; }
+        setUser(me);
         if (sync.isAvailable()) {
           useDeviceStore.getState().initialize().catch(() => {});
         }

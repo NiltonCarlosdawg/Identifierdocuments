@@ -1626,6 +1626,23 @@ pub fn start_background_sync(app: AppHandle) {
     });
 }
 
+fn is_allowed_api_base_url(url: &str) -> Result<String, String> {
+    let clean = url.trim().trim_end_matches('/').to_string();
+    if !clean.starts_with("https://") && !clean.starts_with("http://") {
+        return Err("URL deve começar com http:// ou https://".to_string());
+    }
+    if clean.starts_with("http://") {
+        let rest = clean.trim_start_matches("http://");
+        let hostport = rest.split('/').next().unwrap_or("");
+        let host = hostport.split('%').next().unwrap_or("").split(':').next().unwrap_or("");
+        let host = host.trim().trim_matches('[').trim_matches(']').to_ascii_lowercase();
+        if host != "localhost" && host != "127.0.0.1" && host != "::1" {
+            return Err("HTTP só permitido para localhost. Use HTTPS para outros endereços.".to_string());
+        }
+    }
+    Ok(clean)
+}
+
 #[tauri::command]
 pub fn set_sync_credentials(
     state: State<'_, SyncState>,
@@ -1633,13 +1650,7 @@ pub fn set_sync_credentials(
     api_base_url: Option<String>,
 ) -> Result<(), String> {
     if let Some(url) = api_base_url {
-        let clean = url.trim_end_matches('/').to_string();
-        if !clean.starts_with("https://") && !clean.starts_with("http://") {
-            return Err("URL deve começar com http:// ou https://".to_string());
-        }
-        if clean.starts_with("http://") && !clean.contains("localhost") && !clean.contains("127.0.0.1") {
-            return Err("HTTP só permitido para localhost. Use HTTPS para outros endereços.".to_string());
-        }
+        let clean = is_allowed_api_base_url(&url)?;
         let mut base = state.api_base_url.lock().map_err(|e| e.to_string())?;
         *base = clean;
     }
@@ -1650,13 +1661,7 @@ pub fn set_sync_credentials(
 
 #[tauri::command]
 pub fn set_api_base_url(state: State<'_, SyncState>, url: String) -> Result<(), String> {
-    let clean = url.trim_end_matches('/').to_string();
-    if !clean.starts_with("https://") && !clean.starts_with("http://") {
-        return Err("URL deve começar com http:// ou https://".to_string());
-    }
-    if clean.starts_with("http://") && !clean.contains("localhost") && !clean.contains("127.0.0.1") {
-        return Err("HTTP só permitido para localhost. Use HTTPS para outros endereços.".to_string());
-    }
+    let clean = is_allowed_api_base_url(&url)?;
     let mut base = state.api_base_url.lock().map_err(|e| e.to_string())?;
     *base = clean;
     Ok(())
@@ -2037,8 +2042,19 @@ async fn download_document_file(
     document_param: &str,
 ) -> Result<(Vec<u8>, String), String> {
     let client = build_tls_client(120)?;
+    let base = api_base_url.trim_end_matches('/');
+    let mut url = reqwest::Url::parse(&format!("{base}/documents/"))
+        .map_err(|e| format!("URL base inválida: {e}"))?;
+    {
+        let mut segments = url
+            .path_segments_mut()
+            .map_err(|_| "URL base inválida.".to_string())?;
+        segments.pop_if_empty();
+        segments.push(document_param);
+        segments.push("download");
+    }
     let res = client
-        .get(format!("{api_base_url}/documents/{document_param}/download"))
+        .get(url)
         .bearer_auth(token)
         .send()
         .await
@@ -2105,15 +2121,35 @@ pub fn is_document_cached(state: State<'_, SyncState>, document_param: String) -
 }
 
 #[tauri::command]
-pub fn open_local_file(path: String) -> Result<(), String> {
+pub fn open_local_file(state: State<'_, SyncState>, path: String) -> Result<(), String> {
+    let candidate = PathBuf::from(&path);
+    let canonical = candidate
+        .canonicalize()
+        .map_err(|_| "Caminho inválido ou ficheiro inexistente.".to_string())?;
+    if !canonical.is_file() {
+        return Err("O caminho não é um ficheiro.".to_string());
+    }
+
+    let downloads = state
+        .downloads_dir
+        .canonicalize()
+        .unwrap_or_else(|_| state.downloads_dir.clone());
+    let uploads = state
+        .uploads_dir
+        .canonicalize()
+        .unwrap_or_else(|_| state.uploads_dir.clone());
+    if !(canonical.starts_with(&downloads) || canonical.starts_with(&uploads)) {
+        return Err("Só é permitido abrir ficheiros da cache local DocID.".to_string());
+    }
+
     let result = if cfg!(target_os = "windows") {
         std::process::Command::new("cmd")
-            .args(["/C", "start", "", &path])
+            .args(["/C", "start", "", &canonical.to_string_lossy()])
             .spawn()
     } else if cfg!(target_os = "macos") {
-        std::process::Command::new("open").arg(&path).spawn()
+        std::process::Command::new("open").arg(&canonical).spawn()
     } else {
-        std::process::Command::new("xdg-open").arg(&path).spawn()
+        std::process::Command::new("xdg-open").arg(&canonical).spawn()
     };
     result
         .map(|_| ())
@@ -2217,6 +2253,20 @@ mod tests {
     }
 
     // --- safe_dest_path ---
+
+    #[test]
+    fn test_is_allowed_api_base_url_localhost_ok() {
+        assert!(is_allowed_api_base_url("http://localhost:3000").is_ok());
+        assert!(is_allowed_api_base_url("http://127.0.0.1:3000/").is_ok());
+        assert!(is_allowed_api_base_url("https://api.example.com").is_ok());
+    }
+
+    #[test]
+    fn test_is_allowed_api_base_url_rejects_spoofed_localhost() {
+        assert!(is_allowed_api_base_url("http://evil.com/localhost").is_err());
+        assert!(is_allowed_api_base_url("http://127.0.0.1.attacker.com").is_err());
+        assert!(is_allowed_api_base_url("http://example.com").is_err());
+    }
 
     #[test]
     fn test_safe_dest_path_ok() {
