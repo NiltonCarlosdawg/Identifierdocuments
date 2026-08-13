@@ -4,13 +4,14 @@ import { useAuthStore } from "../stores/authStore";
 import { useAppConfigStore } from "../stores/configStore";
 import { useWatcherStore } from "../stores/watcherStore";
 import { useScannerStore } from "../stores/scannerStore";
+import { usePrinterStore } from "../stores/printerStore";
 import { PageHeader, OfflineNotice } from "../components/docid-ui";
 import { useOfflineCache } from "../hooks/useOfflineCache";
 import { mapError } from "../../shared/errors/mapError";
 import { sync, api } from "../../infrastructure/di/container";
 import { sendNativeNotification } from "../../shared/helpers/notifications";
 import type { WatcherFileRow } from "../../domain/entities/Watcher";
-import { Server, Sun, Moon, Save, RotateCcw, FolderPlus, Trash2, Play, Square, Eye, RefreshCw, Building2, Bell, Download, Smartphone, AlertTriangle } from "lucide-react";
+import { Server, Sun, Moon, Save, RotateCcw, FolderPlus, Trash2, Play, Square, Eye, RefreshCw, Building2, Bell, Download, Smartphone, AlertTriangle, Printer } from "lucide-react";
 
 export default function Settings() {
   const [tab, setTab] = useState<"server" | "appearance" | "watcher" | "organizacao" | "notificacoes" | "dispositivos">("server");
@@ -46,6 +47,9 @@ function ServerTab() {
   const [input, setInput] = useState(apiBaseUrl);
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const [updateMsg, setUpdateMsg] = useState("");
+  const [updateError, setUpdateError] = useState("");
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
 
   const handleSave = () => {
     setSaveError("");
@@ -56,6 +60,29 @@ function ServerTab() {
       setTimeout(() => setSaved(false), 2000);
     } else {
       setSaveError("HTTP só é permitido para localhost — use HTTPS para servidores remotos.");
+    }
+  };
+
+  const handleCheckUpdate = async () => {
+    setUpdateMsg("");
+    setUpdateError("");
+    setCheckingUpdate(true);
+    try {
+      if (!sync.isAvailable()) {
+        setUpdateError("Actualizações só estão disponíveis na aplicação desktop.");
+        return;
+      }
+      const { invoke } = await import("@tauri-apps/api/core");
+      const msg = await invoke<string>("check_for_updates");
+      setUpdateMsg(msg);
+      if (msg.includes("instalada")) {
+        const { relaunch } = await import("@tauri-apps/plugin-process");
+        await relaunch();
+      }
+    } catch (err: unknown) {
+      setUpdateError(mapError(err, "Não foi possível verificar actualizações."));
+    } finally {
+      setCheckingUpdate(false);
     }
   };
 
@@ -82,6 +109,18 @@ function ServerTab() {
         <button onClick={handleSave} disabled={!isValid || input === apiBaseUrl} className="docid-button-primary"><Save className="h-4 w-4" /> Guardar</button>
         <button onClick={() => { resetApiBaseUrl(); setInput(useAppConfigStore.getState().apiBaseUrl); }} className="docid-button-secondary"><RotateCcw className="h-4 w-4" /> Restaurar predefinição</button>
         {saved && <span className="text-sm text-docid-secondary">Guardado!</span>}
+      </div>
+
+      <div className="border-t border-docid-border pt-5 space-y-3">
+        <div>
+          <label className="mb-1.5 block text-xs font-semibold text-docid-muted">Actualizações</label>
+          <p className="text-xs text-docid-muted mb-3">Verifica se existe uma nova versão assinada publicada em GitHub Releases.</p>
+          <button onClick={handleCheckUpdate} disabled={checkingUpdate} className="docid-button-secondary">
+            <Download className="h-4 w-4" /> {checkingUpdate ? "A verificar..." : "Procurar actualizações"}
+          </button>
+        </div>
+        {updateMsg && <p className="text-sm text-docid-secondary">{updateMsg}</p>}
+        {updateError && <p className="text-sm text-docid-error">{updateError}</p>}
       </div>
     </div>
   );
@@ -299,6 +338,12 @@ function DevicesTab() {
   const loadScanners = useScannerStore(s => s.loadDevices);
   const selectScanner = useScannerStore(s => s.selectDevice);
   const [scannerLoaded, setScannerLoaded] = useState(false);
+  const printers = usePrinterStore(s => s.printers);
+  const selectedPrinter = usePrinterStore(s => s.selectedPrinter);
+  const loadPrinters = usePrinterStore(s => s.loadPrinters);
+  const selectPrinter = usePrinterStore(s => s.selectPrinter);
+  const printersLoading = usePrinterStore(s => s.loading);
+  const [printersLoaded, setPrintersLoaded] = useState(false);
 
   useEffect(() => {
     if (isTauri && !scannerLoaded) {
@@ -306,6 +351,13 @@ function DevicesTab() {
       setScannerLoaded(true);
     }
   }, [isTauri, scannerLoaded, loadScanners]);
+
+  useEffect(() => {
+    if (isTauri && !printersLoaded) {
+      loadPrinters();
+      setPrintersLoaded(true);
+    }
+  }, [isTauri, printersLoaded, loadPrinters]);
 
   const calcUsage = (lease: LeaseRow) => {
     const total = lease.end_seq - lease.start_seq + 1;
@@ -438,6 +490,29 @@ function DevicesTab() {
                 <p className="text-xs text-docid-muted">Scanner usado por omissão na página Digitalizar.</p>
                 <select value={defaultScanner || ""} onChange={e => selectScanner(e.target.value)} className="docid-input w-full text-sm">
                   {scannerDevices.map(d => <option key={d.name} value={d.name}>{d.name}</option>)}
+                </select>
+              </div>
+            )}
+          </div>
+
+          <div className="docid-panel p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-docid-text">Impressora Predefinida</h3>
+              <button onClick={loadPrinters} className="docid-button-secondary text-xs" disabled={printersLoading}>
+                <RefreshCw className={`h-3 w-3 ${printersLoading ? "animate-spin" : ""}`} /> Actualizar
+              </button>
+            </div>
+            {printers.length === 0 ? (
+              <div className="flex flex-col items-center gap-3 py-6 text-center">
+                <Printer className="h-8 w-8 text-docid-outline" />
+                <p className="text-sm text-docid-muted">Nenhuma impressora encontrada.</p>
+                <button onClick={loadPrinters} className="docid-button-secondary text-xs"><RefreshCw className="h-3 w-3" /> Procurar impressoras</button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-xs text-docid-muted">Usada por omissão ao imprimir digitalizações e documentos.</p>
+                <select value={selectedPrinter || ""} onChange={e => selectPrinter(e.target.value)} className="docid-input w-full text-sm">
+                  {printers.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
                 </select>
               </div>
             )}

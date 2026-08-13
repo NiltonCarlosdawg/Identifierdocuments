@@ -1,11 +1,12 @@
 import { Elysia, t } from "elysia";
-import { users, userRoles, sectors, roles } from "../db/schema";
+import { users, userRoles, sectors, roles, organizations } from "../db/schema";
 import { eq, and, or, isNull } from "drizzle-orm";
 import { requireAuth, getFreshRoles } from "../middleware/auth";
 import { withTenant } from "../db/withTenant";
 import { safeError } from "../lib/errors";
 import { checkRateLimit } from "../middleware/rateLimit";
 import { randomBytes } from "node:crypto";
+import { sendInviteEmail } from "../services/mailer.service";
 
 function parseCsv(text: string): string[][] {
   const rows: string[][] = [];
@@ -165,6 +166,104 @@ export const usersModule = new Elysia({ prefix: "/users" })
   }, {
     body: t.Object({ email: t.String({ format: "email" }), password: t.String({ minLength: 6 }), fullName: t.String(), sectorId: t.String() }),
     detail: { summary: "Criar utilizador", tags: ["Utilizadores"] },
+  })
+
+  .post("/invite", async ({ tenantId, auth, body, request, set }) => {
+    const ip = request.headers.get("x-forwarded-for") || "unknown";
+    if (!(await checkRateLimit(`users-invite:${tenantId}:${ip}`, 20, 60 * 60_000))) {
+      set.status = 429;
+      return { error: { code: "RATE_LIMITED", message: "Demasiados convites. Tente novamente mais tarde." } };
+    }
+    try {
+      return await withTenant(tenantId, async (tx) => {
+        try {
+          const roleNames = await getFreshRoles(auth!.userId, auth!.tenantId);
+          const isAdmin = roleNames.includes("ORG_ADMIN");
+          const isSupervisor = roleNames.includes("SECTOR_SUPERVISOR");
+          if (!isAdmin && !isSupervisor) {
+            set.status = 403; return { error: { code: "FORBIDDEN", message: "Sem permissão para convidar utilizadores." } };
+          }
+
+          const email = body.email.trim().toLowerCase();
+          if (!EMAIL_RE.test(email)) {
+            set.status = 422; return { error: { code: "VALIDATION_ERROR", message: "Email inválido." } };
+          }
+
+          const existing = await tx.query.users.findFirst({
+            where: and(eq(users.tenantId, tenantId), eq(users.email, email)),
+            columns: { id: true },
+          });
+          if (existing) {
+            set.status = 409; return { error: { code: "EMAIL_EXISTS", message: "Já existe um utilizador com este email." } };
+          }
+
+          let sectorId = body.sectorId;
+          if (isSupervisor && !isAdmin) {
+            const supervisorUser = await tx.query.users.findFirst({
+              where: eq(users.id, auth!.userId),
+              columns: { sectorId: true },
+            });
+            if (!supervisorUser?.sectorId) {
+              set.status = 422; return { error: { code: "NO_SECTOR", message: "Supervisor não tem sector atribuído." } };
+            }
+            sectorId = supervisorUser.sectorId;
+          }
+
+          const sector = await tx.query.sectors.findFirst({
+            where: eq(sectors.id, sectorId),
+            columns: { tenantId: true },
+          });
+          if (!sector || sector.tenantId !== tenantId) {
+            set.status = 400; return { error: { code: "VALIDATION_ERROR", message: "Sector não encontrado." } };
+          }
+
+          const requestedRole = (isSupervisor && !isAdmin) ? "MEMBER" : (body.role || "MEMBER");
+          if (requestedRole !== "MEMBER" && requestedRole !== "SECTOR_SUPERVISOR") {
+            set.status = 422; return { error: { code: "INVALID_ROLE", message: "Role de convite deve ser MEMBER ou SECTOR_SUPERVISOR." } };
+          }
+          const role = await tx.query.roles.findFirst({
+            where: and(eq(roles.name, requestedRole), eq(roles.tenantId, tenantId)),
+          });
+          if (!role) {
+            set.status = 422; return { error: { code: "INVALID_ROLE", message: `Role "${requestedRole}" não existe.` } };
+          }
+
+          const password = randomPassword();
+          const passwordHash = await Bun.password.hash(password);
+          const [user] = await tx.insert(users).values({
+            tenantId, sectorId, email, passwordHash, fullName: body.fullName.trim(),
+          }).returning();
+          await tx.insert(userRoles).values({
+            userId: user.id, roleId: role.id, sectorId, grantedBy: auth!.userId,
+          });
+
+          const [org] = await tx.select({ name: organizations.name }).from(organizations).where(eq(organizations.id, tenantId)).limit(1);
+          const emailed = await sendInviteEmail(email, body.fullName.trim(), org?.name || "DocID", password);
+          const { passwordHash: _, ...safeUser } = user;
+          return {
+            data: {
+              ...safeUser,
+              emailed,
+              temporaryPassword: emailed ? undefined : password,
+            },
+          };
+        } catch (err: any) {
+          console.error("[INVITE_USER_ERROR]", err);
+          throw err;
+        }
+      });
+    } catch (err: any) {
+      set.status = 400;
+      return { error: { code: "INVITE_ERROR", message: safeError(err) } };
+    }
+  }, {
+    body: t.Object({
+      email: t.String({ format: "email" }),
+      fullName: t.String({ minLength: 1 }),
+      sectorId: t.String(),
+      role: t.Optional(t.String()),
+    }),
+    detail: { summary: "Convidar utilizador por email", tags: ["Utilizadores"] },
   })
 
   .guard({

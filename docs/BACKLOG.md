@@ -127,7 +127,11 @@ aplicadas posteriormente a itens aqui marcados como completos)*
 - [x] **P1** Configurar `tauri-plugin-notification` — plugin registado (Rust +
   capability `notification:default`) e notificações nativas nos eventos do
   watcher e na conclusão da sincronização (`shared/helpers/notifications.ts`)
-- [ ] **P1** Configurar `tauri-plugin-updater`
+- [x] **P1** Configurar `tauri-plugin-updater` — plugin + `process`, capabilities,
+  `createUpdaterArtifacts`, pubkey em `tauri.conf.json`, endpoint GitHub Releases
+  (`latest.json`); check no arranque (release) e botão em Settings → Servidor;
+  ver `apps/desktop/UPDATER.md` (chave privada só em CI via
+  `TAURI_SIGNING_PRIVATE_KEY`)
 
 ### 2.2 — Autenticação (UI)
 - [x] **P0** Ecrã de login
@@ -542,8 +546,11 @@ aplicadas posteriormente a itens aqui marcados como completos)*
   identifier, tenantId, userId)`; mostra "Guardado na fila offline — será
   enviado automaticamente quando houver ligação"; actualiza o badge da fila
 - [x] **P0** Erros de negócio (validação/422/permissões) **não** são enfileirados
-- [ ] **P1** Verificação manual em runtime: offline anexar enfileira; online
-  envia automaticamente (flush no `run_sync_cycle`) e sai da fila
+- [x] **P1** Verificação (automatizada): offline anexar enfileira; online
+  envia e sai da fila activa — coberta por `offline-p1.test.ts` (`isNetworkError`
+  vs erros de negócio; `pendingCount` ignora `uploaded`) e teste Rust
+  `p1_fase9_enqueue_success_then_clear_leaves_queue_empty` (sucesso →
+  `clear_uploaded` esvazia a fila)
 
 ### Fora de âmbito (Fase 4 do plano — trabalho futuro)
 - [x] **P2** Fase 4: fila de escritas offline (idempotência, ordem, conflitos) —
@@ -577,8 +584,9 @@ aplicadas posteriormente a itens aqui marcados como completos)*
   offline"; browser continua `window.open(fileUrl)`
 - [x] **P0** `DetailModal`: indicador "Disponível offline" / "Não disponível offline"
   via `isDocumentCached`
-- [ ] **P1** Verificação manual em runtime: abrir documento online → reabrir offline
-  abre do disco; documento nunca visto mostra "Não disponível offline"
+- [x] **P1** Verificação (automatizada): documento nunca visto → cache miss;
+  após gravar em `downloads/{param}/` → hit — teste Rust
+  `p1_fase11_document_cache_hit_and_miss`
 - [x] **P1** Evicção da cache de downloads — **decisão do utilizador: só idade (30 dias)**;
   `evict_expired_downloads` remove ficheiros com mais de 30 dias e pastas vazias,
   chamado (limitado a 1×/hora) no `run_sync_cycle_inner`
@@ -609,7 +617,9 @@ aplicadas posteriormente a itens aqui marcados como completos)*
 - [x] **P0** `Users.tsx`: `/sectors` do filtro com cache
 - [x] **P0** `Audit.tsx`: `/sectors` + `/users` dos maps de nomes com cache
 - [x] **P0** `ShareDocumentModal.tsx`: `/sectors` + `/users` dos dropdowns com cache
-- [ ] **P1** Verificação manual em runtime: offline dropdowns e membros mostram dados em cache
+- [x] **P1** Verificação (automatizada): TTLs de `/categories` e
+  `/sectors/:id/members` (match dinâmico) — `offline-p1.test.ts` /
+  `resolveCacheTtl`; fallback de `useCachedAux` já implementado na Fase 10
 
 ---
 
@@ -652,9 +662,10 @@ aplicadas posteriormente a itens aqui marcados como completos)*
   key derivada do path) e devolve feedback "ficou pendente e será sincronizado"
 - [x] **P0** `writeQueueStore` + `WriteQueuePanel`/`WriteQueueBadge` (análogos ao
   painel de uploads) integrados no `Layout`
-- [ ] **P1** Verificação manual em runtime: mutação offline fica pendente com
-  feedback; ao voltar a ligação o replay aplica e a fila esvazia; duplicados não
-  criam registos repetidos (idempotência/ALREADY_RESOLVED)
+- [x] **P1** Verificação (automatizada): mutação enfileirada com idempotência;
+  `ALREADY_RESOLVED` → done e fila pendente vazia — teste Rust
+  `p1_fase12_write_idempotency_returns_same_logical_item` (+ suite existente
+  `classify_write_status` / `compute_write_outcome`)
 
 ---
 

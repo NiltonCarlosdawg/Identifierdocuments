@@ -25,6 +25,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": ["nsis", "msi", "deb", "appimage"],
     "publisher": "Verano Labs",
     "copyright": "© 2026 Verano Labs. Todos os direitos reservados.",
@@ -51,6 +52,17 @@
     "linux": {
       "appimage": {
         "bundleMediaFramework": false
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQwQTg2ODVEOTdGRDNDOApSV1RJMDMvWmhZWUtEYmhqUWNZckhoaVZoSFdiaXFRMGtDNFBjVXBxL3ZsMFFJL3lHWEc5ZjREMAo=",
+      "endpoints": [
+        "https://github.com/NiltonCarlosdawg/Identifierdocuments/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
       }
     }
   }

@@ -3625,4 +3625,119 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("docid_test_missing_{}", Uuid::new_v4()));
         assert_eq!(evict_expired_downloads(&dir).unwrap(), 0);
     }
+
+    // --- P1 runtime verification (Fases 9 / 11 / 12) ---
+
+    #[test]
+    fn p1_fase9_enqueue_success_then_clear_leaves_queue_empty() {
+        let (dir, conn) = tmp_db();
+        let uploads = dir.join("uploads");
+        fs::create_dir_all(&uploads).unwrap();
+        let fp = uploads.join("doc.txt");
+        fs::write(&fp, "conteudo").unwrap();
+
+        let item = insert_item(&conn, &fp, "doc.txt", "VER-PROP-1", "t1", "u1").unwrap();
+        assert_eq!(item.status, "pending");
+
+        conn.execute(
+            "UPDATE upload_queue SET status = 'uploading' WHERE id = ?1",
+            params![item.id],
+        )
+        .unwrap();
+        let outcome = compute_upload_outcome(&item, &Ok(()));
+        conn.execute(
+            "UPDATE upload_queue SET status = ?1, attempts = ?2, last_error = ?3 WHERE id = ?4",
+            params![
+                outcome.new_status,
+                outcome.new_attempts,
+                outcome.new_last_error,
+                item.id
+            ],
+        )
+        .unwrap();
+        assert_eq!(outcome.new_status, "uploaded");
+
+        let pending: i32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM upload_queue WHERE status IN ('pending', 'uploading', 'failed')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(pending, 0, "após flush com sucesso não deve haver pendentes");
+
+        let cleared = clear_uploaded_raw(&conn, &uploads).unwrap();
+        assert_eq!(cleared, 1);
+        let total: i32 = conn
+            .query_row("SELECT COUNT(*) FROM upload_queue", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(total, 0, "clear_uploaded remove os uploaded da fila");
+
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn p1_fase11_document_cache_hit_and_miss() {
+        let dir = std::env::temp_dir().join(format!("docid_dl_cache_{}", Uuid::new_v4()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+
+        let param = "doc-uuid-abc";
+        assert!(
+            first_file_in_dir(&doc_cache_dir(&dir, param)).is_none(),
+            "documento nunca visto → não disponível offline"
+        );
+
+        let cache = doc_cache_dir(&dir, param);
+        fs::create_dir_all(&cache).unwrap();
+        fs::write(cache.join("ficheiro.pdf"), b"%PDF").unwrap();
+        assert!(
+            first_file_in_dir(&cache).is_some(),
+            "após download → disponível offline no disco"
+        );
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn p1_fase12_write_idempotency_returns_same_logical_item() {
+        let (_dir, conn) = tmp_db();
+        let first = insert_write(
+            &conn,
+            "POST",
+            "/sectors",
+            Some(r#"{"name":"Finanças"}"#.to_string()),
+            "idem-sector-1",
+            Some("sector:financas".to_string()),
+        )
+        .unwrap();
+
+        // Mesma chave: lookup como enqueue_write (não duplica)
+        let existing: WriteItem = conn
+            .query_row(
+                "SELECT id, method, path, body, idempotency_key, resource_key, status, attempts, last_error, created_at
+                 FROM local_write_queue WHERE idempotency_key = ?1",
+                params!["idem-sector-1"],
+                row_to_write_item,
+            )
+            .unwrap();
+        assert_eq!(existing.id, first.id);
+
+        let count: i32 = conn
+            .query_row("SELECT COUNT(*) FROM local_write_queue", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+
+        // Replay: ALREADY_RESOLVED → done (não cria registo novo no servidor)
+        let outcome = compute_write_outcome(&first, &WriteClass::AlreadyApplied, "ALREADY_RESOLVED");
+        assert_eq!(outcome.new_status, "done");
+        conn.execute(
+            "UPDATE local_write_queue SET status = ?1 WHERE id = ?2",
+            params![outcome.new_status, first.id],
+        )
+        .unwrap();
+        assert!(fetch_writes_pending(&conn).unwrap().is_empty());
+
+        fs::remove_dir_all(&_dir).ok();
+    }
 }

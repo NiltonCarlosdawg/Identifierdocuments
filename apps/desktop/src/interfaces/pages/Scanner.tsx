@@ -1,17 +1,23 @@
 import { useEffect, useMemo, useState } from "react";
 import { useScannerStore } from "../stores/scannerStore";
+import { usePrinterStore } from "../stores/printerStore";
 import { scanner } from "../../infrastructure/di/container";
+import { mapError } from "../../shared/errors/mapError";
 import { PageHeader } from "../components/docid-ui";
-import { Scan, Camera, RefreshCw, Download, Trash2, ChevronLeft, ChevronRight, Plus } from "lucide-react";
+import { Scan, Camera, RefreshCw, Download, Trash2, ChevronLeft, ChevronRight, Plus, Printer } from "lucide-react";
 
 export default function Scanner() {
   const { devices, selectedDevice, scanning, error, pages, currentPage, options, loadDevices, selectDevice, setOptions, scan, setCurrentPage, removeCurrentPage, clearScan } = useScannerStore();
+  const { printers, selectedPrinter, loadPrinters, selectPrinter, printBytes } = usePrinterStore();
   const [available, setAvailable] = useState(true);
+  const [printInfo, setPrintInfo] = useState("");
+  const [printing, setPrinting] = useState(false);
 
   useEffect(() => {
     setAvailable(scanner.isAvailable());
     loadDevices();
-  }, [loadDevices]);
+    loadPrinters();
+  }, [loadDevices, loadPrinters]);
 
   const page = pages[currentPage] ?? null;
   const hasPages = pages.length > 0;
@@ -41,6 +47,21 @@ export default function Scanner() {
     pages.forEach((_, i) => setTimeout(() => downloadPage(i), i * 250));
   };
 
+  const handlePrint = async () => {
+    if (!page) return;
+    setPrintInfo("");
+    setPrinting(true);
+    try {
+      const msg = await printBytes(page, options.format);
+      setPrintInfo(msg);
+    } catch (err: unknown) {
+      setPrintInfo("");
+      useScannerStore.setState({ error: mapError(err, "Erro ao imprimir.") });
+    } finally {
+      setPrinting(false);
+    }
+  };
+
   const sizeKB = page ? (page.length / 1024).toFixed(1) : "0";
 
   return (
@@ -51,6 +72,7 @@ export default function Scanner() {
         </button>
       } />
       {error && <div className="mb-4 rounded-lg border border-docid-error/30 bg-docid-error/10 p-3 text-sm text-docid-error">{error}</div>}
+      {printInfo && <div className="mb-4 rounded-lg border border-docid-secondary/30 bg-docid-secondary/10 p-3 text-sm text-docid-secondary">{printInfo}</div>}
       {!available && <div className="mb-4 rounded-lg border border-docid-tertiary/30 bg-docid-tertiary/10 p-3 text-sm text-docid-tertiary">Scanner apenas disponível no ambiente desktop (Tauri).</div>}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="docid-panel p-5 space-y-5 lg:col-span-1">
@@ -80,6 +102,12 @@ export default function Scanner() {
               <select value={options.format} onChange={e => setOptions({ format: e.target.value })} className="docid-input w-full text-sm">
                 <option value="pdf">PDF</option><option value="png">PNG</option>
               </select></div>
+            {printers.length > 0 && (
+              <div><label className="mb-1 block text-xs text-docid-muted">Impressora</label>
+                <select value={selectedPrinter || ""} onChange={e => selectPrinter(e.target.value)} className="docid-input w-full text-sm">
+                  {printers.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
+                </select></div>
+            )}
           </div>
           <p className="text-xs text-docid-muted">Cada digitalização acrescenta uma página. Pode navegar, remover ou descarregar páginas individualmente.</p>
         </div>
@@ -108,6 +136,7 @@ export default function Scanner() {
                   <button onClick={scan} disabled={scanning || !selectedDevice} className="docid-button-secondary text-xs"><Plus className="h-3 w-3" /> Página</button>
                   <button onClick={() => downloadPage(currentPage)} className="docid-button-secondary text-xs"><Download className="h-3 w-3" /> Download</button>
                   {pages.length > 1 && <button onClick={handleDownloadAll} className="docid-button-secondary text-xs"><Download className="h-3 w-3" /> Todas</button>}
+                  <button onClick={handlePrint} disabled={printing || !selectedPrinter} className="docid-button-secondary text-xs"><Printer className="h-3 w-3" /> {printing ? "A imprimir..." : "Imprimir"}</button>
                   <button onClick={removeCurrentPage} className="docid-button-secondary text-xs text-docid-error"><Trash2 className="h-3 w-3" /> Remover</button>
                   <button onClick={clearScan} className="docid-button-secondary text-xs text-docid-error">Limpar</button>
                 </div>

@@ -68,17 +68,21 @@ export interface CacheEntry<T> {
   data: T;
 }
 
+export function resolveCacheTtl(endpoint: string, ttlByEndpoint: Record<string, number> = CACHE_TTLS): number {
+  if (ttlByEndpoint[endpoint] != null) return ttlByEndpoint[endpoint];
+  for (const [pattern, ttl] of Object.entries(ttlByEndpoint)) {
+    if (!pattern.includes(":")) continue;
+    const segments = pattern.split("/").map(s => (s.startsWith(":") ? "[^/]+" : s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    if (new RegExp(`^${segments.join("/")}$`).test(endpoint)) return ttl;
+  }
+  return DEFAULT_TTL_MS;
+}
+
 export class OfflineCache {
   constructor(private readonly ttlByEndpoint: Record<string, number> = {}) {}
 
   private ttlFor(endpoint: string): number {
-    if (this.ttlByEndpoint[endpoint] != null) return this.ttlByEndpoint[endpoint];
-    for (const [pattern, ttl] of Object.entries(this.ttlByEndpoint)) {
-      if (!pattern.includes(":")) continue;
-      const segments = pattern.split("/").map(s => (s.startsWith(":") ? "[^/]+" : s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-      if (new RegExp(`^${segments.join("/")}$`).test(endpoint)) return ttl;
-    }
-    return DEFAULT_TTL_MS;
+    return resolveCacheTtl(endpoint, this.ttlByEndpoint);
   }
 
   private keyFor(context: CacheContext, endpoint: string, params?: string): string {

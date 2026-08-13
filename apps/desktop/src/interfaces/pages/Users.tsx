@@ -4,7 +4,8 @@ import { PageHeader, Modal, StatusChip, EmptyState, Pagination, OfflineNotice } 
 import { useOfflineCache } from "../hooks/useOfflineCache";
 import { useCachedAux } from "../hooks/useCachedAux";
 import { mapError } from "../../shared/errors/mapError";
-import { UsersIcon, Search, Plus, Shield, RefreshCw, Upload, Download, CheckCircle2, AlertTriangle, Ban } from "lucide-react";
+import { useAuthStore } from "../stores/authStore";
+import { UsersIcon, Search, Plus, Shield, RefreshCw, Upload, Download, CheckCircle2, AlertTriangle, Ban, Mail } from "lucide-react";
 
 interface UserRow { id: string; email: string; fullName: string; isActive: boolean; sectorId: string | null; sectorName: string | null; roles: { id: string; name: string }[]; createdAt: string; }
 interface Sector { id: string; name: string; }
@@ -16,6 +17,7 @@ export default function Users() {
   const [sectorFilter, setSectorFilter] = useState("");
   const [sectors, setSectors] = useState<Sector[]>([]);
   const [showCreate, setShowCreate] = useState(false);
+  const [showInvite, setShowInvite] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [selected, setSelected] = useState<UserRow | null>(null);
 
@@ -40,11 +42,13 @@ export default function Users() {
     })();
   }, [fetchAux]);
 
+  const canManage = (useAuthStore(s => s.user)?.roles || []).some(r => r === "ORG_ADMIN" || r === "SECTOR_SUPERVISOR");
+  const isAdmin = (useAuthStore(s => s.user)?.roles || []).includes("ORG_ADMIN");
   const filtered = rows.filter(r => !search || r.fullName.toLowerCase().includes(search.toLowerCase()) || r.email.toLowerCase().includes(search.toLowerCase()));
 
   return (
     <div>
-      <PageHeader title="Utilizadores" description="Gerir contas de utilizador da organização" actions={<div className="flex gap-2"><button onClick={() => setShowImport(true)} className="docid-button-secondary"><Upload className="h-4 w-4" /> Importar CSV</button><button onClick={() => setShowCreate(true)} className="docid-button-primary"><Plus className="h-4 w-4" /> Criar utilizador</button></div>} />
+      <PageHeader title="Utilizadores" description="Gerir contas de utilizador da organização" actions={<div className="flex gap-2">{canManage && <button onClick={() => setShowInvite(true)} className="docid-button-secondary"><Mail className="h-4 w-4" /> Convidar</button>}{isAdmin && <button onClick={() => setShowImport(true)} className="docid-button-secondary"><Upload className="h-4 w-4" /> Importar CSV</button>}{canManage && <button onClick={() => setShowCreate(true)} className="docid-button-primary"><Plus className="h-4 w-4" /> Criar utilizador</button>}</div>} />
       {error && <div className="mb-4 rounded-lg border border-docid-error/30 bg-docid-error/10 p-3 text-sm text-docid-error">{error}</div>}
       {isStale && <OfflineNotice cachedAt={cachedAt} onRetry={refresh} />}
       <div className="mb-4 flex items-center gap-3">
@@ -75,6 +79,7 @@ export default function Users() {
         <Pagination totalLabel={`${meta?.total ?? 0} utilizador(es)`} />
       </div>
       {showCreate && <CreateUserModal sectors={sectors} onClose={() => setShowCreate(false)} onDone={() => { setShowCreate(false); refresh(); }} />}
+      {showInvite && <InviteUserModal sectors={sectors} isAdmin={isAdmin} onClose={() => setShowInvite(false)} onDone={() => { setShowInvite(false); refresh(); }} />}
       {showImport && <ImportUsersModal onClose={() => setShowImport(false)} onDone={() => { setShowImport(false); refresh(); }} />}
       {selected && <DetailUserModal user={selected} sectors={sectors} onClose={() => setSelected(null)} onDone={() => { setSelected(null); refresh(); }} />}
     </div>
@@ -106,6 +111,66 @@ function CreateUserModal({ sectors, onClose, onDone }: { sectors: Sector[]; onCl
         <div><label className="mb-1.5 block text-xs font-semibold text-docid-muted">Email</label><input type="email" value={email} onChange={e => setEmail(e.target.value)} className="docid-input w-full" placeholder="maria@empresa.com" /></div>
         <div><label className="mb-1.5 block text-xs font-semibold text-docid-muted">Palavra-passe <span className="font-normal text-docid-outline">(mín. 6 caracteres)</span></label><input type="password" value={password} onChange={e => setPassword(e.target.value)} className="docid-input w-full" placeholder="••••••••" /></div>
         <div><label className="mb-1.5 block text-xs font-semibold text-docid-muted">Sector</label><select value={sectorId} onChange={e => setSectorId(e.target.value)} className="docid-input w-full"><option value="">Seleccionar sector...</option>{sectors.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
+      </div>
+    </Modal>
+  );
+}
+
+function InviteUserModal({ sectors, isAdmin, onClose, onDone }: { sectors: Sector[]; isAdmin: boolean; onClose: () => void; onDone: () => void }) {
+  const [fullName, setFullName] = useState("");
+  const [email, setEmail] = useState("");
+  const [sectorId, setSectorId] = useState("");
+  const [role, setRole] = useState("MEMBER");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [result, setResult] = useState<{ emailed: boolean; temporaryPassword?: string } | null>(null);
+
+  const handleSubmit = async () => {
+    if (!fullName.trim() || !email.trim() || !sectorId) return;
+    setError(""); setLoading(true);
+    try {
+      const res = await api.post<{ data: { emailed: boolean; temporaryPassword?: string } }>("/users/invite", {
+        fullName: fullName.trim(),
+        email: email.trim(),
+        sectorId,
+        role: isAdmin ? role : "MEMBER",
+      });
+      setResult({ emailed: !!res.data?.emailed, temporaryPassword: res.data?.temporaryPassword });
+    } catch (err: any) { setError(mapError(err, "Erro ao enviar convite.")); } finally { setLoading(false); }
+  };
+
+  if (result) {
+    return (
+      <Modal title="Convite enviado" onClose={onDone} footer={<button onClick={onDone} className="docid-button-primary">Concluir</button>}>
+        <div className="space-y-3">
+          {result.emailed ? (
+            <p className="text-sm text-docid-secondary">O convite foi enviado por email com a password temporária.</p>
+          ) : (
+            <>
+              <p className="text-sm text-docid-tertiary">SMTP não está configurado. Entregue esta password fora de banda:</p>
+              <p className="rounded-lg bg-docid-surface-low p-3 font-mono text-sm">{result.temporaryPassword}</p>
+            </>
+          )}
+        </div>
+      </Modal>
+    );
+  }
+
+  return (
+    <Modal title="Convidar utilizador" onClose={onClose} footer={<><button onClick={onClose} className="docid-button-secondary">Cancelar</button><button onClick={handleSubmit} disabled={loading || !fullName.trim() || !email.trim() || !sectorId} className="docid-button-primary">{loading ? "A convidar..." : "Enviar convite"}</button></>}>
+      <div className="space-y-4">
+        {error && <div className="rounded-lg border border-docid-error/30 bg-docid-error/10 p-3 text-sm text-docid-error">{error}</div>}
+        <div><label className="mb-1.5 block text-xs font-semibold text-docid-muted">Nome completo</label><input value={fullName} onChange={e => setFullName(e.target.value)} className="docid-input w-full" placeholder="Ex: Maria Santos" autoFocus /></div>
+        <div><label className="mb-1.5 block text-xs font-semibold text-docid-muted">Email</label><input type="email" value={email} onChange={e => setEmail(e.target.value)} className="docid-input w-full" placeholder="maria@empresa.com" /></div>
+        <div><label className="mb-1.5 block text-xs font-semibold text-docid-muted">Sector</label><select value={sectorId} onChange={e => setSectorId(e.target.value)} className="docid-input w-full"><option value="">Seleccionar sector...</option>{sectors.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
+        {isAdmin && (
+          <div><label className="mb-1.5 block text-xs font-semibold text-docid-muted">Role</label>
+            <select value={role} onChange={e => setRole(e.target.value)} className="docid-input w-full">
+              <option value="MEMBER">MEMBER</option>
+              <option value="SECTOR_SUPERVISOR">SECTOR_SUPERVISOR</option>
+            </select>
+          </div>
+        )}
       </div>
     </Modal>
   );

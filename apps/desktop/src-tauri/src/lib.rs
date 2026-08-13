@@ -1,8 +1,9 @@
 mod commands;
 mod db;
 mod sync;
+mod updater;
 
-use commands::{identifiers, scanner, text_extraction, watcher};
+use commands::{identifiers, printer, scanner, text_extraction, watcher};
 use sync::{start_background_sync, SyncState};
 use tauri::Manager;
 use watcher::WatcherState;
@@ -15,6 +16,8 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(WatcherState::new())
         .setup(|app| {
             let app_data = app.path().app_data_dir().expect("app data dir");
@@ -34,6 +37,18 @@ pub fn run() {
             });
 
             start_background_sync(app.handle().clone());
+
+            // Verificação silenciosa de actualizações (só em builds release)
+            #[cfg(all(desktop, not(debug_assertions)))]
+            {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                    if let Err(e) = crate::updater::check_and_prompt(handle).await {
+                        eprintln!("updater: {e}");
+                    }
+                });
+            }
 
             #[cfg(debug_assertions)]
             if std::env::var("DOCID_DEVTOOLS").as_deref() != Ok("0") {
@@ -89,6 +104,10 @@ pub fn run() {
             watcher::watcher_get_report,
             scanner::list_scanners,
             scanner::scan_document,
+            printer::list_printers,
+            printer::print_file,
+            printer::print_bytes,
+            updater::check_for_updates,
         ])
         .run(tauri::generate_context!())
         .expect("Erro ao iniciar DocID");
