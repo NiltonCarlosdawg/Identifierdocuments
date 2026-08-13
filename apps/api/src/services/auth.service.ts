@@ -3,7 +3,7 @@ import { users, organizations, userRoles, roles, passwordResetTokens } from "../
 import { eq, and, gt, isNull, sql } from "drizzle-orm";
 import { signToken, verifyTokenWithGrace } from "../middleware/auth";
 import type { AuthPayload } from "../middleware/auth";
-import { sendResetPasswordEmail } from "./mailer.service";
+import { enqueueResetPasswordEmail } from "../jobs/queues";
 import { randomBytes, createHash } from "node:crypto";
 
 const RESET_TOKEN_TTL_MS = 15 * 60 * 1000;
@@ -159,7 +159,7 @@ export async function forgotPassword(email: string) {
     expiresAt: new Date(Date.now() + RESET_TOKEN_TTL_MS),
   });
 
-  await sendResetPasswordEmail(user.email, token);
+  await enqueueResetPasswordEmail(user.email, token);
 
   return { message: "Se o email existir, irá receber um código de redefinição." };
 }

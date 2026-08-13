@@ -54,7 +54,7 @@ export default function Login() {
   const goTo = (v: View) => { setError(""); setInfo(""); setView(v); };
 
   const emailField = (
-    <div><label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-docid-muted">E-mail Corporativo</label><div className="relative"><Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-docid-outline" /><input type="email" value={email} onChange={e => setEmail(e.target.value)} className="docid-input w-full pl-10" placeholder="nome@empresa.com" required /></div></div>
+    <div><label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-docid-muted">E-mail Corporativo</label><div className="relative"><Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-docid-outline" /><input data-testid="login-email" type="email" value={email} onChange={e => setEmail(e.target.value)} className="docid-input w-full pl-10" placeholder="nome@empresa.com" required /></div></div>
   );
 
   return (
@@ -70,12 +70,12 @@ export default function Login() {
         {view === "login" && (
           <form onSubmit={handleSubmit} className="space-y-4">
             {emailField}
-            <div><label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-docid-muted">Palavra-passe</label><div className="relative"><Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-docid-outline" /><input type={showPassword ? "text" : "password"} value={password} onChange={e => setPassword(e.target.value)} className="docid-input w-full pl-10 pr-10" placeholder="••••••••" required /><button type="button" onClick={() => setShowPassword(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-docid-outline transition hover:text-docid-text">{showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button></div></div>
+            <div><label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-docid-muted">Palavra-passe</label><div className="relative"><Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-docid-outline" /><input data-testid="login-password" type={showPassword ? "text" : "password"} value={password} onChange={e => setPassword(e.target.value)} className="docid-input w-full pl-10 pr-10" placeholder="••••••••" required /><button type="button" onClick={() => setShowPassword(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-docid-outline transition hover:text-docid-text">{showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button></div></div>
             <div className="flex items-center justify-between text-sm"><label className="flex items-center gap-2 text-docid-muted"><input type="checkbox" className="rounded border-docid-border bg-docid-surface-low text-docid-primary focus:ring-docid-primary" /> Lembrar-me</label><button type="button" onClick={() => goTo("forgot")} className="text-docid-primary-soft hover:underline">Esqueceu a senha?</button></div>
             {created && <p className="rounded-lg border border-docid-secondary/30 bg-docid-secondary/10 p-3 text-sm text-docid-secondary">Organização criada com sucesso! Faça login para continuar.</p>}
             {info && <p className="flex items-start gap-2 rounded-lg border border-docid-secondary/30 bg-docid-secondary/10 p-3 text-sm text-docid-secondary"><CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />{info}</p>}
             {error && <p className="rounded-lg border border-docid-error/30 bg-docid-error/10 p-3 text-sm text-docid-error">{error}</p>}
-            <button type="submit" disabled={loading} className="docid-button-primary w-full py-3">{loading ? "A entrar..." : "Entrar"} <LogIn className="h-4 w-4" /></button>
+            <button data-testid="login-submit" type="submit" disabled={loading} className="docid-button-primary w-full py-3">{loading ? "A entrar..." : "Entrar"} <LogIn className="h-4 w-4" /></button>
           </form>
         )}
 

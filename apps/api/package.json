@@ -14,6 +14,7 @@
   "dependencies": {
     "@elysiajs/cors": "^1.1.0",
     "@elysiajs/swagger": "^1.1.0",
+    "bullmq": "^6.1.0",
     "drizzle-orm": "^0.31.0",
     "elysia": "^1.1.0",
     "ioredis": "^5.4.0",

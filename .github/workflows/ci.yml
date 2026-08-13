@@ -25,7 +25,7 @@ jobs:
       - name: Typecheck
         run: bunx tsc --noEmit
       - name: Unit tests (sem servidor)
-        run: bun test src/__tests__/classifier-cache.test.ts src/__tests__/notification.service.test.ts
+        run: bun test src/__tests__/classifier-cache.test.ts src/__tests__/notification.service.test.ts src/__tests__/document-tags.test.ts
 
   desktop:
     name: Desktop (typecheck + unit tests)
@@ -61,3 +61,20 @@ jobs:
             patchelf libssl-dev libgtk-3-dev libayatana-appindicator3-dev
       - name: Cargo test (lib)
         run: cargo test --lib -- --test-threads=2
+
+  e2e:
+    name: E2E (Playwright UI smoke)
+    runs-on: ubuntu-22.04
+    needs: [desktop]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Install
+        run: bun install --frozen-lockfile
+      - name: Build desktop frontend
+        working-directory: apps/desktop
+        run: bun run build
+      - name: Install Playwright Chromium
+        run: bunx playwright install --with-deps chromium
+      - name: Run E2E
+        run: bun run test:e2e

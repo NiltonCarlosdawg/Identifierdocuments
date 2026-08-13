@@ -9,8 +9,11 @@ import { useQueueStore } from "../stores/queueStore";
 import ShareDocumentModal from "../components/ShareDocumentModal";
 import ClassifierSuggestion from "../components/ClassifierSuggestion";
 import type { ClassifierResult } from "../hooks/useClassifier";
-import { Upload, Download, Share2, Search, Printer, Plus, History } from "lucide-react";
+import { Upload, Download, Share2, Search, Printer, Plus, History, LayoutGrid, List, Tag } from "lucide-react";
 import { usePrinterStore } from "../stores/printerStore";
+
+const PROFILE_CATEGORY_IDS = new Set(["CPS", "CPF", "CTR", "CLA"]);
+const DOCUMENT_PRESET_TAGS = ["urgente", "renovação pendente", "assinado", "rascunho", "arquivado"] as const;
 
 interface DocRow {
   id: string;
@@ -23,6 +26,7 @@ interface DocRow {
   thumbnailUrl: string;
   kind?: "primary" | "attachment";
   label?: string | null;
+  tags?: string[];
   identifier: { id: string; identifier: string; categoryId: string; categoryName: string } | null;
   uploadedBy: string | null;
 }
@@ -64,6 +68,7 @@ interface DocDetail extends DocRow {
   versions?: DocVersionMeta[];
   attachments?: DocAttachmentMeta[];
   primaryDocumentId?: string | null;
+  tags?: string[];
 }
 
 export default function Documents() {
@@ -76,6 +81,8 @@ export default function Documents() {
   const [selected, setSelected] = useState<DocRow | null>(null);
   const [search, setSearch] = useState("");
   const [downloadError, setDownloadError] = useState("");
+  const [viewMode, setViewMode] = useState<"lista" | "perfis">("lista");
+  const [profileDetail, setProfileDetail] = useState(false);
 
   const { loading, error, isStale, cachedAt, refresh } = useOfflineCache<{ data: DocRow[]; meta: { total: number; page: number; limit: number } }>({
     endpoint: "/documents",
@@ -124,6 +131,16 @@ export default function Documents() {
     }
   };
 
+  const filtered = rows.filter(r =>
+    !search
+    || r.filename?.toLowerCase().includes(search.toLowerCase())
+    || r.identifier?.identifier.toLowerCase().includes(search.toLowerCase())
+    || r.identifier?.categoryName?.toLowerCase().includes(search.toLowerCase())
+    || (r.tags || []).some(t => t.toLowerCase().includes(search.toLowerCase())),
+  );
+  const profileRows = filtered.filter(r => r.identifier?.categoryId && PROFILE_CATEGORY_IDS.has(r.identifier.categoryId));
+  const listRows = viewMode === "perfis" ? profileRows : filtered;
+
   return (
     <div>
       <PageHeader title="Documentos" description="Gerir os documentos associados a identificadores" actions={
@@ -132,19 +149,49 @@ export default function Documents() {
       {error && <div className="mb-4 rounded-lg border border-docid-error/30 bg-docid-error/10 p-3 text-sm text-docid-error">{error}</div>}
       {isStale && <OfflineNotice cachedAt={cachedAt} onRetry={refresh} />}
       {downloadError && <div className="mb-4 rounded-lg border border-docid-tertiary/30 bg-docid-tertiary/10 p-3 text-sm text-docid-tertiary">{downloadError}</div>}
-      <div className="mb-4 flex items-center gap-3">
+      <div className="mb-4 flex flex-wrap items-center gap-3">
         <div className="relative flex-1 max-w-xs"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-docid-outline" /><input value={search} onChange={e => setSearch(e.target.value)} className="docid-input w-full pl-9" placeholder="Pesquisar documento..." /></div>
+        <div className="flex rounded-lg border border-docid-outline/20 p-0.5">
+          <button type="button" onClick={() => setViewMode("lista")} className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium ${viewMode === "lista" ? "bg-docid-primary/15 text-docid-primary-soft" : "text-docid-muted"}`}><List className="h-3.5 w-3.5" /> Lista</button>
+          <button type="button" onClick={() => setViewMode("perfis")} className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium ${viewMode === "perfis" ? "bg-docid-primary/15 text-docid-primary-soft" : "text-docid-muted"}`}><LayoutGrid className="h-3.5 w-3.5" /> Perfis</button>
+        </div>
       </div>
       <div className="docid-panel overflow-hidden">
         {loading ? (
           <div className="flex items-center justify-center py-16 text-sm text-docid-muted">A carregar...</div>
-        ) : rows.length === 0 ? (
-          <EmptyState>Nenhum documento encontrado.</EmptyState>
+        ) : listRows.length === 0 ? (
+          <EmptyState>{viewMode === "perfis" ? "Nenhum contrato/perfil encontrado (CPS, CPF, CTR, CLA)." : "Nenhum documento encontrado."}</EmptyState>
+        ) : viewMode === "perfis" ? (
+          <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
+            {listRows.map(row => (
+              <button
+                key={row.id}
+                type="button"
+                onClick={() => { setProfileDetail(false); setSelected(row); }}
+                className="rounded-xl border border-docid-outline/20 bg-docid-surface-low p-4 text-left transition hover:border-docid-primary/40 hover:bg-docid-surface"
+              >
+                <div className="mb-2 flex items-start justify-between gap-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-docid-primary-soft">{row.identifier?.categoryId}</p>
+                  <StatusChip tone={row.status === "active" || row.status === "attached" ? "success" : "neutral"}>{row.status}</StatusChip>
+                </div>
+                <p className="mb-1 truncate text-sm font-medium">{row.filename || "Sem ficheiro"}</p>
+                <p className="mb-3 font-mono text-[11px] text-docid-muted">{row.identifier?.identifier}</p>
+                <div className="flex flex-wrap gap-1">
+                  {(row.tags || []).length === 0 ? (
+                    <span className="text-[10px] text-docid-outline">Sem tags</span>
+                  ) : (row.tags || []).slice(0, 4).map(tag => (
+                    <span key={tag} className="rounded-full bg-docid-surface-high px-2 py-0.5 text-[10px] text-docid-muted">{tag}</span>
+                  ))}
+                  {(row.tags || []).length > 4 && <span className="text-[10px] text-docid-muted">+{(row.tags || []).length - 4}</span>}
+                </div>
+              </button>
+            ))}
+          </div>
         ) : (
           <table className="docid-table">
             <thead><tr><th>Ficheiro</th><th>Identificador</th><th>Categoria</th><th>Estado</th><th>Carregado por</th><th>Data</th><th></th></tr></thead>
-            <tbody>{rows.filter(r => !search || r.filename?.toLowerCase().includes(search.toLowerCase()) || r.identifier?.identifier.toLowerCase().includes(search.toLowerCase())).map(row => (
-              <tr key={row.id} className="cursor-pointer" onClick={() => setSelected(row)}>
+            <tbody>{listRows.map(row => (
+              <tr key={row.id} className="cursor-pointer" onClick={() => { setProfileDetail(PROFILE_CATEGORY_IDS.has(row.identifier?.categoryId || "")); setSelected(row); }}>
                 <td className="max-w-48 truncate font-medium">{row.filename}</td>
                 <td className="font-mono text-xs">{row.identifier?.identifier || "-"}</td>
                 <td className="text-xs text-docid-muted">{row.identifier?.categoryName || "-"}</td>
@@ -156,11 +203,11 @@ export default function Documents() {
             ))}</tbody>
           </table>
         )}
-        <Pagination totalLabel={`${meta.total} documento(s)`} />
+        <Pagination totalLabel={`${viewMode === "perfis" ? profileRows.length : meta.total} documento(s)`} />
       </div>
 
       {showUpload && <UploadModal onClose={closeUpload} onDone={finishUpload} initialPath={attachPath || ""} initialIdentifier={attachIdentifier} />}
-      {selected && <DetailModal row={selected} onClose={() => setSelected(null)} onDone={() => refresh()} onDownload={() => handleOpen(selected)} />}
+      {selected && <DetailModal row={selected} onClose={() => setSelected(null)} onDone={() => refresh()} onDownload={() => handleOpen(selected)} profileMode={profileDetail || (viewMode === "perfis")} />}
     </div>
   );
 }
@@ -412,7 +459,7 @@ function UploadModal({ onClose, onDone, initialPath = "", initialIdentifier = ""
   );
 }
 
-function DetailModal({ row, onClose, onDone, onDownload }: { row: DocRow; onClose: () => void; onDone: () => void; onDownload: () => Promise<void> }) {
+function DetailModal({ row, onClose, onDone, onDownload, profileMode = false }: { row: DocRow; onClose: () => void; onDone: () => void; onDownload: () => Promise<void>; profileMode?: boolean }) {
   const [showShare, setShowShare] = useState(false);
   const [offlineAvailable, setOfflineAvailable] = useState<boolean | null>(null);
   const [printing, setPrinting] = useState(false);
@@ -422,6 +469,10 @@ function DetailModal({ row, onClose, onDone, onDownload }: { row: DocRow; onClos
   const [busy, setBusy] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState("");
+  const [tags, setTags] = useState<string[]>(row.tags || []);
+  const [customTag, setCustomTag] = useState("");
+  const [savingTags, setSavingTags] = useState(false);
+  const isProfile = profileMode || PROFILE_CATEGORY_IDS.has(row.identifier?.categoryId || "");
   const identCode = row.identifier?.identifier || row.id;
   const selectedPrinter = usePrinterStore(s => s.selectedPrinter);
   const loadPrinters = usePrinterStore(s => s.loadPrinters);
@@ -432,9 +483,38 @@ function DetailModal({ row, onClose, onDone, onDownload }: { row: DocRow; onClos
     try {
       const res = await api.get<{ data: DocDetail }>(`/documents/${row.id}`);
       setDetail(res.data);
+      if (Array.isArray(res.data.tags)) setTags(res.data.tags);
     } catch (err: any) {
       setDetailError(mapError(err, "Erro ao carregar detalhe."));
     }
+  };
+
+  const saveTags = async (next: string[]) => {
+    setSavingTags(true); setDetailError("");
+    try {
+      const res = await api.patch<{ data: { tags: string[] } }>(`/documents/${row.id}/tags`, { tags: next });
+      setTags(res.data.tags);
+      onDone();
+    } catch (err: any) {
+      setDetailError(mapError(err, "Erro ao guardar tags."));
+    } finally {
+      setSavingTags(false);
+    }
+  };
+
+  const togglePresetTag = (tag: string) => {
+    const next = tags.includes(tag) ? tags.filter(t => t !== tag) : [...tags, tag];
+    setTags(next);
+    void saveTags(next);
+  };
+
+  const addCustomTag = () => {
+    const t = customTag.trim();
+    if (!t || tags.includes(t)) return;
+    const next = [...tags, t];
+    setCustomTag("");
+    setTags(next);
+    void saveTags(next);
   };
 
   useEffect(() => {
@@ -577,7 +657,7 @@ function DetailModal({ row, onClose, onDone, onDownload }: { row: DocRow; onClos
 
   return (
     <>
-      <Modal title="Detalhe do Documento" onClose={onClose} footer={
+      <Modal title={isProfile ? `Perfil · ${row.identifier?.categoryId || "Contrato"}` : "Detalhe do Documento"} onClose={onClose} footer={
         <div className="flex flex-wrap gap-2">
           <button onClick={onDownload} className="docid-button-secondary"><Download className="h-4 w-4" /> Descarregar</button>
           {sync.isAvailable() && (
@@ -601,6 +681,52 @@ function DetailModal({ row, onClose, onDone, onDownload }: { row: DocRow; onClos
             </div>
             <p className="text-xs text-docid-muted">{fileSize ? `${(fileSize / 1024 / 1024).toFixed(2)} MB · ${mimeType}` : mimeType}</p>
           </div>
+
+          {isProfile && (
+            <div className="rounded-lg border border-docid-outline/20 bg-docid-surface-low p-3">
+              <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-docid-muted"><Tag className="h-3.5 w-3.5" /> Tags do perfil</p>
+              <div className="mb-2 flex flex-wrap gap-1.5">
+                {DOCUMENT_PRESET_TAGS.map(tag => (
+                  <button
+                    key={tag}
+                    type="button"
+                    disabled={savingTags}
+                    onClick={() => togglePresetTag(tag)}
+                    className={`rounded-full px-2.5 py-1 text-[11px] ${tags.includes(tag) ? "bg-docid-primary/20 text-docid-primary-soft" : "bg-docid-surface-high text-docid-muted"}`}
+                  >
+                    {tag}
+                  </button>
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <input
+                  value={customTag}
+                  onChange={e => setCustomTag(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addCustomTag(); } }}
+                  className="docid-input flex-1 text-xs"
+                  placeholder="Tag personalizada…"
+                  disabled={savingTags}
+                />
+                <button type="button" onClick={addCustomTag} disabled={savingTags || !customTag.trim()} className="docid-button-secondary text-xs">Adicionar</button>
+              </div>
+              {tags.filter(t => !(DOCUMENT_PRESET_TAGS as readonly string[]).includes(t)).length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {tags.filter(t => !(DOCUMENT_PRESET_TAGS as readonly string[]).includes(t)).map(tag => (
+                    <button
+                      key={tag}
+                      type="button"
+                      disabled={savingTags}
+                      onClick={() => { const next = tags.filter(t => t !== tag); setTags(next); void saveTags(next); }}
+                      className="rounded-full bg-docid-surface-high px-2 py-0.5 text-[10px] text-docid-muted"
+                      title="Remover"
+                    >
+                      {tag} ×
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {(previewUrl || previewError) && (
             <div>

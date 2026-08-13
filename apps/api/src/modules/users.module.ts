@@ -6,7 +6,7 @@ import { withTenant } from "../db/withTenant";
 import { safeError } from "../lib/errors";
 import { checkRateLimit } from "../middleware/rateLimit";
 import { randomBytes } from "node:crypto";
-import { sendInviteEmail } from "../services/mailer.service";
+import { enqueueInviteEmail } from "../jobs/queues";
 
 function parseCsv(text: string): string[][] {
   const rows: string[][] = [];
@@ -238,7 +238,7 @@ export const usersModule = new Elysia({ prefix: "/users" })
           });
 
           const [org] = await tx.select({ name: organizations.name }).from(organizations).where(eq(organizations.id, tenantId)).limit(1);
-          const emailed = await sendInviteEmail(email, body.fullName.trim(), org?.name || "DocID", password);
+          const emailed = await enqueueInviteEmail(email, body.fullName.trim(), org?.name || "DocID", password);
           const { passwordHash: _, ...safeUser } = user;
           return {
             data: {

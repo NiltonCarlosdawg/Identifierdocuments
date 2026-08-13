@@ -6,6 +6,7 @@ import { eq, and, or, isNull, desc } from "drizzle-orm";
 import { verifyDocumentContainsIdentifier } from "./document.service";
 import { getSharedDocIds } from "./identifier.service";
 import type { AuthPayload } from "../middleware/auth";
+import { tryEnqueueThumbnail } from "../jobs/queues";
 
 const APP_ROOT = path.resolve(import.meta.dir, "../..");
 const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(APP_ROOT, "uploads");
@@ -26,7 +27,12 @@ export function pickPrimaryDocument<T extends { kind: string }>(docs: T[] | null
   return docs.find((d) => d.kind === "primary") ?? undefined;
 }
 
-export function generateThumbnailAsync(filePath: string, docId: string) {
+export function generateThumbnailAsync(filePath: string, docId: string): void {
+  void runThumbnailJob(filePath, docId);
+}
+
+/** Gera thumbnail e espera o processo terminar (usado pelo worker BullMQ). */
+export async function runThumbnailJob(filePath: string, docId: string): Promise<void> {
   const supported = [".pdf", ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".docx"];
   const ext = path.extname(filePath).toLowerCase();
   if (!supported.includes(ext)) return;
@@ -43,22 +49,41 @@ export function generateThumbnailAsync(filePath: string, docId: string) {
     stdio: ["ignore", "ignore", "pipe"],
   });
 
-  (async () => {
-    const stderrText = await new Response(child.stderr).text().catch(() => "");
-    const exitCode = await child.exited;
-    if (exitCode !== 0) {
-      console.error(
-        `[THUMBNAIL] Falha ao gerar thumbnail para docId=${docId} (exit code ${exitCode}).` +
-        (stderrText ? ` stderr: ${stderrText.slice(0, 2000)}` : " Sem output em stderr — verifique se python3 e as dependências do script estão instaladas neste ambiente."),
-      );
-      return;
-    }
-    if (!fs.existsSync(thumbPath)) {
-      console.error(`[THUMBNAIL] Script terminou com sucesso (exit 0) mas não criou ${thumbPath}. docId=${docId}`);
-    }
-  })().catch((err) => {
-    console.error(`[THUMBNAIL] Erro inesperado ao acompanhar geração de thumbnail para docId=${docId}:`, err);
+  const stderrText = await new Response(child.stderr).text().catch(() => "");
+  const exitCode = await child.exited;
+  if (exitCode !== 0) {
+    console.error(
+      `[THUMBNAIL] Falha ao gerar thumbnail para docId=${docId} (exit code ${exitCode}).` +
+      (stderrText ? ` stderr: ${stderrText.slice(0, 2000)}` : " Sem output em stderr — verifique se python3 e as dependências do script estão instaladas neste ambiente."),
+    );
+    return;
+  }
+  if (!fs.existsSync(thumbPath)) {
+    console.error(`[THUMBNAIL] Script terminou com sucesso (exit 0) mas não criou ${thumbPath}. docId=${docId}`);
+  }
+}
+
+/** Preferência: fila BullMQ; fallback spawn local. */
+export function scheduleThumbnail(filePath: string, docId: string): void {
+  void tryEnqueueThumbnail(filePath, docId).then((queued) => {
+    if (!queued) generateThumbnailAsync(filePath, docId);
   });
+}
+
+export function parseDocumentTags(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return [...new Set(parsed.filter((t): t is string => typeof t === "string").map((t) => t.trim()).filter(Boolean))];
+  } catch {
+    return [];
+  }
+}
+
+export function serializeDocumentTags(tags: string[]): string {
+  const unique = [...new Set(tags.map((t) => t.trim()).filter(Boolean))].slice(0, 24);
+  return JSON.stringify(unique);
 }
 
 function sanitizeFilename(name: string): string {
@@ -84,8 +109,10 @@ function hydrateDocument(
   current: typeof documentVersions.$inferSelect | null | undefined,
   extra?: Record<string, unknown>,
 ) {
+  const { tags: tagsRaw, ...rest } = doc;
   return {
-    ...doc,
+    ...rest,
+    tags: parseDocumentTags(tagsRaw),
     filename: current?.filename ?? null,
     mimeType: current?.mimeType ?? null,
     filePath: current?.filePath ?? null,
@@ -184,7 +211,7 @@ export async function attachDocument(
     throw new Error("Este identificador já foi associado a um documento entretanto. Tente novamente.");
   }
 
-  generateThumbnailAsync(finalPath, doc.id);
+  scheduleThumbnail(finalPath, doc.id);
 
   await tx.insert(auditLogs).values({
     tenantId: auth.tenantId, userId: auth.userId, action: "ATTACH",
@@ -248,7 +275,7 @@ export async function attachAttachment(
     isCurrent: true,
   }).returning();
 
-  generateThumbnailAsync(finalPath, doc.id);
+  scheduleThumbnail(finalPath, doc.id);
 
   await tx.insert(auditLogs).values({
     tenantId: auth.tenantId, userId: auth.userId, action: "ATTACH_ATTACHMENT",
@@ -340,7 +367,7 @@ export async function createDocumentVersion(
     throw new Error(`Erro ao criar versão: ${err.message}`);
   }
 
-  generateThumbnailAsync(finalPath, doc.id);
+  scheduleThumbnail(finalPath, doc.id);
 
   await tx.insert(auditLogs).values({
     tenantId: auth.tenantId, userId: auth.userId, action: "VERSION",
@@ -496,6 +523,30 @@ export async function downloadDocument(
   return { filePath: resolvedPath, fileName: version.filename };
 }
 
+export async function updateDocumentTags(
+  tx: DB,
+  auth: AuthPayload,
+  docId: string,
+  tags: string[],
+) {
+  const doc = await tx.query.documents.findFirst({
+    where: and(eq(documents.id, docId), eq(documents.tenantId, auth.tenantId)),
+    with: { identifier: true },
+  });
+  if (!doc) return { error: "NOT_FOUND" as const };
+
+  const { allowed, restricted } = await canAccessDocument(
+    tx, auth, doc.identifier?.sectorId ?? null, doc.identifier?.visibility ?? null, doc.id, doc.uploadedBy,
+  );
+  if (!allowed && !restricted) return { error: "NOT_FOUND" as const };
+  if (restricted) return { error: "FORBIDDEN" as const };
+
+  const serialized = serializeDocumentTags(tags);
+  await tx.update(documents).set({ tags: serialized }).where(eq(documents.id, docId));
+
+  return { success: true as const, tags: parseDocumentTags(serialized) };
+}
+
 export async function listDocumentsForApi(
   tx: DB,
   auth: AuthPayload,
@@ -542,6 +593,7 @@ export async function listDocumentsForApi(
       id: d.id,
       kind: d.kind,
       label: d.label,
+      tags: parseDocumentTags(d.tags),
       filename: current?.filename ?? null,
       fileSize: current?.fileSize ?? null,
       mimeType: current?.mimeType ?? null,

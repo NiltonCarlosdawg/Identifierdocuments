@@ -93,12 +93,26 @@ export type DocumentVersion = {
   createdAt: string;
 };
 
+/** Categorias renderizadas como perfis (contratos; candidaturas futuras). */
+export const PROFILE_CATEGORY_IDS = ["CPS", "CPF", "CTR", "CLA"] as const;
+export type ProfileCategoryId = (typeof PROFILE_CATEGORY_IDS)[number];
+
+export const DOCUMENT_PRESET_TAGS = [
+  "urgente",
+  "renovação pendente",
+  "assinado",
+  "rascunho",
+  "arquivado",
+] as const;
+export type DocumentPresetTag = (typeof DOCUMENT_PRESET_TAGS)[number];
+
 export type Document = {
   id: string;
   tenantId: string;
   identifierId: string;
   kind: DocumentKind;
   label: string | null;
+  tags?: string[];
   uploadedBy: string | null;
   createdAt: string;
   /** Campos hidratados da versão current (API). */

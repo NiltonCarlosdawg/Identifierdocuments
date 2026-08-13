@@ -125,6 +125,8 @@ export const documents = pgTable("documents", {
   identifierId: uuid("identifier_id").notNull().references(() => identifiers.id),
   kind: text("kind", { enum: ["primary", "attachment"] }).notNull().default("primary"),
   label: text("label"),
+  /** JSON array de strings (tags de perfil: urgente, assinado, custom, …). */
+  tags: text("tags").notNull().default("[]"),
   uploadedBy: uuid("uploaded_by").references(() => users.id),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [

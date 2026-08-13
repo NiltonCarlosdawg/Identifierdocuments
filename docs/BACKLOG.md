@@ -19,7 +19,9 @@
 > offline, aprovações pendentes, documentos recentes), prompt few-shot do
 > classificador e evicção da cache de downloads (30 dias). **Fase 14 — Anexos
 > múltiplos + versionamento** concluída (`document_versions`, kind/label,
-> endpoints e UI de lote/detalhe).**
+> endpoints e UI de lote/detalhe). **P2** (preview PDF, perfil utilizador, fila
+> com upload_mode, CI) e **P3** (Playwright) concluídos; placeholders **2.7**
+> (perfis contratos) e **3.4** (BullMQ) concluídos.**
 
 ---
 
@@ -172,7 +174,9 @@ aplicadas posteriormente a itens aqui marcados como completos)*
   autenticado via `api.getBlob(/documents/:id/download)`
 
 ### 2.7 — Contratos & Candidaturas como Perfis (UI)
-- [ ] Sem alteração — não abordado nesta ronda de trabalho.
+- [x] **P1** Vista «Perfis» em Documentos para CPS/CPF/CTR/CLA (cards com tags)
+- [x] **P1** Tags pré-definidas + custom; `PATCH /documents/:id/tags` + coluna `tags`
+- [x] **P2** Detalhe em modo perfil (secção de tags; versões/anexos/partilha existentes)
 
 ### 2.8 — Gestão de Utilizadores & Sectores (UI)
 - [x] **P1** Todos os itens principais — implementados (`Users.tsx`, `Sectors.tsx`)
@@ -201,7 +205,9 @@ aplicadas posteriormente a itens aqui marcados como completos)*
 - [x] **P0/P1** Todos os itens, excepto notificação nativa (pendente)
 
 ### 3.4 — BullMQ Server-side
-- [ ] Sem alteração — não abordado nesta ronda.
+- [x] **P1** Filas `docid-email` e `docid-thumbnail` (BullMQ + Redis)
+- [x] **P1** Workers no arranque da API; fallback síncrono se Redis indisponível
+- [x] **P1** Convites / reset password e thumbnails enfileirados via `jobs/queues.ts`
 
 ---
 
@@ -700,7 +706,8 @@ aplicadas posteriormente a itens aqui marcados como completos)*
 - [x] **P2** Pipeline CI básica — `.github/workflows/ci.yml`: typecheck API,
   testes unitários API/desktop, `bun run build` do frontend, `cargo test --lib`
   do sync Rust
-- [ ] **P3** Testes E2E com Playwright
+- [x] **P3** Testes E2E com Playwright — `e2e/` + job CI (smoke UI login;
+  smoke API opcional via `API_E2E_URL`)
 
 ---
 

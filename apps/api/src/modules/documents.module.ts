@@ -4,7 +4,7 @@ import path from "node:path";
 import {
   attachDocument, attachAttachment, createDocumentVersion,
   getDocumentMeta, downloadDocument, canAccessDocument,
-  pickPrimaryDocument, listDocumentsForApi,
+  pickPrimaryDocument, listDocumentsForApi, updateDocumentTags,
 } from "../services/attachment.service";
 import { requireAuth, getFreshRoles } from "../middleware/auth";
 import { documents, documentShares, approvals, sectors, auditLogs, identifiers, users, documentAccessRequests } from "../db/schema";
@@ -125,6 +125,32 @@ export const documentsModule = new Elysia({ prefix: "/documents" })
       identifierId: t.Optional(t.String()),
     }),
     detail: { summary: "Listar documentos", tags: ["Documentos"] },
+  })
+
+  .patch("/:id/tags", async ({ tenantId, auth, params, body, set }) => {
+    try {
+      return await withTenant(tenantId, async (tx) => {
+        const result = await updateDocumentTags(tx, auth!, params.id, body.tags);
+        if ("error" in result) {
+          if (result.error === "FORBIDDEN") {
+            set.status = 403;
+            return { error: { code: "FORBIDDEN", message: "Sem permissão para editar tags." } };
+          }
+          set.status = 404;
+          return { error: { code: "NOT_FOUND", message: "Documento não encontrado." } };
+        }
+        return { data: { tags: result.tags } };
+      });
+    } catch (err: any) {
+      set.status = 500;
+      return { error: { code: "TAGS_ERROR", message: safeError(err) } };
+    }
+  }, {
+    params: t.Object({ id: t.String() }),
+    body: t.Object({
+      tags: t.Array(t.String({ minLength: 1, maxLength: 64 }), { maxItems: 24 }),
+    }),
+    detail: { summary: "Actualizar tags de perfil do documento", tags: ["Documentos"] },
   })
 
   .get("/:param", async ({ tenantId, auth, params, set }) => {

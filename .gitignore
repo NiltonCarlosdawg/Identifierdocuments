@@ -10,3 +10,7 @@ apps/desktop/src-tauri/target/
 apps/desktop/src-tauri/gen/
 dump.rdb
 tsconfig.tsbuildinfo
+playwright-report/
+test-results/
+blob-report/
+playwright/.cache/

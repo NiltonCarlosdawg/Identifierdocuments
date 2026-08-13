@@ -19,6 +19,7 @@ import { devicesModule } from "./modules/devices.module";
 import { classifierModule } from "./modules/classifier.module";
 import { notificationSSEModule } from "./services/notification.service";
 import { logger } from "./lib/logger";
+import { startWorkers } from "./jobs/workers";
 
 const requestTimings = new WeakMap<Request, number>();
 
@@ -125,5 +126,9 @@ const app = new Elysia()
   .listen(3000);
 
 logger.info("DocID API arrancou em http://localhost:3000");
+
+void startWorkers().catch((err) => {
+  logger.warn({ err }, "[BULLMQ] Falha ao arrancar workers");
+});
 
 export type App = typeof app;
