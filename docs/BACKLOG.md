@@ -3,9 +3,9 @@
 > Backlog organizado por fases. Cada fase é um entregável funcional e independente.
 > Critério de prioridade: P0 = bloqueante | P1 = essencial | P2 = importante | P3 = nice-to-have
 >
-> **Estado: Fases 1-4 completas e validadas E2E. Fase 5 maioritariamente completa
-> (falta só integração com impressoras). Preview PDF/multi-página no scanner,
-> extracção `.docx` e cache Redis do classificador concluídos.
+> **Estado: Fases 1-5 completas e validadas E2E (impressoras e convite por email
+> incluídos). Preview PDF/multi-página no scanner, extracção `.docx` e cache Redis
+> do classificador concluídos.
 > Fase 6 — Geração Offline de Identificadores
 > — completa (backend, motor de sync nativo, renovação de lease, UI e registo de
 > dispositivos). Fase 7 — Cache Offline de Leitura — completa (leitura de
@@ -17,7 +17,9 @@
 > Escritas Offline — completa. Ronda de "itens fáceis" do backlog concluída:
 > `GET /tenants/me/stats`, `GET /roles/:id/users`, widgets do Dashboard (fila
 > offline, aprovações pendentes, documentos recentes), prompt few-shot do
-> classificador e evicção da cache de downloads (30 dias).**
+> classificador e evicção da cache de downloads (30 dias). **Fase 14 — Anexos
+> múltiplos + versionamento** concluída (`document_versions`, kind/label,
+> endpoints e UI de lote/detalhe).**
 
 ---
 
@@ -239,7 +241,9 @@ aplicadas posteriormente a itens aqui marcados como completos)*
   com fallback para download (WebKit/Linux pode não renderizar PDF inline)
 - [x] **P1** Multi-página — cada digitalização acrescenta uma página; navegação,
   remover página, descarregar actual ou todas; mudar o formato limpa as páginas
-- [ ] **P2** Integração com impressoras
+- [x] **P2** Integração com impressoras — `list_printers`/`print_file`/`print_bytes`
+  (CUPS `lp`/`lpstat` no Linux/macOS, Win32_Printer no Windows); impressora
+  predefinida em Settings; imprimir a partir do Scanner e do detalhe de Documentos
 
 ### 5.3 — Classificação por IA
 - [x] **P0** `POST /classifier/suggest`
@@ -261,7 +265,10 @@ aplicadas posteriormente a itens aqui marcados como completos)*
   sucesso (sem auto-login, por decisão explícita)
 - [x] **P1** Ecrã de configurações da organização (`Settings` → "Organização")
 - [x] **P2** Importar utilizadores via CSV *(Fase 14 — `POST /users/import` ORG_ADMIN, colunas email/full_name/sector/role, password gerada devolvida no relatório; UI em Users)*
-- [ ] **P2** Convite de membros por email (não fazia parte do fluxo simplificado)
+- [x] **P2** Convite de membros por email — `POST /users/invite` (ORG_ADMIN /
+  SECTOR_SUPERVISOR); cria conta com password temporária, envia email SMTP
+  (fallback: password devolvida na resposta se SMTP não estiver configurado);
+  UI em Utilizadores → Convidar
 
 ### 5.5 — Configurações & Preferências (UI)
 - [x] **P1** Perfil do utilizador (`Profile.tsx`)
@@ -681,6 +688,36 @@ aplicadas posteriormente a itens aqui marcados como completos)*
 
 ---
 
+## FASE 14 — Anexos múltiplos + versionamento de documentos
+> **Objectivo:** vários ficheiros por identificador (primary + attachments) e histórico de versões (a mais recente é a activa).
+> **Entregável:** migração 0015, API attach/attachments/versions, UI desktop (lote + detalhe).
+
+### 14.1 — Modelo de dados
+- [x] **P0** Tabela `document_versions` com `UNIQUE(document_id, version)` e um `is_current` por documento
+- [x] **P0** Remover unique de `documents.identifier_id`; adicionar `kind` (`primary`|`attachment`) e `label`
+- [x] **P0** Índice parcial: no máximo um `kind=primary` por `identifier_id`
+- [x] **P0** Backfill: cada documento existente → versão 1 current; metadados de ficheiro na versão
+- [x] **P0** RLS para `document_versions`
+
+### 14.2 — API
+- [x] **P0** `POST /documents/attach` — cria primary v1 (rejeita se já existir primary)
+- [x] **P0** `POST /documents/attachments` — cria attachment v1 (sem verificação obrigatória do ID)
+- [x] **P0** `POST /documents/:id/versions` — nova versão; primary exige verificação do ID
+- [x] **P0** `GET /documents/:id` — meta + `versions[]` + `attachments[]`
+- [x] **P0** `GET /documents/:id/versions/:version/download` — download de versão específica
+- [x] **P1** Listagem devolve o primary actual por identificador
+
+### 14.3 — Desktop
+- [x] **P0** `attach_document_native` com `mode: attach | version | attachment`
+- [x] **P0** UploadModal: selecção múltipla, lote com IDs distintos ou anexos ao mesmo ID
+- [x] **P0** DetailModal: timeline de versões, nova versão, adicionar anexo
+- [x] **P1** Feedback de lote por ficheiro (sucesso/falha/fila) sem abortar o resto
+
+### 14.4 — Testes
+- [x] **P0** Suite de integração: primary, rejeição do 2.º primary, attachment, versão, download histórico
+
+---
+
 ## Resumo por Fase
 
 | Fase | Foco | Estado |
@@ -689,7 +726,7 @@ aplicadas posteriormente a itens aqui marcados como completos)*
 | **2** | App Tauri (online) | ✅ Completo |
 | **3** | Offline sync | ✅ Completo (incl. bug crítico de path corrigido, testes) |
 | **4** | Partilha + Aprovações + SSE | ✅ Completo |
-| **5** | Scanner + IA + File Watcher + Settings | 🔄 Quase completo — falta integração com impressoras |
+| **5** | Scanner + IA + File Watcher + Settings | ✅ Completo — watcher, scanner/PDF/multi-página, impressoras, classificador com cache Redis, convite por email |
 | **5.6** | Correcções de segurança (hardening) | ✅ Completo — RLS, advisory lock, roles frescas, tratamento de erro uniforme, suite de testes de carga |
 | **6** | Geração offline de identificadores | ✅ Completo — backend (M0–M2), motor de sync nativo + testes (M3), UI (M4 + M4.5), registo de dispositivos (M5); classificação legal de categorias pendente de confirmação profissional |
 | **7** | Cache offline de leitura | ✅ Completo — `OfflineCache` encriptado (AES-GCM), hook nas 8 páginas, `mapError`, limpeza no logout; resolve o P0 de ecrãs vazios offline |
@@ -699,6 +736,7 @@ aplicadas posteriormente a itens aqui marcados como completos)*
 | **11** | Download offline de documentos | ✅ Completo — cache de ficheiros em disco (`downloads_dir`), `download_document_offline`/`is_document_cached`/`open_local_file`, abertura com app do SO, indicador de disponibilidade offline no detalhe, evicção por idade (30 dias); verificação manual em runtime pendente |
 | **12** | Fila de escritas offline | ✅ Completo — tabela `local_write_queue`, comandos enqueue/get/remove/retry, replay FIFO com idempotência (`ALREADY_RESOLVED`/conflitos/401), interceptor no `HttpApiClient`, painel + badge de escritas no Layout; verificação manual em runtime pendente |
 | **13** | Itens fáceis do backlog | ✅ Completo — `GET /tenants/me/stats`, `GET /roles/:id/users`, widgets do Dashboard (fila offline, aprovações pendentes, documentos recentes), prompt few-shot do classificador, evicção da cache de downloads |
+| **14** | Anexos múltiplos + versionamento | ✅ Completo — `document_versions`, kind/label, endpoints attach/attachments/versions, UI lote + detalhe |
 
 > Consultar `README.md` para visão geral do produto e arquitectura; este
 > ficheiro é o documento vivo de estado por fase.

@@ -122,7 +122,22 @@ export const idempotencyRecords = pgTable("idempotency_records", {
 export const documents = pgTable("documents", {
   id: uuid("id").primaryKey().defaultRandom(),
   tenantId: uuid("tenant_id").notNull().references(() => organizations.id),
-  identifierId: uuid("identifier_id").notNull().unique().references(() => identifiers.id),
+  identifierId: uuid("identifier_id").notNull().references(() => identifiers.id),
+  kind: text("kind", { enum: ["primary", "attachment"] }).notNull().default("primary"),
+  label: text("label"),
+  uploadedBy: uuid("uploaded_by").references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  index("documents_tenant_idx").on(t.tenantId),
+  index("documents_identifier_idx").on(t.identifierId),
+  uniqueIndex("documents_one_primary_per_identifier_idx").on(t.identifierId).where(sql`kind = 'primary'`),
+]);
+
+export const documentVersions = pgTable("document_versions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  tenantId: uuid("tenant_id").notNull().references(() => organizations.id),
+  documentId: uuid("document_id").notNull().references(() => documents.id),
+  version: integer("version").notNull(),
   filename: text("filename").notNull(),
   mimeType: text("mime_type").notNull(),
   filePath: text("file_path").notNull(),
@@ -130,9 +145,13 @@ export const documents = pgTable("documents", {
   extractedText: text("extracted_text"),
   uploadedBy: uuid("uploaded_by").references(() => users.id),
   uploadSource: text("upload_source", { enum: ["manual", "scanner", "sync"] }).notNull().default("manual"),
+  isCurrent: boolean("is_current").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [
-  index("documents_tenant_idx").on(t.tenantId),
+  index("document_versions_tenant_idx").on(t.tenantId),
+  index("document_versions_document_idx").on(t.documentId),
+  uniqueIndex("document_versions_doc_version_uidx").on(t.documentId, t.version),
+  uniqueIndex("document_versions_one_current_idx").on(t.documentId).where(sql`is_current = true`),
 ]);
 
 export const documentAccessRequests = pgTable("document_access_requests", {
@@ -338,20 +357,27 @@ export const userRoleRelations = relations(userRoles, ({ one }) => ({
   sector: one(sectors, { fields: [userRoles.sectorId], references: [sectors.id] }),
 }));
 
-export const identifierRelations = relations(identifiers, ({ one }) => ({
+export const identifierRelations = relations(identifiers, ({ one, many }) => ({
   organization: one(organizations, { fields: [identifiers.tenantId], references: [organizations.id] }),
   sector: one(sectors, { fields: [identifiers.sectorId], references: [sectors.id] }),
   category: one(categories, { fields: [identifiers.categoryId], references: [categories.id] }),
   createdByUser: one(users, { fields: [identifiers.createdBy], references: [users.id], relationName: "createdByIdentifiers" }),
-  document: one(documents, { fields: [identifiers.id], references: [documents.identifierId] }),
+  documents: many(documents),
 }));
 
 export const documentRelations = relations(documents, ({ one, many }) => ({
   organization: one(organizations, { fields: [documents.tenantId], references: [organizations.id] }),
   identifier: one(identifiers, { fields: [documents.identifierId], references: [identifiers.id] }),
   uploader: one(users, { fields: [documents.uploadedBy], references: [users.id] }),
+  versions: many(documentVersions),
   shares: many(documentShares),
   approvals: many(approvals),
+}));
+
+export const documentVersionRelations = relations(documentVersions, ({ one }) => ({
+  organization: one(organizations, { fields: [documentVersions.tenantId], references: [organizations.id] }),
+  document: one(documents, { fields: [documentVersions.documentId], references: [documents.id] }),
+  uploader: one(users, { fields: [documentVersions.uploadedBy], references: [users.id] }),
 }));
 
 export const documentAccessRequestRelations = relations(documentAccessRequests, ({ one }) => ({

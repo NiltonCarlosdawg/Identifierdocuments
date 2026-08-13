@@ -76,10 +76,12 @@ export type Identifier = {
   createdAt: string;
 };
 
-export type Document = {
+export type DocumentKind = "primary" | "attachment";
+
+export type DocumentVersion = {
   id: string;
-  tenantId: string;
-  identifierId: string;
+  documentId: string;
+  version: number;
   filename: string;
   mimeType: string;
   filePath: string;
@@ -87,7 +89,26 @@ export type Document = {
   extractedText: string | null;
   uploadedBy: string | null;
   uploadSource: "manual" | "scanner" | "sync";
+  isCurrent: boolean;
   createdAt: string;
+};
+
+export type Document = {
+  id: string;
+  tenantId: string;
+  identifierId: string;
+  kind: DocumentKind;
+  label: string | null;
+  uploadedBy: string | null;
+  createdAt: string;
+  /** Campos hidratados da versão current (API). */
+  filename?: string | null;
+  mimeType?: string | null;
+  filePath?: string | null;
+  fileSize?: number | null;
+  extractedText?: string | null;
+  uploadSource?: "manual" | "scanner" | "sync" | null;
+  currentVersion?: number | null;
 };
 
 export type DocumentShare = {

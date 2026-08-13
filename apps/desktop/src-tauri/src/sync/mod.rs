@@ -1184,21 +1184,64 @@ pub async fn upload_document(
     identifier: &str,
     upload_source: &str,
 ) -> Result<serde_json::Value, String> {
+    upload_document_mode(
+        api_base_url,
+        token,
+        file_path,
+        filename,
+        "attach",
+        Some(identifier),
+        None,
+        None,
+        upload_source,
+    )
+    .await
+}
+
+pub async fn upload_document_mode(
+    api_base_url: &str,
+    token: &str,
+    file_path: &str,
+    filename: &str,
+    mode: &str,
+    identifier: Option<&str>,
+    document_id: Option<&str>,
+    label: Option<&str>,
+    upload_source: &str,
+) -> Result<serde_json::Value, String> {
     let bytes = std::fs::read(file_path).map_err(|e| e.to_string())?;
     let part = multipart::Part::bytes(bytes)
         .file_name(filename.to_string())
         .mime_str("application/octet-stream")
         .map_err(|e| e.to_string())?;
 
-    let form = multipart::Form::new()
-        .text("identifier", identifier.to_string())
+    let endpoint = match mode {
+        "version" => {
+            let id = document_id.ok_or_else(|| "documentId é obrigatório para nova versão.".to_string())?;
+            format!("{api_base_url}/documents/{id}/versions")
+        }
+        "attachment" => format!("{api_base_url}/documents/attachments"),
+        _ => format!("{api_base_url}/documents/attach"),
+    };
+
+    let mut form = multipart::Form::new()
         .text("uploadSource", upload_source.to_string())
         .part("file", part);
+
+    if mode != "version" {
+        let ident = identifier.ok_or_else(|| "identifier é obrigatório.".to_string())?;
+        form = form.text("identifier", ident.to_string());
+    }
+    if let Some(lbl) = label {
+        if !lbl.is_empty() {
+            form = form.text("label", lbl.to_string());
+        }
+    }
 
     let client = build_tls_client(120)?;
 
     let res = client
-        .post(format!("{api_base_url}/documents/attach"))
+        .post(&endpoint)
         .bearer_auth(token)
         .multipart(form)
         .send()
@@ -1856,8 +1899,11 @@ pub async fn force_sync(app: AppHandle, state: State<'_, SyncState>) -> Result<u
 pub async fn attach_document_native(
     state: State<'_, SyncState>,
     path: String,
-    identifier: String,
+    identifier: Option<String>,
     upload_source: Option<String>,
+    mode: Option<String>,
+    document_id: Option<String>,
+    label: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let api_base_url = state.api_base_url.lock().map_err(|e| e.to_string())?.clone();
     let token = state
@@ -1873,8 +1919,27 @@ pub async fn attach_document_native(
         .and_then(|n| n.to_str())
         .unwrap_or("documento");
     let source = upload_source.as_deref().unwrap_or("manual");
+    let mode_str = mode.as_deref().unwrap_or("attach");
 
-    upload_document(&api_base_url, &token, &path, filename, &identifier, source).await
+    if mode_str == "version" && document_id.is_none() {
+        return Err("documentId é obrigatório para mode=version.".to_string());
+    }
+    if mode_str != "version" && identifier.as_ref().map(|s| s.trim().is_empty()).unwrap_or(true) {
+        return Err("identifier é obrigatório.".to_string());
+    }
+
+    upload_document_mode(
+        &api_base_url,
+        &token,
+        &path,
+        filename,
+        mode_str,
+        identifier.as_deref(),
+        document_id.as_deref(),
+        label.as_deref(),
+        source,
+    )
+    .await
 }
 
 fn doc_cache_dir(downloads_dir: &PathBuf, document_param: &str) -> PathBuf {

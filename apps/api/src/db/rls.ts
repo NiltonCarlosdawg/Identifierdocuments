@@ -4,7 +4,7 @@ const connectionString = process.env.DATABASE_URL!;
 
 const TABLES_WITH_TENANT = [
   "sectors", "users", "roles", "identifiers",
-  "documents", "approvals", "audit_logs",
+  "documents", "document_versions", "approvals", "audit_logs",
   "classifier_feedback",
   "devices", "identifier_leases", "identifier_release_pool",
   "idempotency_records",
