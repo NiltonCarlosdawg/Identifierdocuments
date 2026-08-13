@@ -9,7 +9,6 @@ import { PageHeader, OfflineNotice } from "../components/docid-ui";
 import { useOfflineCache } from "../hooks/useOfflineCache";
 import { mapError } from "../../shared/errors/mapError";
 import { sync, api } from "../../infrastructure/di/container";
-import { sendNativeNotification } from "../../shared/helpers/notifications";
 import type { WatcherFileRow } from "../../domain/entities/Watcher";
 import { Server, Sun, Moon, Save, RotateCcw, FolderPlus, Trash2, Play, Square, Eye, RefreshCw, Building2, Bell, Download, Smartphone, AlertTriangle, Printer } from "lucide-react";
 
@@ -600,6 +599,8 @@ function DevicesTab() {
 function NotificationsTab() {
   const [prefs, setPrefs] = useState<Record<string, boolean>>({});
   const [saving, setSaving] = useState<string | null>(null);
+  const setNotificationPrefs = useAppConfigStore(s => s.setNotificationPrefs);
+  const patchNotificationPref = useAppConfigStore(s => s.patchNotificationPref);
 
   const { loading, error, isStale, cachedAt, refresh } = useOfflineCache<Record<string, boolean>>({
     endpoint: "/auth/me",
@@ -607,17 +608,23 @@ function NotificationsTab() {
       const res = await api.get<{ notificationPreferences?: Record<string, boolean> }>("/auth/me");
       return res.notificationPreferences ?? {};
     },
-    onData: setPrefs,
+    onData: (data) => {
+      setPrefs(data);
+      setNotificationPrefs(data);
+    },
   });
 
   const handleToggle = async (key: string) => {
-    const newVal = !prefs[key];
+    const current = key in prefs ? !!prefs[key] : true;
+    const newVal = !current;
     setPrefs(p => ({ ...p, [key]: newVal }));
+    patchNotificationPref(key, newVal);
     setSaving(key);
     try {
       await api.patch("/auth/me/notifications-preferences", { [key]: newVal });
     } catch {
-      setPrefs(p => ({ ...p, [key]: !newVal }));
+      setPrefs(p => ({ ...p, [key]: current }));
+      patchNotificationPref(key, current);
     } finally {
       setSaving(null);
     }
@@ -629,14 +636,17 @@ function NotificationsTab() {
     { key: "approval_pending", label: "Aprovação pendente", desc: "Quando um documento necessita da sua aprovação" },
     { key: "approval_resolved", label: "Aprovação resolvida", desc: "Quando uma aprovação foi concedida ou rejeitada" },
     { key: "document_shared", label: "Documento partilhado", desc: "Quando um documento é partilhado consigo ou com o seu sector" },
-    { key: "sync_complete", label: "Sync completo", desc: "Quando uma sincronização de ficheiros é concluída" },
+    { key: "sync_complete", label: "Sync completo", desc: "Quando a fila offline envia documentos com sucesso" },
+    { key: "sync_failed", label: "Falha de sync", desc: "Quando um upload da fila offline falha" },
+    { key: "queue_enqueued", label: "Enfileirado offline", desc: "Quando um documento é guardado na fila por falta de rede" },
+    { key: "write_enqueued", label: "Escrita pendente", desc: "Quando uma alteração de dados fica na fila de escritas offline" },
     { key: "watcher_detected", label: "Ficheiro detectado pelo watcher", desc: "Quando um novo ficheiro é detectado na pasta vigiada" },
   ];
 
   return (
     <div className="docid-panel p-6 max-w-xl space-y-5">
       <h3 className="text-sm font-semibold text-docid-text">Preferências de Notificação</h3>
-      <p className="text-xs text-docid-muted">Seleccione para que eventos pretende ser notificado.</p>
+      <p className="text-xs text-docid-muted">Seleccione para que eventos pretende ser notificado. Eventos de fila/watcher usam notificações nativas do sistema (Tauri).</p>
       {isStale && <OfflineNotice cachedAt={cachedAt} onRetry={refresh} />}
       {error && <p className="text-xs text-docid-error">{error}</p>}
       {items.map(({ key, label, desc }) => (
@@ -645,7 +655,7 @@ function NotificationsTab() {
             <p className="text-sm font-medium text-docid-text">{label}</p>
             <p className="text-xs text-docid-muted">{desc}</p>
           </div>
-          <input type="checkbox" checked={!!prefs[key]} onChange={() => handleToggle(key)} disabled={saving === key} className="rounded border-docid-border bg-docid-surface-low text-docid-primary focus:ring-docid-primary" />
+          <input type="checkbox" checked={key in prefs ? !!prefs[key] : true} onChange={() => handleToggle(key)} disabled={saving === key} className="rounded border-docid-border bg-docid-surface-low text-docid-primary focus:ring-docid-primary" />
         </label>
       ))}
     </div>
@@ -665,16 +675,12 @@ function WatcherTab() {
     (async () => {
       if (typeof window !== "undefined" && !("__TAURI_INTERNALS__" in window)) return;
       const { listen } = await import("@tauri-apps/api/event");
-      const f1 = await listen("watcher:file_detected", (e) => {
+      const f1 = await listen("watcher:file_detected", () => {
         bumpDetected();
-        const p = e.payload as { path?: string };
-        sendNativeNotification("Documento detectado", `Ficheiro novo em ${p?.path ?? "pasta vigiada"}`);
         refreshFiles(); refreshReport();
       });
-      const f2 = await listen("watcher:identifier_found", (e) => {
+      const f2 = await listen("watcher:identifier_found", () => {
         bumpDetected();
-        const p = e.payload as { path?: string; identifier?: string };
-        sendNativeNotification("Identificador encontrado", `O documento ${p?.path ?? ""} contém ${p?.identifier ?? "um identificador"}`);
         refreshFiles(); refreshReport();
       });
       const f3 = await listen("watcher:status_changed", () => {

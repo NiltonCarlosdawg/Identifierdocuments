@@ -11,6 +11,7 @@ interface AppConfigState {
   avatar: string | null;
   defaultScanner: string | null;
   defaultPrinter: string | null;
+  notificationPrefs: Record<string, boolean>;
   setApiBaseUrl: (url: string) => void;
   resetApiBaseUrl: () => void;
   setTheme: (theme: Theme) => void;
@@ -18,12 +19,15 @@ interface AppConfigState {
   setAvatar: (avatar: string | null) => void;
   setDefaultScanner: (name: string | null) => void;
   setDefaultPrinter: (name: string | null) => void;
+  setNotificationPrefs: (prefs: Record<string, boolean>) => void;
+  patchNotificationPref: (key: string, value: boolean) => void;
 }
 
 export const useAppConfigStore = create<AppConfigState>()(
   persist(
     (set, get) => ({
       apiBaseUrl: DEFAULT_API_URL, theme: "dark", avatar: null, defaultScanner: null, defaultPrinter: null,
+      notificationPrefs: {},
       setApiBaseUrl: (url) => {
         const clean = url.trim().replace(/\/$/, "");
         if (!clean.startsWith("http://") && !clean.startsWith("https://")) return;
@@ -36,6 +40,8 @@ export const useAppConfigStore = create<AppConfigState>()(
       setAvatar: (avatar) => set({ avatar }),
       setDefaultScanner: (name) => set({ defaultScanner: name }),
       setDefaultPrinter: (name) => set({ defaultPrinter: name }),
+      setNotificationPrefs: (prefs) => set({ notificationPrefs: prefs ?? {} }),
+      patchNotificationPref: (key, value) => set({ notificationPrefs: { ...get().notificationPrefs, [key]: value } }),
     }),
     { name: "docid-config", storage: tauriJsonStorage },
   ),

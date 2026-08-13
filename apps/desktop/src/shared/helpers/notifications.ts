@@ -1,3 +1,10 @@
+export type NativeNotificationKey =
+  | "sync_complete"
+  | "sync_failed"
+  | "queue_enqueued"
+  | "write_enqueued"
+  | "watcher_detected";
+
 export function isTauriRuntime(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
@@ -31,4 +38,20 @@ export async function sendNativeNotification(title: string, body: string): Promi
   } catch {
     // Notificações nativas são best-effort; nunca quebram o fluxo principal.
   }
+}
+
+/** Preferência em falta = activa (opt-out). */
+export function isNativePrefEnabled(prefs: Record<string, boolean>, key: NativeNotificationKey): boolean {
+  if (!(key in prefs)) return true;
+  return !!prefs[key];
+}
+
+export async function notifyNative(
+  prefs: Record<string, boolean>,
+  key: NativeNotificationKey,
+  title: string,
+  body: string,
+): Promise<void> {
+  if (!isNativePrefEnabled(prefs, key)) return;
+  await sendNativeNotification(title, body);
 }

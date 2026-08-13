@@ -6,6 +6,7 @@ import { LayoutDashboard, FileText, Fingerprint, CheckSquare, Users, UserPlus, C
 import OfflineQueuePanel, { OfflineQueueBadge } from "./OfflineQueuePanel";
 import WriteQueuePanel, { WriteQueueBadge } from "./WriteQueuePanel";
 import NotificationBell from "./NotificationBell";
+import NativeNotificationsBridge from "./NativeNotificationsBridge";
 
 const navItems = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -86,6 +87,7 @@ export default function Layout() {
       </div>
       <OfflineQueuePanel />
       <WriteQueuePanel />
+      <NativeNotificationsBridge />
     </div>
   );
 }

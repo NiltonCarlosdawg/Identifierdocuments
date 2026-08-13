@@ -1702,6 +1702,7 @@ fn safe_dest_path(uploads_dir: &PathBuf, filename: &str) -> Result<PathBuf, Stri
 
 #[tauri::command]
 pub fn enqueue_upload(
+    app: AppHandle,
     state: State<'_, SyncState>,
     source_path: String,
     identifier: String,
@@ -1729,11 +1730,21 @@ pub fn enqueue_upload(
     let conn = state.conn()?;
     let safe_name = sanitize_filename(&filename);
     let mode = upload_mode.as_deref().unwrap_or("attach");
-    insert_item(&conn, &dest, &safe_name, &identifier, &tenant_id, &user_id, mode)
+    let item = insert_item(&conn, &dest, &safe_name, &identifier, &tenant_id, &user_id, mode)?;
+    let _ = app.emit(
+        "queue:enqueued",
+        serde_json::json!({
+            "id": item.id,
+            "filename": item.filename,
+            "identifier": item.identifier,
+        }),
+    );
+    Ok(item)
 }
 
 #[tauri::command]
 pub fn enqueue_upload_bytes(
+    app: AppHandle,
     state: State<'_, SyncState>,
     filename: String,
     bytes: Vec<u8>,
@@ -1753,7 +1764,16 @@ pub fn enqueue_upload_bytes(
     let conn = state.conn()?;
     let safe_name = sanitize_filename(&filename);
     let mode = upload_mode.as_deref().unwrap_or("attach");
-    insert_item(&conn, &dest, &safe_name, &identifier, &tenant_id, &user_id, mode)
+    let item = insert_item(&conn, &dest, &safe_name, &identifier, &tenant_id, &user_id, mode)?;
+    let _ = app.emit(
+        "queue:enqueued",
+        serde_json::json!({
+            "id": item.id,
+            "filename": item.filename,
+            "identifier": item.identifier,
+        }),
+    );
+    Ok(item)
 }
 
 #[tauri::command]
@@ -1842,6 +1862,7 @@ pub fn retry_queue_item(state: State<'_, SyncState>, id: String) -> Result<(), S
 
 #[tauri::command]
 pub fn enqueue_write(
+    app: AppHandle,
     state: State<'_, SyncState>,
     method: String,
     path: String,
@@ -1874,7 +1895,16 @@ pub fn enqueue_write(
         return Ok(existing);
     }
 
-    insert_write(&conn, &method, &path, body, &idempotency_key, resource_key)
+    let item = insert_write(&conn, &method, &path, body, &idempotency_key, resource_key)?;
+    let _ = app.emit(
+        "write:enqueued",
+        serde_json::json!({
+            "id": item.id,
+            "method": item.method,
+            "path": item.path,
+        }),
+    );
+    Ok(item)
 }
 
 #[tauri::command]

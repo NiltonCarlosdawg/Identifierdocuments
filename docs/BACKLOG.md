@@ -127,8 +127,9 @@ aplicadas posteriormente a itens aqui marcados como completos)*
 - [x] **P0** Configurar `tauri-plugin-fs`
 - [x] **P1** Configurar `@tauri-apps/plugin-dialog` *(diálogo nativo de ficheiro/pasta, necessário para upload nativo e watcher)*
 - [x] **P1** Configurar `tauri-plugin-notification` — plugin registado (Rust +
-  capability `notification:default`) e notificações nativas nos eventos do
-  watcher e na conclusão da sincronização (`shared/helpers/notifications.ts`)
+  capability `notification:default`); bridge global no Layout
+  (`NativeNotificationsBridge`) para watcher, fila offline e sync
+  (`shared/helpers/notifications.ts`)
 - [x] **P1** Configurar `tauri-plugin-updater` — plugin + `process`, capabilities,
   `createUpdaterArtifacts`, pubkey em `tauri.conf.json`, endpoint GitHub Releases
   (`latest.json`); check no arranque (release) e botão em Settings → Servidor;
@@ -202,7 +203,10 @@ aplicadas posteriormente a itens aqui marcados como completos)*
   inesperado (`reset_stuck_items`, corre no arranque do ciclo de sync)
 
 ### 3.3 — UI da Fila Offline
-- [x] **P0/P1** Todos os itens, excepto notificação nativa (pendente)
+- [x] **P0/P1** Painel, badge, retry/remove, sync forçado
+- [x] **P1** Notificações nativas do SO — `NativeNotificationsBridge` no Layout:
+  enfileiramento (`queue:enqueued` / `write:enqueued`), `sync:complete`,
+  `sync:failed`, watcher; preferências em Settings (opt-out)
 
 ### 3.4 — BullMQ Server-side
 - [x] **P1** Filas `docid-email` e `docid-thumbnail` (BullMQ + Redis)
