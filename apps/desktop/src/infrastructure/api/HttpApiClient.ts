@@ -83,6 +83,9 @@ export class HttpApiClient implements IApiClient {
       res = await fetch(`${this.baseUrl}${path}`, { ...options, headers });
     } catch {
       if (this.isMutationMethod(method)) {
+        if (options.body instanceof FormData) {
+          throw new Error("Sem ligação ao servidor. Uploads de ficheiro offline requerem a app desktop (fila nativa).");
+        }
         const queued = await this.enqueueOfflineWrite(method, path, options.body);
         if (queued) {
           throw new Error("Sem ligação. A alteração ficou pendente e será sincronizada automaticamente quando a ligação voltar.");

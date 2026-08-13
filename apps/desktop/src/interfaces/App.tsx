@@ -27,6 +27,15 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function RoleProtectedRoute({ children, roles }: { children: React.ReactNode; roles: string[] }) {
+  const token = useAuthStore(s => s.token);
+  const user = useAuthStore(s => s.user);
+  if (!token) return <Navigate to="/login" replace />;
+  // Enquanto o perfil hidrata, permite render; a API continua a ser a fonte de authz.
+  if (user && !roles.some(r => user.roles?.includes(r))) return <Navigate to="/" replace />;
+  return <>{children}</>;
+}
+
 function ConfigSync() {
   const token = useAuthStore(s => s.token);
   const apiBaseUrl = useAppConfigStore(s => s.apiBaseUrl);
@@ -93,13 +102,13 @@ export default function App() {
           <Route index element={<Dashboard />} />
           <Route path="identificadores" element={<Identifiers />} />
           <Route path="documentos" element={<Documents />} />
-          <Route path="aprovacoes" element={<Approvals />} />
-          <Route path="sectores" element={<Sectors />} />
-          <Route path="utilizadores" element={<Users />} />
-          <Route path="utilizadores/:id" element={<UserProfile />} />
-          <Route path="auditoria" element={<Audit />} />
+          <Route path="aprovacoes" element={<RoleProtectedRoute roles={["ORG_ADMIN", "SECTOR_SUPERVISOR"]}><Approvals /></RoleProtectedRoute>} />
+          <Route path="sectores" element={<RoleProtectedRoute roles={["ORG_ADMIN"]}><Sectors /></RoleProtectedRoute>} />
+          <Route path="utilizadores" element={<RoleProtectedRoute roles={["ORG_ADMIN", "SECTOR_SUPERVISOR"]}><Users /></RoleProtectedRoute>} />
+          <Route path="utilizadores/:id" element={<RoleProtectedRoute roles={["ORG_ADMIN", "SECTOR_SUPERVISOR"]}><UserProfile /></RoleProtectedRoute>} />
+          <Route path="auditoria" element={<RoleProtectedRoute roles={["ORG_ADMIN"]}><Audit /></RoleProtectedRoute>} />
           <Route path="digitalizar" element={<Scanner />} />
-          <Route path="configuracoes" element={<Settings />} />
+          <Route path="configuracoes" element={<RoleProtectedRoute roles={["ORG_ADMIN"]}><Settings /></RoleProtectedRoute>} />
           <Route path="perfil" element={<Profile />} />
         </Route>
       </Routes>
