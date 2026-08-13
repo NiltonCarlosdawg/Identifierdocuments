@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master, "fix/**", "feat/**"]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api:
+    name: API (typecheck + unit tests)
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: apps/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Install
+        working-directory: .
+        run: bun install --frozen-lockfile
+      - name: Typecheck
+        run: bunx tsc --noEmit
+      - name: Unit tests (sem servidor)
+        run: bun test src/__tests__/classifier-cache.test.ts src/__tests__/notification.service.test.ts
+
+  desktop:
+    name: Desktop (typecheck + unit tests)
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Install
+        working-directory: .
+        run: bun install --frozen-lockfile
+      - name: Typecheck + build frontend
+        run: bun run build
+      - name: Unit tests
+        run: bun test
+
+  rust-sync:
+    name: Desktop Rust (sync unit tests)
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: apps/desktop/src-tauri
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Linux Tauri deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev \
+            patchelf libssl-dev libgtk-3-dev libayatana-appindicator3-dev
+      - name: Cargo test (lib)
+        run: cargo test --lib -- --test-threads=2

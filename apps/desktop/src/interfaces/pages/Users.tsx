@@ -1,16 +1,18 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { api } from "../../infrastructure/di/container";
 import { PageHeader, Modal, StatusChip, EmptyState, Pagination, OfflineNotice } from "../components/docid-ui";
 import { useOfflineCache } from "../hooks/useOfflineCache";
 import { useCachedAux } from "../hooks/useCachedAux";
 import { mapError } from "../../shared/errors/mapError";
 import { useAuthStore } from "../stores/authStore";
-import { UsersIcon, Search, Plus, Shield, RefreshCw, Upload, Download, CheckCircle2, AlertTriangle, Ban, Mail } from "lucide-react";
+import { UsersIcon, Search, Plus, Shield, RefreshCw, Upload, Download, CheckCircle2, AlertTriangle, Ban, Mail, Eye } from "lucide-react";
 
 interface UserRow { id: string; email: string; fullName: string; isActive: boolean; sectorId: string | null; sectorName: string | null; roles: { id: string; name: string }[]; createdAt: string; }
 interface Sector { id: string; name: string; }
 
 export default function Users() {
+  const navigate = useNavigate();
   const [rows, setRows] = useState<UserRow[]>([]);
   const [meta, setMeta] = useState({ total: 0, page: 1, limit: 20 });
   const [search, setSearch] = useState("");
@@ -64,14 +66,17 @@ export default function Users() {
           <table className="docid-table">
             <thead><tr><th>Nome</th><th>Email</th><th>Sector</th><th>Roles</th><th>Estado</th><th>Criado em</th><th></th></tr></thead>
             <tbody>{filtered.map(row => (
-              <tr key={row.id} className="cursor-pointer" onClick={() => setSelected(row)}>
+              <tr key={row.id} className="cursor-pointer" onClick={() => navigate(`/utilizadores/${row.id}`)}>
                 <td className="font-medium">{row.fullName}</td>
                 <td className="text-xs text-docid-muted">{row.email}</td>
                 <td className="text-xs">{row.sectorName || "-"}</td>
                 <td><div className="flex flex-wrap gap-1">{(row.roles || []).map(r => <span key={r.id} className="rounded-full bg-docid-surface-high px-2 py-0.5 text-[10px] font-medium text-docid-muted">{r.name}</span>)}</div></td>
                 <td><StatusChip tone={row.isActive ? "success" : "error"}>{row.isActive ? "Activo" : "Inactivo"}</StatusChip></td>
                 <td className="text-xs text-docid-muted">{new Date(row.createdAt).toLocaleDateString("pt-AO")}</td>
-                <td><button onClick={e => { e.stopPropagation(); setSelected(row); }} className="rounded p-1 text-docid-muted hover:text-docid-text"><Shield className="h-4 w-4" /></button></td>
+                <td className="flex gap-1">
+                  <button title="Ver perfil" onClick={e => { e.stopPropagation(); navigate(`/utilizadores/${row.id}`); }} className="rounded p-1 text-docid-muted hover:text-docid-text"><Eye className="h-4 w-4" /></button>
+                  {canManage && <button title="Gerir" onClick={e => { e.stopPropagation(); setSelected(row); }} className="rounded p-1 text-docid-muted hover:text-docid-text"><Shield className="h-4 w-4" /></button>}
+                </td>
               </tr>
             ))}</tbody>
           </table>

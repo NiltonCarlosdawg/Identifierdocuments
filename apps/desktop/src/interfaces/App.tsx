@@ -19,6 +19,7 @@ import Settings from "./pages/Settings";
 import Audit from "./pages/Audit";
 import Scanner from "./pages/Scanner";
 import Profile from "./pages/Profile";
+import UserProfile from "./pages/UserProfile";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const token = useAuthStore(s => s.token);
@@ -90,6 +91,7 @@ export default function App() {
           <Route path="aprovacoes" element={<Approvals />} />
           <Route path="sectores" element={<Sectors />} />
           <Route path="utilizadores" element={<Users />} />
+          <Route path="utilizadores/:id" element={<UserProfile />} />
           <Route path="auditoria" element={<Audit />} />
           <Route path="digitalizar" element={<Scanner />} />
           <Route path="configuracoes" element={<Settings />} />

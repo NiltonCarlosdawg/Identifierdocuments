@@ -991,6 +991,12 @@ pub struct QueueItem {
     pub attempts: i32,
     pub last_error: Option<String>,
     pub created_at: String,
+    #[serde(default = "default_upload_mode")]
+    pub upload_mode: String,
+}
+
+fn default_upload_mode() -> String {
+    "attach".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1034,13 +1040,14 @@ fn row_to_item(row: &rusqlite::Row<'_>) -> rusqlite::Result<QueueItem> {
         attempts: row.get(7)?,
         last_error: row.get(8)?,
         created_at: row.get(9)?,
+        upload_mode: row.get::<_, Option<String>>(10)?.unwrap_or_else(|| "attach".to_string()),
     })
 }
 
 fn fetch_all(conn: &Connection) -> Result<Vec<QueueItem>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT id, file_path, filename, identifier, tenant_id, user_id, status, attempts, last_error, created_at
+            "SELECT id, file_path, filename, identifier, tenant_id, user_id, status, attempts, last_error, created_at, COALESCE(upload_mode, 'attach')
              FROM upload_queue ORDER BY created_at ASC",
         )
         .map_err(|e| e.to_string())?;
@@ -1059,13 +1066,15 @@ fn insert_item(
     identifier: &str,
     tenant_id: &str,
     user_id: &str,
+    upload_mode: &str,
 ) -> Result<QueueItem, String> {
     let id = Uuid::new_v4().to_string();
     let created_at = Utc::now().to_rfc3339();
+    let mode = if upload_mode == "attachment" { "attachment" } else { "attach" };
     conn.execute(
-        "INSERT INTO upload_queue (id, file_path, filename, identifier, tenant_id, user_id, status, attempts, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'pending', 0, ?7)",
-        params![id, file_path.to_string_lossy(), filename, identifier, tenant_id, user_id, created_at],
+        "INSERT INTO upload_queue (id, file_path, filename, identifier, tenant_id, user_id, status, attempts, created_at, upload_mode)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'pending', 0, ?7, ?8)",
+        params![id, file_path.to_string_lossy(), filename, identifier, tenant_id, user_id, created_at, mode],
     )
     .map_err(|e| e.to_string())?;
 
@@ -1080,6 +1089,7 @@ fn insert_item(
         attempts: 0,
         last_error: None,
         created_at,
+        upload_mode: mode.to_string(),
     })
 }
 
@@ -1264,12 +1274,25 @@ async fn upload_item(
     token: &str,
     item: &QueueItem,
 ) -> Result<(), String> {
-    upload_document(
+    let mode = if item.upload_mode == "attachment" {
+        "attachment"
+    } else {
+        "attach"
+    };
+    let label = if mode == "attachment" {
+        Some(item.filename.as_str())
+    } else {
+        None
+    };
+    upload_document_mode(
         api_base_url,
         token,
         &item.file_path,
         &item.filename,
-        &item.identifier,
+        mode,
+        Some(&item.identifier),
+        None,
+        label,
         "sync",
     )
     .await
@@ -1446,7 +1469,7 @@ async fn run_sync_cycle_inner(app: &AppHandle, state: &SyncState) -> Result<usiz
 
     let items: Vec<QueueItem> = conn
         .prepare(
-            "SELECT id, file_path, filename, identifier, tenant_id, user_id, status, attempts, last_error, created_at
+            "SELECT id, file_path, filename, identifier, tenant_id, user_id, status, attempts, last_error, created_at, COALESCE(upload_mode, 'attach')
              FROM upload_queue
              WHERE status IN ('pending', 'failed') AND attempts < ?1
              ORDER BY created_at ASC",
@@ -1684,6 +1707,7 @@ pub fn enqueue_upload(
     identifier: String,
     tenant_id: String,
     user_id: String,
+    upload_mode: Option<String>,
 ) -> Result<QueueItem, String> {
     let source = PathBuf::from(&source_path);
     if !source.exists() {
@@ -1704,7 +1728,8 @@ pub fn enqueue_upload(
 
     let conn = state.conn()?;
     let safe_name = sanitize_filename(&filename);
-    insert_item(&conn, &dest, &safe_name, &identifier, &tenant_id, &user_id)
+    let mode = upload_mode.as_deref().unwrap_or("attach");
+    insert_item(&conn, &dest, &safe_name, &identifier, &tenant_id, &user_id, mode)
 }
 
 #[tauri::command]
@@ -1715,6 +1740,7 @@ pub fn enqueue_upload_bytes(
     identifier: String,
     tenant_id: String,
     user_id: String,
+    upload_mode: Option<String>,
 ) -> Result<QueueItem, String> {
     std::fs::create_dir_all(&state.uploads_dir).map_err(|e| e.to_string())?;
     let dest = safe_dest_path(&state.uploads_dir, &filename)?;
@@ -1726,7 +1752,8 @@ pub fn enqueue_upload_bytes(
 
     let conn = state.conn()?;
     let safe_name = sanitize_filename(&filename);
-    insert_item(&conn, &dest, &safe_name, &identifier, &tenant_id, &user_id)
+    let mode = upload_mode.as_deref().unwrap_or("attach");
+    insert_item(&conn, &dest, &safe_name, &identifier, &tenant_id, &user_id, mode)
 }
 
 #[tauri::command]
@@ -2252,7 +2279,7 @@ mod tests {
         let file_path = dir.join("doc.pdf");
         fs::write(&file_path, "dummy").unwrap();
 
-        let item = insert_item(&conn, &file_path, "doc.pdf", "TST-001", "t1", "u1").unwrap();
+        let item = insert_item(&conn, &file_path, "doc.pdf", "TST-001", "t1", "u1", "attach").unwrap();
         assert_eq!(item.status, "pending");
         assert_eq!(item.filename, "doc.pdf");
         assert_eq!(item.identifier, "TST-001");
@@ -2270,12 +2297,12 @@ mod tests {
         let file_path = dir.join("doc.pdf");
         fs::write(&file_path, "dummy").unwrap();
 
-        insert_item(&conn, &file_path, "doc.pdf", "TST-001", "t1", "u1").unwrap();
+        insert_item(&conn, &file_path, "doc.pdf", "TST-001", "t1", "u1", "attach").unwrap();
 
         // second insert (different path, same identifier) should succeed (no unique constraint on identifier alone)
         let file_path2 = dir.join("doc2.pdf");
         fs::write(&file_path2, "dummy2").unwrap();
-        let result = insert_item(&conn, &file_path2, "doc2.pdf", "TST-002", "t1", "u1");
+        let result = insert_item(&conn, &file_path2, "doc2.pdf", "TST-002", "t1", "u1", "attach");
         assert!(result.is_ok());
 
         let all = fetch_all(&conn).unwrap();
@@ -2289,7 +2316,7 @@ mod tests {
         let (dir, conn) = tmp_db();
         let fp = dir.join("ok.pdf");
         fs::write(&fp, "ok").unwrap();
-        insert_item(&conn, &fp, "ok.pdf", "TST-001", "t1", "u1").unwrap();
+        insert_item(&conn, &fp, "ok.pdf", "TST-001", "t1", "u1", "attach").unwrap();
 
         // manually mark as uploaded
         conn.execute(
@@ -2312,7 +2339,7 @@ mod tests {
         let (dir, conn) = tmp_db();
         let fp = dir.join("remover.pdf");
         fs::write(&fp, "remover").unwrap();
-        let item = insert_item(&conn, &fp, "remover.pdf", "TST-001", "t1", "u1").unwrap();
+        let item = insert_item(&conn, &fp, "remover.pdf", "TST-001", "t1", "u1", "attach").unwrap();
 
         remove_queue_item_raw(&conn, &item.id, &dir).unwrap();
 
@@ -2328,7 +2355,7 @@ mod tests {
 
     #[test]
     fn outcome_success_returns_uploaded() {
-        let item = QueueItem { id: "x".into(), file_path: "".into(), filename: "".into(), identifier: "".into(), tenant_id: "".into(), user_id: "".into(), status: "uploading".into(), attempts: 2, last_error: Some("erro anterior".into()), created_at: "".into() };
+        let item = QueueItem { id: "x".into(), file_path: "".into(), filename: "".into(), identifier: "".into(), tenant_id: "".into(), user_id: "".into(), status: "uploading".into(), attempts: 2, last_error: Some("erro anterior".into()), created_at: "".into(), upload_mode: "attach".into() };
         let outcome = compute_upload_outcome(&item, &Ok(()));
         assert_eq!(outcome.new_status, "uploaded");
         assert_eq!(outcome.new_attempts, 2);
@@ -2337,7 +2364,7 @@ mod tests {
 
     #[test]
     fn outcome_first_failure_is_pending() {
-        let item = QueueItem { id: "x".into(), file_path: "".into(), filename: "".into(), identifier: "".into(), tenant_id: "".into(), user_id: "".into(), status: "uploading".into(), attempts: 0, last_error: None, created_at: "".into() };
+        let item = QueueItem { id: "x".into(), file_path: "".into(), filename: "".into(), identifier: "".into(), tenant_id: "".into(), user_id: "".into(), status: "uploading".into(), attempts: 0, last_error: None, created_at: "".into(), upload_mode: "attach".into() };
         let outcome = compute_upload_outcome(&item, &Err("timeout".into()));
         assert_eq!(outcome.new_status, "pending");
         assert_eq!(outcome.new_attempts, 1);
@@ -2346,7 +2373,7 @@ mod tests {
 
     #[test]
     fn outcome_second_failure_is_pending() {
-        let item = QueueItem { id: "x".into(), file_path: "".into(), filename: "".into(), identifier: "".into(), tenant_id: "".into(), user_id: "".into(), status: "uploading".into(), attempts: 1, last_error: Some("timeout".into()), created_at: "".into() };
+        let item = QueueItem { id: "x".into(), file_path: "".into(), filename: "".into(), identifier: "".into(), tenant_id: "".into(), user_id: "".into(), status: "uploading".into(), attempts: 1, last_error: Some("timeout".into()), created_at: "".into(), upload_mode: "attach".into() };
         let outcome = compute_upload_outcome(&item, &Err("erro rede".into()));
         assert_eq!(outcome.new_status, "pending");
         assert_eq!(outcome.new_attempts, 2);
@@ -2354,7 +2381,7 @@ mod tests {
 
     #[test]
     fn outcome_third_failure_is_failed() {
-        let item = QueueItem { id: "x".into(), file_path: "".into(), filename: "".into(), identifier: "".into(), tenant_id: "".into(), user_id: "".into(), status: "uploading".into(), attempts: 2, last_error: Some("timeout".into()), created_at: "".into() };
+        let item = QueueItem { id: "x".into(), file_path: "".into(), filename: "".into(), identifier: "".into(), tenant_id: "".into(), user_id: "".into(), status: "uploading".into(), attempts: 2, last_error: Some("timeout".into()), created_at: "".into(), upload_mode: "attach".into() };
         let outcome = compute_upload_outcome(&item, &Err("limite excedido".into()));
         assert_eq!(outcome.new_status, "failed");
         assert_eq!(outcome.new_attempts, 3);
@@ -2369,7 +2396,7 @@ mod tests {
         let fp = dir.join("stuck.pdf");
         fs::write(&fp, "stuck").unwrap();
 
-        let item = insert_item(&conn, &fp, "stuck.pdf", "TST-STUCK", "t1", "u1").unwrap();
+        let item = insert_item(&conn, &fp, "stuck.pdf", "TST-STUCK", "t1", "u1", "attach").unwrap();
         // simulate crash mid-upload
         conn.execute("UPDATE upload_queue SET status = 'uploading' WHERE id = ?1", params![item.id]).unwrap();
 
@@ -2388,8 +2415,8 @@ mod tests {
         fs::write(&dir.join("a.pdf"), "a").unwrap();
         fs::write(&dir.join("b.pdf"), "b").unwrap();
 
-        let a = insert_item(&conn, &dir.join("a.pdf"), "a.pdf", "TST-A", "t1", "u1").unwrap();
-        let b = insert_item(&conn, &dir.join("b.pdf"), "b.pdf", "TST-B", "t1", "u1").unwrap();
+        let a = insert_item(&conn, &dir.join("a.pdf"), "a.pdf", "TST-A", "t1", "u1", "attach").unwrap();
+        let b = insert_item(&conn, &dir.join("b.pdf"), "b.pdf", "TST-B", "t1", "u1", "attach").unwrap();
 
         conn.execute("UPDATE upload_queue SET status = 'uploading' WHERE id = ?1", params![a.id]).unwrap();
         conn.execute("UPDATE upload_queue SET status = 'uploaded' WHERE id = ?1", params![b.id]).unwrap();
@@ -2413,7 +2440,7 @@ mod tests {
         let fp = dir.join("ok.pdf");
         fs::write(&fp, "ok").unwrap();
 
-        let item = insert_item(&conn, &fp, "ok.pdf", "TST-OK", "t1", "u1").unwrap();
+        let item = insert_item(&conn, &fp, "ok.pdf", "TST-OK", "t1", "u1", "attach").unwrap();
         assert_eq!(item.status, "pending");
 
         // simulate the cycle logic manually (same as run_sync_cycle_inner does per item)
@@ -2437,7 +2464,7 @@ mod tests {
         let fp = dir.join("fail.pdf");
         fs::write(&fp, "fail").unwrap();
 
-        let item = insert_item(&conn, &fp, "fail.pdf", "TST-FAIL", "t1", "u1").unwrap();
+        let item = insert_item(&conn, &fp, "fail.pdf", "TST-FAIL", "t1", "u1", "attach").unwrap();
 
         // simulate 3 upload attempts, all failing
         for attempt in 1..=3 {
@@ -2644,7 +2671,7 @@ mod tests {
         let (dir, conn) = tmp_db();
         let fp = dir.join("retry.pdf");
         fs::write(&fp, "retry").unwrap();
-        let item = insert_item(&conn, &fp, "retry.pdf", "TST-001", "t1", "u1").unwrap();
+        let item = insert_item(&conn, &fp, "retry.pdf", "TST-001", "t1", "u1", "attach").unwrap();
 
         conn.execute(
             "UPDATE upload_queue SET status = 'failed', attempts = 3, last_error = 'timeout' WHERE id = ?1",
@@ -3636,7 +3663,7 @@ mod tests {
         let fp = uploads.join("doc.txt");
         fs::write(&fp, "conteudo").unwrap();
 
-        let item = insert_item(&conn, &fp, "doc.txt", "VER-PROP-1", "t1", "u1").unwrap();
+        let item = insert_item(&conn, &fp, "doc.txt", "VER-PROP-1", "t1", "u1", "attach").unwrap();
         assert_eq!(item.status, "pending");
 
         conn.execute(

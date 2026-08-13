@@ -168,14 +168,17 @@ aplicadas posteriormente a itens aqui marcados como completos)*
 ### 2.6 — Módulo Documentos (UI)
 - [x] **P0** Listar, upload, detalhe, download — implementados (`Documents.tsx`)
 - [x] **P1** Indicador de origem digital/físico
-- [ ] **P2** Pré-visualização inline de PDFs
+- [x] **P2** Pré-visualização inline de PDFs — iframe no `DetailModal` com blob
+  autenticado via `api.getBlob(/documents/:id/download)`
 
 ### 2.7 — Contratos & Candidaturas como Perfis (UI)
 - [ ] Sem alteração — não abordado nesta ronda de trabalho.
 
 ### 2.8 — Gestão de Utilizadores & Sectores (UI)
 - [x] **P1** Todos os itens principais — implementados (`Users.tsx`, `Sectors.tsx`)
-- [ ] **P2** Página de perfil dedicada por utilizador (fora do próprio perfil)
+- [x] **P2** Página de perfil dedicada por utilizador — rota
+  `/utilizadores/:id` (`UserProfile.tsx`) com `GET /users/:id`; clique na
+  listagem abre o perfil (edição continua no modal “Gerir”)
 - [x] **P2** Transferir utilizador entre sectores — via UI de edição, sem fluxo dedicado
 
 ---
@@ -486,9 +489,9 @@ aplicadas posteriormente a itens aqui marcados como completos)*
 ### Fora de âmbito (trabalho futuro)
 - [x] **P2** Enfileiramento de escritas offline (fila de pedidos) — Opção C —
   **feito na Fase 12**
-- [ ] **P2** Upload offline via `attach_document_native` (Rust) — faz HTTP
-  directo, sem fila (o fallback de rede do `UploadModal` enfileira via
-  `enqueueFromPath` — Fase 9)
+- [x] **P2** Upload offline via `attach_document_native` (Rust) — fila
+  `upload_queue.upload_mode` (`attach`|`attachment`); `enqueue_upload` /
+  `enqueueFromPath` propagam o modo; sync chama `upload_document_mode`
 - [x] **P2** Cache de endpoints auxiliares (categorias no GenerateModal, listas
   de sectores/utilizadores nos dropdowns de Users/Audit) — **feito na Fase 10**
 
@@ -694,7 +697,9 @@ aplicadas posteriormente a itens aqui marcados como completos)*
 - [x] **P1** Health check endpoint `GET /health`
 - [x] **P2** Documentação OpenAPI actualizada
 - [x] **P2** Script de seed para dados de demonstração
-- [ ] **P2** Pipeline CI básica (lint + typecheck + testes)
+- [x] **P2** Pipeline CI básica — `.github/workflows/ci.yml`: typecheck API,
+  testes unitários API/desktop, `bun run build` do frontend, `cargo test --lib`
+  do sync Rust
 - [ ] **P3** Testes E2E com Playwright
 
 ---

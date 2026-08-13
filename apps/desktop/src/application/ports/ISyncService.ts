@@ -10,8 +10,8 @@ export interface ISyncService {
   setApiBaseUrl(url: string): Promise<void>;
   isOnline(): Promise<boolean>;
   getQueue(): Promise<QueueItem[]>;
-  enqueueFromFile(file: File, identifier: string, tenantId: string, userId: string): Promise<QueueItem | null>;
-  enqueueFromPath(path: string, identifier: string, tenantId: string, userId: string): Promise<QueueItem | null>;
+  enqueueFromFile(file: File, identifier: string, tenantId: string, userId: string, uploadMode?: "attach" | "attachment"): Promise<QueueItem | null>;
+  enqueueFromPath(path: string, identifier: string, tenantId: string, userId: string, uploadMode?: "attach" | "attachment"): Promise<QueueItem | null>;
   removeItem(id: string): Promise<void>;
   retryItem(id: string): Promise<void>;
   forceSync(): Promise<number>;

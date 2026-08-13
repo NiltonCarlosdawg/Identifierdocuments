@@ -281,10 +281,10 @@ function UploadModal({ onClose, onDone, initialPath = "", initialIdentifier = ""
         });
         return { status: "ok" as const };
       } catch (err: any) {
-        if (isNetworkError(err) && uploadMode === "attach") {
+        if (isNetworkError(err) && (uploadMode === "attach" || uploadMode === "attachment")) {
           const user = useAuthStore.getState().user;
           if (!user?.tenantId || !user?.id) throw err;
-          const item = await sync.enqueueFromPath(row.path, identifier, user.tenantId, user.id);
+          const item = await sync.enqueueFromPath(row.path, identifier, user.tenantId, user.id, uploadMode);
           if (!item) throw err;
           useQueueStore.getState().refresh().catch(() => {});
           return { status: "queued" as const };
@@ -420,6 +420,8 @@ function DetailModal({ row, onClose, onDone, onDownload }: { row: DocRow; onClos
   const [detail, setDetail] = useState<DocDetail | null>(null);
   const [detailError, setDetailError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewError, setPreviewError] = useState("");
   const identCode = row.identifier?.identifier || row.id;
   const selectedPrinter = usePrinterStore(s => s.selectedPrinter);
   const loadPrinters = usePrinterStore(s => s.loadPrinters);
@@ -437,14 +439,33 @@ function DetailModal({ row, onClose, onDone, onDownload }: { row: DocRow; onClos
 
   useEffect(() => {
     let cancelled = false;
+    let objectUrl: string | null = null;
     if (!sync.isAvailable()) { setOfflineAvailable(false); }
     else {
       loadPrinters();
       sync.isDocumentCached(row.id).then(v => { if (!cancelled) setOfflineAvailable(v); }).catch(() => {});
     }
     loadDetail();
-    return () => { cancelled = true; };
-  }, [row.id, loadPrinters]);
+
+    const mime = row.mimeType || "";
+    if (mime.includes("pdf") || row.filename?.toLowerCase().endsWith(".pdf")) {
+      setPreviewError("");
+      api.getBlob(`/documents/${row.id}/download`)
+        .then((blob) => {
+          if (cancelled || !blob) return;
+          objectUrl = URL.createObjectURL(blob);
+          setPreviewUrl(objectUrl);
+        })
+        .catch((err: unknown) => {
+          if (!cancelled) setPreviewError(mapError(err, "Pré-visualização indisponível."));
+        });
+    }
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [row.id, row.mimeType, row.filename, loadPrinters]);
 
   const handlePrint = async () => {
     setPrintError("");
@@ -580,6 +601,21 @@ function DetailModal({ row, onClose, onDone, onDownload }: { row: DocRow; onClos
             </div>
             <p className="text-xs text-docid-muted">{fileSize ? `${(fileSize / 1024 / 1024).toFixed(2)} MB · ${mimeType}` : mimeType}</p>
           </div>
+
+          {(previewUrl || previewError) && (
+            <div>
+              <p className="mb-2 text-xs font-semibold text-docid-muted">Pré-visualização</p>
+              {previewError && <p className="text-xs text-docid-error">{previewError}</p>}
+              {previewUrl && (
+                <iframe
+                  title="Pré-visualização PDF"
+                  src={previewUrl}
+                  className="h-80 w-full rounded border border-docid-outline/20 bg-docid-surface-low"
+                />
+              )}
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-4 text-sm">
             <div><p className="text-xs text-docid-muted">Identificador</p><p className="font-mono text-xs font-medium">{row.identifier?.identifier || "-"}</p></div>
             <div><p className="text-xs text-docid-muted">Categoria</p><p className="font-medium">{row.identifier?.categoryName || "-"}</p></div>

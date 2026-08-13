@@ -237,6 +237,11 @@ fn init_schema(conn: &Connection) -> Result<()> {
             ON watcher_files(status, updated_at);
         ",
     )?;
+    // Migração leve: modo de upload (attach | attachment) na fila offline
+    let _ = conn.execute(
+        "ALTER TABLE upload_queue ADD COLUMN upload_mode TEXT NOT NULL DEFAULT 'attach'",
+        [],
+    );
     Ok(())
 }
 

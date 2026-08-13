@@ -36,18 +36,18 @@ export class SyncService implements ISyncService {
     const { invoke } = await import("@tauri-apps/api/core");
     return invoke<QueueItem[]>("get_queue");
   }
-  async enqueueFromFile(file: File, identifier: string, tenantId: string, userId: string): Promise<QueueItem | null> {
+  async enqueueFromFile(file: File, identifier: string, tenantId: string, userId: string, uploadMode: "attach" | "attachment" = "attach"): Promise<QueueItem | null> {
     if (!this.isTauri()) return null;
     const MAX_IPC_SIZE = 52_428_800;
     if (file.size > MAX_IPC_SIZE) throw new Error("Ficheiro demasiado grande. Máximo: 50MB.");
     const { invoke } = await import("@tauri-apps/api/core");
     const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
-    return invoke<QueueItem>("enqueue_upload_bytes", { filename: file.name, bytes, identifier, tenantId, userId });
+    return invoke<QueueItem>("enqueue_upload_bytes", { filename: file.name, bytes, identifier, tenantId, userId, uploadMode });
   }
-  async enqueueFromPath(path: string, identifier: string, tenantId: string, userId: string): Promise<QueueItem | null> {
+  async enqueueFromPath(path: string, identifier: string, tenantId: string, userId: string, uploadMode: "attach" | "attachment" = "attach"): Promise<QueueItem | null> {
     if (!this.isTauri()) return null;
     const { invoke } = await import("@tauri-apps/api/core");
-    return invoke<QueueItem>("enqueue_upload", { sourcePath: path, identifier, tenantId, userId });
+    return invoke<QueueItem>("enqueue_upload", { sourcePath: path, identifier, tenantId, userId, uploadMode });
   }
   async removeItem(id: string): Promise<void> { if (!this.isTauri()) return; const { invoke } = await import("@tauri-apps/api/core"); await invoke("remove_queue_item", { id }); }
   async retryItem(id: string): Promise<void> { if (!this.isTauri()) return; const { invoke } = await import("@tauri-apps/api/core"); await invoke("retry_queue_item", { id }); await invoke("force_sync"); }
