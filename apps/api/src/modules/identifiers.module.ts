@@ -1,6 +1,6 @@
 import { Elysia, t } from "elysia";
 import { generateIdentifier, listIdentifiers, getIdentifier, cancelIdentifier } from "../services/identifier.service";
-import { leaseIdentifiers, releaseLease, forceReleaseLease, registerOfflineIdentifiers } from "../services/lease.service";
+import { leaseIdentifiers, releaseLease, forceReleaseLease, registerOfflineIdentifiers, assertDeviceUsable } from "../services/lease.service";
 import { requireAuth, getFreshRoles } from "../middleware/auth";
 import { checkRateLimit } from "../middleware/rateLimit";
 import { withTenant } from "../db/withTenant";
@@ -134,7 +134,7 @@ export const identifiersModule = new Elysia({ prefix: "/identifiers" })
             where: and(eq(devices.id, body.deviceId), eq(devices.tenantId, tenantId)),
           });
           if (!device) { set.status = 404; return { error: { code: "NOT_FOUND", message: "Dispositivo não encontrado." } }; }
-          if (device.status !== "active") { set.status = 400; return { error: { code: "DEVICE_INACTIVE", message: "Dispositivo não está activo." } }; }
+          await assertDeviceUsable(tx, auth!, device);
 
           const cat = await tx.query.categories.findFirst({ where: eq(categories.id, body.categoryId) });
           if (!cat) { set.status = 404; return { error: { code: "NOT_FOUND", message: "Categoria não encontrada." } }; }
@@ -187,7 +187,7 @@ export const identifiersModule = new Elysia({ prefix: "/identifiers" })
           if (!targetSectorId) {
             set.status = 422; return { error: { code: "VALIDATION_ERROR", message: "Sector não definido." } };
           }
-          if (targetSectorId !== auth!.sectorId && !auth!.roles.includes("ORG_ADMIN")) {
+          if (targetSectorId !== auth!.sectorId && !(await getFreshRoles(auth!.userId, auth!.tenantId)).includes("ORG_ADMIN")) {
             set.status = 403; return { error: { code: "FORBIDDEN", message: "Não pode gerar identificadores para outro sector." } };
           }
           const result = await generateIdentifier(tx, auth!, {

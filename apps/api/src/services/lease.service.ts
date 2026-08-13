@@ -2,6 +2,21 @@ import type { DB } from "../db";
 import { identifiers, categories, organizations, devices, identifierLeases, identifierReleasePool, auditLogs, idempotencyRecords } from "../db/schema";
 import { eq, and, sql } from "drizzle-orm";
 import type { AuthPayload } from "../middleware/auth";
+import { getFreshRoles } from "../middleware/auth";
+
+/** Dispositivo utilizável: registado pelo user, mesmo sector, ou ORG_ADMIN. */
+export async function assertDeviceUsable(
+  tx: DB,
+  auth: AuthPayload,
+  device: { id: string; status: string; sectorId: string | null; registeredByUserId: string | null },
+): Promise<void> {
+  if (device.status !== "active") throw new Error("Dispositivo não está activo.");
+  if (device.registeredByUserId === auth.userId) return;
+  if (device.sectorId != null && device.sectorId === auth.sectorId) return;
+  const roles = await getFreshRoles(auth.userId, auth.tenantId);
+  if (roles.includes("ORG_ADMIN")) return;
+  throw new Error("Sem permissão para usar este dispositivo.");
+}
 
 export async function leaseIdentifiers(
   tx: DB,
@@ -17,10 +32,15 @@ export async function leaseIdentifiers(
     where: and(eq(devices.id, opts.deviceId), eq(devices.tenantId, auth.tenantId)),
   });
   if (!device) throw new Error("Dispositivo não encontrado.");
-  if (device.status !== "active") throw new Error("Dispositivo não está activo.");
+  await assertDeviceUsable(tx, auth, device);
 
-  const resolvedSectorId = opts.sectorId ?? auth.sectorId;
+  const resolvedSectorId = opts.sectorId ?? auth.sectorId ?? device.sectorId;
   if (!resolvedSectorId) throw new Error("Sector não definido. Indique sectorId ou associe o utilizador a um sector.");
+
+  const roles = await getFreshRoles(auth.userId, auth.tenantId);
+  if (opts.sectorId && opts.sectorId !== auth.sectorId && !roles.includes("ORG_ADMIN")) {
+    throw new Error("Sem permissão para reservar sequências noutro sector.");
+  }
 
   const org = await tx.query.organizations.findFirst({ where: eq(organizations.id, auth.tenantId) });
   const batchSize = org?.identifierLeaseBatchSize ?? 50;
@@ -95,6 +115,12 @@ export async function releaseLease(
   });
   if (!lease) throw new Error("Lease não encontrado.");
   if (lease.status !== "active") throw new Error("Lease não está activo.");
+
+  const device = await tx.query.devices.findFirst({
+    where: and(eq(devices.id, lease.deviceId), eq(devices.tenantId, auth.tenantId)),
+  });
+  if (!device) throw new Error("Dispositivo do lease não encontrado.");
+  await assertDeviceUsable(tx, auth, device);
 
   const unusedStart = (lease.usedUpTo ?? lease.startSeq - 1) + 1;
   if (unusedStart <= lease.endSeq) {
@@ -196,7 +222,7 @@ export async function registerOfflineIdentifiers(
     where: and(eq(devices.id, opts.deviceId), eq(devices.tenantId, auth.tenantId)),
   });
   if (!device) throw new Error("Dispositivo não encontrado.");
-  if (device.status !== "active") throw new Error("Dispositivo não está activo.");
+  await assertDeviceUsable(tx, auth, device);
 
   const org = await tx.query.organizations.findFirst({ where: eq(organizations.id, auth.tenantId) });
   const orgPrefix = org?.identifierPrefix ?? "VL";

@@ -7,6 +7,7 @@ const SMTP_USER = process.env.SMTP_USER || "";
 const SMTP_PASS = process.env.SMTP_PASS || "";
 const SMTP_FROM = process.env.SMTP_FROM || "DocID <no-reply@docid.local>";
 const SMTP_SECURE = process.env.SMTP_SECURE === "true";
+const IS_PROD = process.env.NODE_ENV === "production";
 
 let transporter: nodemailer.Transporter | null = null;
 
@@ -38,8 +39,11 @@ export async function sendInviteEmail(to: string, fullName: string, orgName: str
     `Password temporária: ${password}\n\n` +
     `Altere a password no primeiro acesso (Perfil).\n`;
   if (!t) {
-    logger.warn({ to }, "SMTP não configurado — convite impresso no log (apenas dev).");
-    logger.info(`Convite para ${to}: password temporária ${password}`);
+    logger.warn({ to }, "SMTP não configurado — convite não enviado por email.");
+    // Nunca imprimir password em produção
+    if (!IS_PROD) {
+      logger.info(`Convite para ${to}: password temporária ${password}`);
+    }
     return false;
   }
   await t.sendMail({
@@ -58,8 +62,10 @@ export async function sendInviteEmail(to: string, fullName: string, orgName: str
 export async function sendResetPasswordEmail(to: string, token: string): Promise<void> {
   const t = getTransporter();
   if (!t) {
-    logger.warn({ to }, "SMTP não configurado — token de redefinição impresso no log (apenas dev).");
-    logger.info(`Reset token para ${to}: ${token}`);
+    logger.warn({ to }, "SMTP não configurado — reset não enviado por email.");
+    if (!IS_PROD) {
+      logger.info(`Reset token para ${to}: ${token}`);
+    }
     return;
   }
   await t.sendMail({

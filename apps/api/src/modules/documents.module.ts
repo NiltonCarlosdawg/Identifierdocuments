@@ -5,6 +5,7 @@ import {
   attachDocument, attachAttachment, createDocumentVersion,
   getDocumentMeta, downloadDocument, canAccessDocument,
   pickPrimaryDocument, listDocumentsForApi, updateDocumentTags,
+  isPathInsideDir,
 } from "../services/attachment.service";
 import { requireAuth, getFreshRoles } from "../middleware/auth";
 import { documents, documentShares, approvals, sectors, auditLogs, identifiers, users, documentAccessRequests } from "../db/schema";
@@ -271,10 +272,10 @@ export const documentsModule = new Elysia({ prefix: "/documents" })
           : { error: { code: "NOT_FOUND", message: "Documento não encontrado." } };
       }
 
-      const THUMBNAIL_DIR = process.env.THUMBNAIL_DIR || "./thumbnails";
+      const THUMBNAIL_DIR = path.resolve(process.env.THUMBNAIL_DIR || path.join(import.meta.dir, "../../thumbnails"));
       const thumbPath = path.join(THUMBNAIL_DIR, `${docId}.png`);
       try {
-        if (!fs.existsSync(thumbPath)) {
+        if (!isPathInsideDir(thumbPath, THUMBNAIL_DIR) || !fs.existsSync(thumbPath)) {
           set.status = 204;
           return new Uint8Array(0);
         }

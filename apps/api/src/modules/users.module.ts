@@ -240,11 +240,12 @@ export const usersModule = new Elysia({ prefix: "/users" })
           const [org] = await tx.select({ name: organizations.name }).from(organizations).where(eq(organizations.id, tenantId)).limit(1);
           const emailed = await enqueueInviteEmail(email, body.fullName.trim(), org?.name || "DocID", password);
           const { passwordHash: _, ...safeUser } = user;
+          const isProd = process.env.NODE_ENV === "production";
           return {
             data: {
               ...safeUser,
               emailed,
-              temporaryPassword: emailed ? undefined : password,
+              temporaryPassword: (!isProd && !emailed) ? password : undefined,
             },
           };
         } catch (err: any) {
@@ -444,9 +445,11 @@ export const usersModule = new Elysia({ prefix: "/users" })
             const sectorByCode = new Map(sectorList.map(s => [s.code.toLowerCase(), s.id]));
             const roleByName = new Map(roleList.map(r => [r.name.toLowerCase(), r.id]));
 
-            const created: { email: string; fullName: string; password: string }[] = [];
+            const created: { email: string; fullName: string; temporaryPassword?: string; emailed: boolean }[] = [];
             const skipped: { row: number; reason: string }[] = [];
             const errors: { row: number; reason: string }[] = [];
+            const isProd = process.env.NODE_ENV === "production";
+            const org = await tx.query.organizations.findFirst({ where: eq(organizations.id, tenantId) });
 
             let rowNum = 1;
             for (const cols of dataRows) {
@@ -481,7 +484,14 @@ export const usersModule = new Elysia({ prefix: "/users" })
               if (roleId) {
                 await tx.insert(userRoles).values({ userId: user.id, roleId, sectorId, grantedBy: auth!.userId });
               }
-              created.push({ email, fullName, password });
+              const emailed = await enqueueInviteEmail(email, fullName, org?.name || "DocID", password);
+              created.push({
+                email,
+                fullName,
+                emailed,
+                // Em produção nunca devolver passwords no JSON; em dev só se o email falhou
+                temporaryPassword: (!isProd && !emailed) ? password : undefined,
+              });
             }
 
             return {

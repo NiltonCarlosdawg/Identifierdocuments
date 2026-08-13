@@ -10,6 +10,14 @@ import { safeError } from "../lib/errors";
 export const tenantsModule = new Elysia({ prefix: "/tenants" })
 
   .post("/", async ({ body, set, request }) => {
+    const allowPublic = process.env.ALLOW_PUBLIC_ONBOARDING === "true";
+    const expectedKey = process.env.ONBOARDING_SECRET;
+    const providedKey = request.headers.get("x-onboarding-secret");
+    if (!allowPublic && (!expectedKey || providedKey !== expectedKey)) {
+      set.status = 403;
+      return { error: { code: "ONBOARDING_DISABLED", message: "Onboarding público desactivado. Contacte o administrador." } };
+    }
+
     const ip = request.headers.get("x-forwarded-for") || "unknown"; // TODO(security): validar/sanitizar IP; atualmente confia no header
     if (!(await checkRateLimit(`onboarding:${ip}`, 3, 3600_000))) {
       set.status = 429;
