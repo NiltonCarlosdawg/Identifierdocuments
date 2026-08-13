@@ -1,14 +1,27 @@
 import { Elysia, t } from "elysia";
 import fs from "node:fs";
 import path from "node:path";
-import { attachDocument, getDocumentMeta, downloadDocument, canAccessDocument } from "../services/attachment.service";
-import { getSharedDocIds } from "../services/identifier.service";
+import {
+  attachDocument, attachAttachment, createDocumentVersion,
+  getDocumentMeta, downloadDocument, canAccessDocument,
+  pickPrimaryDocument, listDocumentsForApi, updateDocumentTags,
+} from "../services/attachment.service";
 import { requireAuth, getFreshRoles } from "../middleware/auth";
 import { documents, documentShares, approvals, sectors, auditLogs, identifiers, users, documentAccessRequests } from "../db/schema";
-import { eq, and, isNull, or, desc } from "drizzle-orm";
+import { eq, and, isNull, or } from "drizzle-orm";
 import { notify } from "../services/notification.service";
 import { withTenant } from "../db/withTenant";
 import { safeError } from "../lib/errors";
+
+
+async function resolveIdentifierPrimary(tx: any, tenantId: string, code: string, extraWith: Record<string, boolean> = {}) {
+  const idRow = await tx.query.identifiers.findFirst({
+    where: and(eq(identifiers.identifier, code), eq(identifiers.tenantId, tenantId)),
+    with: { documents: true, ...extraWith },
+  });
+  if (!idRow) return null;
+  return { ...idRow, document: pickPrimaryDocument(idRow.documents) ?? null };
+}
 
 async function canShareDocument(tx: any, auth: any, docSectorId: string | null, docUploadedBy: string | null): Promise<boolean> {
   if (auth.userId === docUploadedBy) return true;
@@ -51,6 +64,36 @@ export const documentsModule = new Elysia({ prefix: "/documents" })
     detail: { summary: "Associar documento", tags: ["Documentos"] },
   })
 
+  .post("/attachments", async ({ auth, body, set, clientIp, tenantId }) => {
+    try {
+      return await withTenant(tenantId, async (tx) => {
+        try {
+          const result = await attachAttachment(tx, auth!, {
+            identifier: body.identifier,
+            file: body.file,
+            label: body.label,
+            uploadSource: body.uploadSource,
+          }, clientIp);
+          return result;
+        } catch (err: any) {
+          console.error("[ATTACHMENT_ERROR]", err);
+          throw err;
+        }
+      });
+    } catch (err: any) {
+      set.status = 400;
+      return { error: { code: "ATTACHMENT_ERROR", message: safeError(err) } };
+    }
+  }, {
+    body: t.Object({
+      identifier: t.String(),
+      file: t.File(),
+      label: t.Optional(t.String()),
+      uploadSource: t.Optional(t.Union([t.Literal("manual"), t.Literal("scanner"), t.Literal("sync")])),
+    }),
+    detail: { summary: "Adicionar anexo a um identificador", tags: ["Documentos"] },
+  })
+
   .get("/", async ({ tenantId, auth, query, set }) => {
     try {
       return await withTenant(tenantId, async (tx) => {
@@ -59,59 +102,13 @@ export const documentsModule = new Elysia({ prefix: "/documents" })
           const limit = Math.min(Math.max(Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : 20, 1), 100);
           const parsedPage = parseInt(query.page || "1", 10);
           const page = Math.max(1, Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : 1);
-          const offset = (page - 1) * limit;
 
-          const conditions = [eq(documents.tenantId, tenantId)];
-          if (query.identifierId) conditions.push(eq(documents.identifierId, query.identifierId));
-
-          const allRows = await tx.query.documents.findMany({
-            where: and(...conditions),
-            with: {
-              identifier: { with: { category: true } },
-              uploader: true,
-            },
-            orderBy: [desc(documents.createdAt)],
+          return await listDocumentsForApi(tx, auth!, {
+            tenantId,
+            identifierId: query.identifierId,
+            page,
+            limit,
           });
-
-          // CORREÇÃO: esta listagem devolvia todos os documentos do tenant sem
-          // qualquer filtro de visibilidade — um documento sector_only (ex.: Folha
-          // de Salário, Rescisão, Contrato) de outro sector aparecia aqui com
-          // filename, identifier e uploader visíveis a qualquer user autenticado do
-          // tenant, mesmo sem acesso ao ficheiro em si. Alinhado agora com o mesmo
-          // critério de visibilidade usado em listIdentifiers/canAccessDocument.
-          const sharedDocIds = await getSharedDocIds(tx, auth!);
-          const visibleRows = allRows.filter((d: any) => {
-            const visibility = d.identifier?.visibility ?? "public";
-            if (d.uploadedBy === auth!.userId) return true;
-            if (visibility === "public") return true;
-            if (d.identifier?.sectorId != null && d.identifier.sectorId === auth!.sectorId) return true;
-            if (sharedDocIds.has(d.id)) return true;
-            return false;
-          });
-
-          const total = visibleRows.length;
-          const paginated = visibleRows.slice(offset, offset + limit);
-
-          const baseUrl = process.env.API_BASE_URL || "http://localhost:3000";
-          const safe = paginated.map((d: any) => ({
-            id: d.id,
-            filename: d.filename,
-            fileSize: d.fileSize,
-            mimeType: d.mimeType,
-            status: d.identifier?.status || "active",
-            createdAt: d.createdAt,
-            fileUrl: `${baseUrl}/documents/${d.id}/download`,
-            thumbnailUrl: `${baseUrl}/documents/${d.id}/thumbnail`,
-            identifier: d.identifier ? {
-              id: d.identifier.id,
-              identifier: d.identifier.identifier,
-              categoryId: d.identifier.category?.id,
-              categoryName: d.identifier.category?.name,
-            } : null,
-            uploadedBy: d.uploader?.fullName || null,
-          }));
-
-          return { data: safe, meta: { total, page, limit } };
         } catch (err: any) {
           console.error("[LIST_ERROR]", err);
           throw err;
@@ -128,6 +125,32 @@ export const documentsModule = new Elysia({ prefix: "/documents" })
       identifierId: t.Optional(t.String()),
     }),
     detail: { summary: "Listar documentos", tags: ["Documentos"] },
+  })
+
+  .patch("/:id/tags", async ({ tenantId, auth, params, body, set }) => {
+    try {
+      return await withTenant(tenantId, async (tx) => {
+        const result = await updateDocumentTags(tx, auth!, params.id, body.tags);
+        if ("error" in result) {
+          if (result.error === "FORBIDDEN") {
+            set.status = 403;
+            return { error: { code: "FORBIDDEN", message: "Sem permissão para editar tags." } };
+          }
+          set.status = 404;
+          return { error: { code: "NOT_FOUND", message: "Documento não encontrado." } };
+        }
+        return { data: { tags: result.tags } };
+      });
+    } catch (err: any) {
+      set.status = 500;
+      return { error: { code: "TAGS_ERROR", message: safeError(err) } };
+    }
+  }, {
+    params: t.Object({ id: t.String() }),
+    body: t.Object({
+      tags: t.Array(t.String({ minLength: 1, maxLength: 64 }), { maxItems: 24 }),
+    }),
+    detail: { summary: "Actualizar tags de perfil do documento", tags: ["Documentos"] },
   })
 
   .get("/:param", async ({ tenantId, auth, params, set }) => {
@@ -149,10 +172,7 @@ export const documentsModule = new Elysia({ prefix: "/documents" })
           // UUID — permitia obter metadados de qualquer documento de qualquer sector
           // só por se saber o identifier code. Resolve-se agora sempre por
           // identifiers.identifier + tenantId, reutilizando getDocumentMeta.
-          const idRow = await tx.query.identifiers.findFirst({
-            where: and(eq(identifiers.identifier, params.param), eq(identifiers.tenantId, tenantId)),
-            with: { document: true },
-          });
+          const idRow = await resolveIdentifierPrimary(tx, tenantId, params.param);
           if (!idRow?.document) { set.status = 404; return { error: { code: "NOT_FOUND", message: "Documento não encontrado." } }; }
 
           const doc = await getDocumentMeta(tx, auth!, idRow.document.id);
@@ -184,10 +204,7 @@ export const documentsModule = new Elysia({ prefix: "/documents" })
           const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
           let docId = params.param;
           if (!UUID_REGEX.test(docId)) {
-            const idRow = await tx.query.identifiers.findFirst({
-              where: and(eq(identifiers.identifier, params.param), eq(identifiers.tenantId, tenantId)),
-              with: { document: true },
-            });
+            const idRow = await resolveIdentifierPrimary(tx, tenantId, params.param);
             if (!idRow?.document) {
               set.status = 404;
               return { error: { code: "NOT_FOUND", message: "Documento não encontrado." } };
@@ -227,10 +244,7 @@ export const documentsModule = new Elysia({ prefix: "/documents" })
       const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
       let docId = params.param;
       if (!UUID_REGEX.test(docId)) {
-        const idRow = await tx.query.identifiers.findFirst({
-          where: and(eq(identifiers.identifier, params.param), eq(identifiers.tenantId, tenantId)),
-          with: { document: true },
-        });
+        const idRow = await resolveIdentifierPrimary(tx, tenantId, params.param);
         if (!idRow?.document) {
           set.status = 404;
           return { error: { code: "NOT_FOUND", message: "Documento não encontrado." } };
@@ -278,6 +292,72 @@ export const documentsModule = new Elysia({ prefix: "/documents" })
     detail: { summary: "Thumbnail do documento (UUID ou identifier code)", tags: ["Documentos"] },
   })
 
+  .post("/:param/versions", async ({ auth, body, set, clientIp, tenantId, params }) => {
+    try {
+      return await withTenant(tenantId, async (tx) => {
+        try {
+          const result = await createDocumentVersion(tx, auth!, {
+            documentId: params.param,
+            file: body.file,
+            uploadSource: body.uploadSource,
+          }, clientIp);
+          if (!result.success) { set.status = 422; return result; }
+          return result;
+        } catch (err: any) {
+          console.error("[VERSION_ERROR]", err);
+          throw err;
+        }
+      });
+    } catch (err: any) {
+      set.status = 400;
+      return { error: { code: "VERSION_ERROR", message: safeError(err) } };
+    }
+  }, {
+    params: t.Object({ param: t.String() }),
+    body: t.Object({
+      file: t.File(),
+      uploadSource: t.Optional(t.Union([t.Literal("manual"), t.Literal("scanner"), t.Literal("sync")])),
+    }),
+    detail: { summary: "Criar nova versão de um documento", tags: ["Documentos"] },
+  })
+
+  .get("/:param/versions/:version/download", async ({ tenantId, auth, params, set }) => {
+    try {
+      return await withTenant(tenantId, async (tx) => {
+        try {
+          const versionNum = parseInt(params.version, 10);
+          if (!Number.isFinite(versionNum) || versionNum < 1) {
+            set.status = 400;
+            return { error: { code: "VALIDATION_ERROR", message: "Versão inválida." } };
+          }
+          const result = await downloadDocument(tx, auth!, params.param, versionNum);
+          if ("error" in result) {
+            if (result.error === "ACCESS_REQUIRED") {
+              set.status = 403;
+              return { error: { code: "ACCESS_REQUIRED", message: "Solicite acesso ao supervisor do sector emitente." } };
+            }
+            set.status = 404;
+            return { error: { code: "NOT_FOUND", message: "Ficheiro não encontrado." } };
+          }
+          const fileBuffer = fs.readFileSync(result.filePath);
+          const asciiName = result.fileName.replace(/[^\x20-\x7E]/g, "_");
+          set.headers["Content-Disposition"] = `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(result.fileName)}`;
+          set.headers["Content-Type"] = "application/octet-stream";
+          return fileBuffer;
+        } catch (err: any) {
+          console.error("[VERSION_DOWNLOAD_ERROR]", err);
+          throw err;
+        }
+      });
+    } catch (err: any) {
+      set.status = 500;
+      return { error: { code: "DOWNLOAD_ERROR", message: safeError(err) } };
+    }
+  }, {
+    params: t.Object({ param: t.String(), version: t.String() }),
+    detail: { summary: "Download de uma versão específica", tags: ["Documentos"] },
+  })
+
   .post("/:param/share", async ({ tenantId, auth, params, body, set, clientIp }) => {
     try {
       return await withTenant(tenantId, async (tx) => {
@@ -294,10 +374,7 @@ export const documentsModule = new Elysia({ prefix: "/documents" })
             return { error: { code: "VALIDATION_ERROR", message: "Indique apenas sectorId OU userId, não ambos." } };
           }
 
-          const idRow = await tx.query.identifiers.findFirst({
-            where: and(eq(identifiers.identifier, params.param), eq(identifiers.tenantId, tenantId)),
-            with: { document: true },
-          });
+          const idRow = await resolveIdentifierPrimary(tx, tenantId, params.param);
           if (!idRow || !idRow.document) {
             set.status = 404; return { error: { code: "NOT_FOUND", message: "Documento não encontrado." } };
           }
@@ -442,10 +519,7 @@ export const documentsModule = new Elysia({ prefix: "/documents" })
     try {
       return await withTenant(tenantId, async (tx) => {
         try {
-          const idRow = await tx.query.identifiers.findFirst({
-            where: and(eq(identifiers.identifier, params.param), eq(identifiers.tenantId, tenantId)),
-            with: { document: true },
-          });
+          const idRow = await resolveIdentifierPrimary(tx, tenantId, params.param);
           if (!idRow?.document) {
             set.status = 404;
             return { error: { code: "NOT_FOUND", message: "Documento não encontrado." } };
@@ -476,10 +550,7 @@ export const documentsModule = new Elysia({ prefix: "/documents" })
     try {
       return await withTenant(tenantId, async (tx) => {
         try {
-          const idRow = await tx.query.identifiers.findFirst({
-            where: and(eq(identifiers.identifier, params.param), eq(identifiers.tenantId, tenantId)),
-            with: { document: true, sector: true },
-          });
+          const idRow = await resolveIdentifierPrimary(tx, tenantId, params.param, { sector: true });
           if (!idRow?.document) {
             set.status = 404; return { error: { code: "NOT_FOUND", message: "Documento não encontrado." } };
           }
@@ -563,10 +634,7 @@ export const documentsModule = new Elysia({ prefix: "/documents" })
     try {
       return await withTenant(tenantId, async (tx) => {
         try {
-          const idRow = await tx.query.identifiers.findFirst({
-            where: and(eq(identifiers.identifier, params.param), eq(identifiers.tenantId, tenantId)),
-            with: { document: true, sector: true },
-          });
+          const idRow = await resolveIdentifierPrimary(tx, tenantId, params.param, { sector: true });
           if (!idRow?.document) {
             set.status = 404; return { error: { code: "NOT_FOUND", message: "Documento não encontrado." } };
           }
@@ -610,10 +678,7 @@ export const documentsModule = new Elysia({ prefix: "/documents" })
     try {
       return await withTenant(tenantId, async (tx) => {
         try {
-          const idRow = await tx.query.identifiers.findFirst({
-            where: and(eq(identifiers.identifier, params.param), eq(identifiers.tenantId, tenantId)),
-            with: { document: true, sector: true },
-          });
+          const idRow = await resolveIdentifierPrimary(tx, tenantId, params.param, { sector: true });
           if (!idRow?.document) {
             set.status = 404; return { error: { code: "NOT_FOUND", message: "Documento não encontrado." } };
           }
@@ -710,10 +775,7 @@ export const documentsModule = new Elysia({ prefix: "/documents" })
     try {
       return await withTenant(tenantId, async (tx) => {
         try {
-          const idRow = await tx.query.identifiers.findFirst({
-            where: and(eq(identifiers.identifier, params.param), eq(identifiers.tenantId, tenantId)),
-            with: { document: true },
-          });
+          const idRow = await resolveIdentifierPrimary(tx, tenantId, params.param);
           if (!idRow?.document) {
             set.status = 404; return { error: { code: "NOT_FOUND", message: "Documento não encontrado." } };
           }
@@ -765,10 +827,7 @@ export const documentsModule = new Elysia({ prefix: "/documents" })
     try {
       return await withTenant(tenantId, async (tx) => {
         try {
-          const idRow = await tx.query.identifiers.findFirst({
-            where: and(eq(identifiers.identifier, params.param), eq(identifiers.tenantId, tenantId)),
-            with: { document: true },
-          });
+          const idRow = await resolveIdentifierPrimary(tx, tenantId, params.param);
           if (!idRow?.document) {
             set.status = 404; return { error: { code: "NOT_FOUND", message: "Documento não encontrado." } };
           }

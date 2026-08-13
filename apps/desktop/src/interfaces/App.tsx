@@ -5,7 +5,7 @@ import type { StoredUser } from "../domain/entities/User";
 import { useAuthStore } from "./stores/authStore";
 import { useAppConfigStore } from "./stores/configStore";
 import { useDeviceStore } from "./stores/deviceStore";
-import { api, sync } from "../infrastructure/di/container";
+import { api, sync, offlineCache } from "../infrastructure/di/container";
 import Layout from "./components/Layout";
 import Login from "./pages/Login";
 import Onboarding from "./pages/Onboarding";
@@ -19,6 +19,7 @@ import Settings from "./pages/Settings";
 import Audit from "./pages/Audit";
 import Scanner from "./pages/Scanner";
 import Profile from "./pages/Profile";
+import UserProfile from "./pages/UserProfile";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const token = useAuthStore(s => s.token);
@@ -58,6 +59,10 @@ export default function App() {
   }, [token, user, setUser]);
 
   useEffect(() => {
+    offlineCache.purgeStaleVersions().catch(() => {});
+  }, []);
+
+  useEffect(() => {
     if (!token) return;
     (async () => {
       try {
@@ -86,6 +91,7 @@ export default function App() {
           <Route path="aprovacoes" element={<Approvals />} />
           <Route path="sectores" element={<Sectors />} />
           <Route path="utilizadores" element={<Users />} />
+          <Route path="utilizadores/:id" element={<UserProfile />} />
           <Route path="auditoria" element={<Audit />} />
           <Route path="digitalizar" element={<Scanner />} />
           <Route path="configuracoes" element={<Settings />} />

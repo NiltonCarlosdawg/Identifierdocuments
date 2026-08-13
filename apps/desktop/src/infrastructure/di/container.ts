@@ -1,6 +1,7 @@
 import { HttpApiClient } from "../api/HttpApiClient";
 import { TauriSyncAdapter } from "../sync/TauriSyncAdapter";
 import { TauriScannerAdapter } from "../scanner/TauriScannerAdapter";
+import { TauriPrinterAdapter } from "../printer/TauriPrinterAdapter";
 import { TauriWatcherAdapter } from "../watcher/TauriWatcherAdapter";
 import type { IAuthRepository } from "../../domain/repositories/IAuthRepository";
 import type { StoredUser } from "../../domain/entities/User";
@@ -17,7 +18,9 @@ const authRepo: IAuthRepository = {
 
 const getBaseUrl = () => useAppConfigStore.getState().apiBaseUrl;
 
-export const api = new HttpApiClient(authRepo, getBaseUrl);
 export const sync = new TauriSyncAdapter();
+export const api = new HttpApiClient(authRepo, getBaseUrl, sync);
+export { offlineCache } from "../storage/OfflineCache";
 export const scanner = new TauriScannerAdapter();
+export const printer = new TauriPrinterAdapter();
 export const watcher = new TauriWatcherAdapter();

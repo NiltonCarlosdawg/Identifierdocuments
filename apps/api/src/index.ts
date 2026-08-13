@@ -18,6 +18,10 @@ import { statsModule } from "./modules/stats.module";
 import { devicesModule } from "./modules/devices.module";
 import { classifierModule } from "./modules/classifier.module";
 import { notificationSSEModule } from "./services/notification.service";
+import { logger } from "./lib/logger";
+import { startWorkers } from "./jobs/workers";
+
+const requestTimings = new WeakMap<Request, number>();
 
 const app = new Elysia()
   .use(cors({
@@ -54,6 +58,20 @@ const app = new Elysia()
   }))
   .use(authMiddleware)
   .use(tenantMiddleware)
+  .onRequest(({ request }) => {
+    requestTimings.set(request, performance.now());
+  })
+  .onAfterHandle(({ request, set }) => {
+    const start = requestTimings.get(request);
+    const url = new URL(request.url);
+    logger.info({
+      method: request.method,
+      path: url.pathname,
+      status: set.status,
+      durationMs: start ? Math.round(performance.now() - start) : undefined,
+    });
+    requestTimings.delete(request);
+  })
   .get("/", () => ({
     name: "Verano Labs — DocID API",
     version: "2.0.0",
@@ -82,7 +100,7 @@ const app = new Elysia()
   .use(devicesModule)
   .use(classifierModule)
   .use(notificationSSEModule)
-  .onError(({ code, error, set }) => {
+  .onError(({ code, error, set, request }) => {
     if (code === "NOT_FOUND") {
       set.status = 404;
       return { error: { code: "NOT_FOUND", message: "Rota não encontrada." } };
@@ -91,18 +109,26 @@ const app = new Elysia()
       set.status = 422;
       return { error: { code: "VALIDATION_ERROR", message: "Dados inválidos." } };
     }
+    const start = requestTimings.get(request);
+    const url = new URL(request.url);
+    logger.error({
+      code,
+      method: request.method,
+      path: url.pathname,
+      status: set.status,
+      durationMs: start ? Math.round(performance.now() - start) : undefined,
+      err: error,
+    });
+    requestTimings.delete(request);
     set.status = 500;
-    console.error("[ERROR]", error);
     return { error: { code: "INTERNAL_ERROR", message: "Erro interno do servidor." } };
   })
   .listen(3000);
 
-console.log(`
-  ╔═══════════════════════════════════════════╗
-  ║    Verano Labs — DocID API v1.0.0         ║
-  ║    http://localhost:3000                  ║
-  ║    Swagger: http://localhost:3000/docs    ║
-  ╚═══════════════════════════════════════════╝
-`);
+logger.info("DocID API arrancou em http://localhost:3000");
+
+void startWorkers().catch((err) => {
+  logger.warn({ err }, "[BULLMQ] Falha ao arrancar workers");
+});
 
 export type App = typeof app;

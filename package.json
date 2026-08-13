@@ -3,7 +3,12 @@
   "version": "1.0.0",
   "private": true,
   "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "test:e2e": "playwright test",
+    "test:e2e:install": "playwright install chromium"
+  },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@tauri-apps/cli": "^2.11.3"
   }
 }

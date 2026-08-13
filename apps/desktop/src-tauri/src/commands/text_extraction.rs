@@ -1,3 +1,4 @@
+use std::io::Read;
 use std::path::Path;
 
 pub fn extract_text_from_pdf(path: &Path) -> Result<String, String> {
@@ -9,6 +10,69 @@ pub fn extract_text_from_pdf(path: &Path) -> Result<String, String> {
 
 pub fn extract_text_from_txt(path: &Path) -> Result<String, String> {
     std::fs::read_to_string(path).map_err(|e| format!("Erro ao ler ficheiro: {e}"))
+}
+
+pub fn extract_text_from_docx(path: &Path) -> Result<String, String> {
+    let file = std::fs::File::open(path).map_err(|e| format!("Erro ao ler DOCX: {e}"))?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("DOCX inválido: {e}"))?;
+    let mut document = archive
+        .by_name("word/document.xml")
+        .map_err(|_| "DOCX sem word/document.xml.".to_string())?;
+    let mut xml = String::new();
+    document
+        .read_to_string(&mut xml)
+        .map_err(|e| format!("Erro ao ler document.xml: {e}"))?;
+    Ok(docx_xml_to_text(&xml))
+}
+
+fn decode_xml_entities(s: &str) -> String {
+    s.replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+}
+
+/// Extrai o texto visível de um `word/document.xml` (`<w:t>`), com quebra de
+/// parágrafo em `</w:p>`.
+fn docx_xml_to_text(xml: &str) -> String {
+    let mut out = String::new();
+    let mut pos = 0;
+    while pos < xml.len() {
+        let rest = &xml[pos..];
+        let t_at = rest.find("<w:t");
+        let p_at = rest.find("</w:p>");
+        match (t_at, p_at) {
+            (Some(t), Some(p)) if p < t => {
+                out.push('\n');
+                pos += p + 6;
+            }
+            (Some(t), _) => {
+                let after_tag = t + 4;
+                let slice = &rest[after_tag..];
+                let Some(gt) = slice.find('>') else { break };
+                if slice[..gt].ends_with('/') {
+                    pos += after_tag + gt + 1;
+                    continue;
+                }
+                let content_start = after_tag + gt + 1;
+                let after_content = &rest[content_start..];
+                let Some(end) = after_content.find("</w:t>") else { break };
+                out.push_str(&decode_xml_entities(&after_content[..end]));
+                pos += content_start + end + 6;
+            }
+            (None, Some(p)) => {
+                out.push('\n');
+                pos += p + 6;
+            }
+            (None, None) => break,
+        }
+    }
+    out.split('\n')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 #[tauri::command]
@@ -25,7 +89,7 @@ pub fn extract_text_command(path: String) -> Result<String, String> {
     {
         Some("pdf") => extract_text_from_pdf(p),
         Some("txt" | "md" | "csv") => extract_text_from_txt(p),
-        // .docx pendente — decidir entre docx-rs ou quick-xml
+        Some("docx") => extract_text_from_docx(p),
         Some(other) => Err(format!("Formato não suportado: .{other}")),
         None => Err("Ficheiro sem extensão.".to_string()),
     }
@@ -35,7 +99,10 @@ pub fn extract_text_command(path: String) -> Result<String, String> {
 mod tests {
     use super::*;
     use std::fs;
+    use std::io::Write;
     use uuid::Uuid;
+    use zip::write::SimpleFileOptions;
+    use zip::ZipWriter;
 
     fn tmp_file(content: &str, extension: &str) -> (std::path::PathBuf, String) {
         let dir = std::env::temp_dir().join(format!("docid_test_{}", Uuid::new_v4()));
@@ -44,6 +111,17 @@ mod tests {
         fs::write(&path, content).unwrap();
         let path_str = path.to_string_lossy().to_string();
         (dir, path_str)
+    }
+
+    fn write_minimal_docx(path: &Path, inner_xml: &str) {
+        let file = fs::File::create(path).unwrap();
+        let mut zip = ZipWriter::new(file);
+        let opts = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+        zip.start_file("[Content_Types].xml", opts).unwrap();
+        zip.write_all(br#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"></Types>"#).unwrap();
+        zip.start_file("word/document.xml", opts).unwrap();
+        zip.write_all(inner_xml.as_bytes()).unwrap();
+        zip.finish().unwrap();
     }
 
     #[test]
@@ -94,5 +172,29 @@ mod tests {
         let result = extract_text_command(path.to_string_lossy().to_string());
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), "Ficheiro sem extensão.");
+    }
+
+    #[test]
+    fn docx_xml_extracts_wt_and_paragraphs() {
+        let xml = r#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>VL-PROP-2026-0725-001</w:t></w:r></w:p><w:p><w:r><w:t xml:space="preserve">Contrato &amp; anexo</w:t></w:r></w:p></w:body></w:document>"#;
+        let text = docx_xml_to_text(xml);
+        assert!(text.contains("VL-PROP-2026-0725-001"));
+        assert!(text.contains("Contrato & anexo"));
+        assert!(text.contains('\n'));
+    }
+
+    #[test]
+    fn extract_docx_returns_document_text() {
+        let dir = std::env::temp_dir().join(format!("docid_test_{}", Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("contrato.docx");
+        write_minimal_docx(
+            &path,
+            r#"<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Identificador VL-FAT-2026-0813-002 no corpo</w:t></w:r></w:p></w:body></w:document>"#,
+        );
+        let result = extract_text_command(path.to_string_lossy().to_string());
+        assert!(result.is_ok(), "{result:?}");
+        assert!(result.unwrap().contains("VL-FAT-2026-0813-002"));
+        fs::remove_dir_all(&dir).ok();
     }
 }

@@ -29,7 +29,13 @@ export async function getSharedDocIds(tx: DB, auth: AuthPayload): Promise<Set<st
 type VisibilityResult = { visible: boolean; restricted: boolean };
 
 function checkVisibility(
-  row: { visibility: string | null; sectorId: string | null; document?: { id: string } | null; createdBy?: string | null },
+  row: {
+    visibility: string | null;
+    sectorId: string | null;
+    documents?: { id: string }[] | null;
+    document?: { id: string } | null;
+    createdBy?: string | null;
+  },
   auth: AuthPayload,
   sharedDocIds: Set<string>,
 ): VisibilityResult {
@@ -41,7 +47,8 @@ function checkVisibility(
   const isOwnSector = row.sectorId != null && row.sectorId === auth.sectorId;
   if (isOwnSector) return { visible: true, restricted: false };
 
-  if (row.document && sharedDocIds.has(row.document.id)) return { visible: true, restricted: false };
+  const docs = row.documents ?? (row.document ? [row.document] : []);
+  if (docs.some((d) => sharedDocIds.has(d.id))) return { visible: true, restricted: false };
 
   if (auth.roles.includes("ORG_ADMIN")) return { visible: true, restricted: true };
 
@@ -175,7 +182,7 @@ export async function listIdentifiers(tx: DB, auth: AuthPayload, filters: {
 
   const allRows = await tx.query.identifiers.findMany({
     where: and(...conditions),
-    with: { category: true, document: true, sector: true, createdByUser: true },
+    with: { category: true, documents: true, sector: true, createdByUser: true },
     orderBy: desc(identifiers.createdAt),
   });
 
@@ -188,7 +195,8 @@ export async function listIdentifiers(tx: DB, auth: AuthPayload, filters: {
 
   const data = filtered.map(row => {
     const { restricted } = checkVisibility(row, auth, sharedDocIds);
-    return { ...row, restricted };
+    const primary = row.documents?.find((d) => d.kind === "primary") ?? null;
+    return { ...row, document: primary, restricted };
   });
 
   const paginated = data.slice(offset, offset + limit);
@@ -199,7 +207,7 @@ export async function listIdentifiers(tx: DB, auth: AuthPayload, filters: {
 export async function getIdentifier(tx: DB, auth: AuthPayload, identifierStr: string, ip: string = "unknown") {
   const row = await tx.query.identifiers.findFirst({
     where: and(eq(identifiers.identifier, identifierStr), eq(identifiers.tenantId, auth.tenantId)),
-    with: { category: true, document: true, sector: true, createdByUser: true },
+    with: { category: true, documents: true, sector: true, createdByUser: true },
   });
 
   if (!row) return null;
@@ -218,7 +226,8 @@ export async function getIdentifier(tx: DB, auth: AuthPayload, identifierStr: st
     ip,
   });
 
-  return { ...row, restricted };
+  const primary = row.documents?.find((d) => d.kind === "primary") ?? null;
+  return { ...row, document: primary, restricted };
 }
 
 export async function cancelIdentifier(tx: DB, auth: AuthPayload, identifierStr: string, reason: string, ip: string = "unknown") {

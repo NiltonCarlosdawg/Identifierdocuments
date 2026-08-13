@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 const MODEL = "llama-3.3-70b-versatile";
 
@@ -46,7 +48,23 @@ ESP — Especificação Técnica [Técnico]
 MAN — Manual de Utilização [Técnico]
 REP — Relatório Técnico [Técnico]
 TAS — Termo de Aceitação / Entrega [Técnico]
-PLN — Plano de Projecto [Técnico]`;
+PLN — Plano de Projecto [Técnico]
+
+Exemplos de classificação:
+
+1) Nome do ficheiro: FACTURA_2025-04-12.pdf
+   Conteúdo: "FACTURA Nº FT/2025/0412. Cliente: Empresa XYZ, NIF 503123456. Descrição: Serviços de consultoria, 40h x 50 EUR = 2.000,00 EUR. IVA 23% = 460,00 EUR. Total a pagar: 2.460,00 EUR. Validade: 30 dias."
+   Resposta: { "categoryId": "FAT", "confidence": 0.99, "reasoning": "Documento com estrutura clássica de factura: número, cliente, linhas com valores e IVA, total a pagar." }
+
+2) Nome do ficheiro: ATA_REUNIAO_MENSAL.docx
+   Conteúdo: "Acta da reunião de 03/02/2026. Presentes: José, Maria e Ana. Ordem de trabalhos: 1. Aprovação do orçamento do trimestre; 2. Estatuto de obras do novo armazém. Deliberou-se aprovar o ponto 1 por unanimidade."
+   Resposta: { "categoryId": "ATA", "confidence": 0.96, "reasoning": "Texto é uma acta de reunião: participantes, ordem de trabalhos e deliberações." }
+
+3) Nome do ficheiro: Contrato_Jorge_Santos.pdf
+   Conteúdo: "CONTRATO DE TRABALHO. Ao abrigo do Código do Trabalho, a empresa recruta Jorge Santos, NIF 502987654, para as funções de Técnico de Informática. Período experimental de 6 meses. Salário base mensal de 1.250,00 EUR."
+   Resposta: { "categoryId": "CTR", "confidence": 0.98, "reasoning": "Contrato de trabalho individual com funções, período experimental e salário, ao abrigo do Código do Trabalho." }
+
+Classifique o documento seguinte seguindo o mesmo formato. Responda APENAS com o JSON, sem texto adicional.`;
 
 export interface ClassificationResult {
   categoryId: string;
@@ -67,6 +85,33 @@ const VALID_CATEGORY_IDS = new Set([
   "ATA", "MEM", "CIR", "REQ", "POL", "PRO", "DEL",
   "ESP", "MAN", "REP", "TAS", "PLN",
 ]);
+
+export const CLASSIFIER_CACHE_TTL_SECONDS = 24 * 60 * 60;
+
+export function classifierCacheKey(tenantId: string, text: string, filename?: string): string {
+  const payload = `${filename ?? ""}\n${text.slice(0, 4000)}`;
+  const hash = createHash("sha256").update(payload).digest("hex");
+  return `classifier:${tenantId}:hash:${hash}`;
+}
+
+export function cacheableClassification(result: ClassificationResult): boolean {
+  return result.categoryId !== "UNKNOWN" && result.confidence > 0;
+}
+
+export function parseCachedClassification(raw: string): ClassificationResult | null {
+  try {
+    const parsed = JSON.parse(raw) as ClassificationResult;
+    if (typeof parsed?.categoryId !== "string" || parsed.categoryId === "UNKNOWN") return null;
+    if (typeof parsed.confidence !== "number") return null;
+    return {
+      categoryId: parsed.categoryId,
+      confidence: parsed.confidence,
+      reasoning: typeof parsed.reasoning === "string" ? parsed.reasoning : "",
+    };
+  } catch {
+    return null;
+  }
+}
 
 export async function suggestCategory(text: string, filename?: string): Promise<ClassificationResult> {
   const apiKey = process.env.GROQ_API_KEY;

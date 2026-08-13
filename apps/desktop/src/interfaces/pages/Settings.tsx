@@ -1,10 +1,16 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAuthStore } from "../stores/authStore";
 import { useAppConfigStore } from "../stores/configStore";
 import { useWatcherStore } from "../stores/watcherStore";
-import { PageHeader } from "../components/docid-ui";
+import { useScannerStore } from "../stores/scannerStore";
+import { usePrinterStore } from "../stores/printerStore";
+import { PageHeader, OfflineNotice } from "../components/docid-ui";
+import { useOfflineCache } from "../hooks/useOfflineCache";
+import { mapError } from "../../shared/errors/mapError";
 import { sync, api } from "../../infrastructure/di/container";
-import { Server, Sun, Moon, Save, RotateCcw, FolderPlus, Trash2, Play, Square, Eye, RefreshCw, Building2, Bell, Download, Smartphone, AlertTriangle } from "lucide-react";
+import type { WatcherFileRow } from "../../domain/entities/Watcher";
+import { Server, Sun, Moon, Save, RotateCcw, FolderPlus, Trash2, Play, Square, Eye, RefreshCw, Building2, Bell, Download, Smartphone, AlertTriangle, Printer } from "lucide-react";
 
 export default function Settings() {
   const [tab, setTab] = useState<"server" | "appearance" | "watcher" | "organizacao" | "notificacoes" | "dispositivos">("server");
@@ -40,6 +46,9 @@ function ServerTab() {
   const [input, setInput] = useState(apiBaseUrl);
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const [updateMsg, setUpdateMsg] = useState("");
+  const [updateError, setUpdateError] = useState("");
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
 
   const handleSave = () => {
     setSaveError("");
@@ -50,6 +59,29 @@ function ServerTab() {
       setTimeout(() => setSaved(false), 2000);
     } else {
       setSaveError("HTTP só é permitido para localhost — use HTTPS para servidores remotos.");
+    }
+  };
+
+  const handleCheckUpdate = async () => {
+    setUpdateMsg("");
+    setUpdateError("");
+    setCheckingUpdate(true);
+    try {
+      if (!sync.isAvailable()) {
+        setUpdateError("Actualizações só estão disponíveis na aplicação desktop.");
+        return;
+      }
+      const { invoke } = await import("@tauri-apps/api/core");
+      const msg = await invoke<string>("check_for_updates");
+      setUpdateMsg(msg);
+      if (msg.includes("instalada")) {
+        const { relaunch } = await import("@tauri-apps/plugin-process");
+        await relaunch();
+      }
+    } catch (err: unknown) {
+      setUpdateError(mapError(err, "Não foi possível verificar actualizações."));
+    } finally {
+      setCheckingUpdate(false);
     }
   };
 
@@ -76,6 +108,18 @@ function ServerTab() {
         <button onClick={handleSave} disabled={!isValid || input === apiBaseUrl} className="docid-button-primary"><Save className="h-4 w-4" /> Guardar</button>
         <button onClick={() => { resetApiBaseUrl(); setInput(useAppConfigStore.getState().apiBaseUrl); }} className="docid-button-secondary"><RotateCcw className="h-4 w-4" /> Restaurar predefinição</button>
         {saved && <span className="text-sm text-docid-secondary">Guardado!</span>}
+      </div>
+
+      <div className="border-t border-docid-border pt-5 space-y-3">
+        <div>
+          <label className="mb-1.5 block text-xs font-semibold text-docid-muted">Actualizações</label>
+          <p className="text-xs text-docid-muted mb-3">Verifica se existe uma nova versão assinada publicada em GitHub Releases.</p>
+          <button onClick={handleCheckUpdate} disabled={checkingUpdate} className="docid-button-secondary">
+            <Download className="h-4 w-4" /> {checkingUpdate ? "A verificar..." : "Procurar actualizações"}
+          </button>
+        </div>
+        {updateMsg && <p className="text-sm text-docid-secondary">{updateMsg}</p>}
+        {updateError && <p className="text-sm text-docid-error">{updateError}</p>}
       </div>
     </div>
   );
@@ -115,7 +159,6 @@ function OrganizationTab() {
   const [name, setName] = useState("");
   const [prefix, setPrefix] = useState("");
   const [batchSize, setBatchSize] = useState(50);
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
@@ -123,21 +166,19 @@ function OrganizationTab() {
   const [exportingStats, setExportingStats] = useState(false);
   const [exportError, setExportError] = useState("");
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await api.get<{ data: { name: string; slug: string; identifierPrefix: string; plan: string; identifierLeaseBatchSize: number | null } }>("/tenants/me");
-        setOrg(res.data);
-        setName(res.data.name);
-        setPrefix(res.data.identifierPrefix);
-        setBatchSize(res.data.identifierLeaseBatchSize ?? 50);
-      } catch (e: any) {
-        setError(e.message);
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, []);
+  const { loading, error: loadError, isStale, cachedAt, refresh } = useOfflineCache<{ name: string; slug: string; identifierPrefix: string; plan: string; identifierLeaseBatchSize: number | null }>({
+    endpoint: "/tenants/me",
+    fetcher: async () => {
+      const res = await api.get<{ data: { name: string; slug: string; identifierPrefix: string; plan: string; identifierLeaseBatchSize: number | null } }>("/tenants/me");
+      return res.data;
+    },
+    onData: data => {
+      setOrg(data);
+      setName(data.name);
+      setPrefix(data.identifierPrefix);
+      setBatchSize(data.identifierLeaseBatchSize ?? 50);
+    },
+  });
 
   const handleSave = async () => {
     setSaving(true);
@@ -152,7 +193,7 @@ function OrganizationTab() {
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch (e: any) {
-      setError(e.message);
+      setError(mapError(e, "Erro ao guardar dados da organização."));
     } finally {
       setSaving(false);
     }
@@ -177,7 +218,7 @@ function OrganizationTab() {
       const blob = await api.getBlob(path);
       if (blob) downloadBlob(blob, filename);
     } catch (e: any) {
-      setExportError(e.message === "Erro 429" ? "Limite de exportações excedido (5/hora). Tente novamente dentro de 1 hora." : e.message);
+      setExportError(e.message === "Erro 429" ? "Limite de exportações excedido (5/hora). Tente novamente dentro de 1 hora." : mapError(e));
     } finally {
       setter(false);
     }
@@ -187,9 +228,10 @@ function OrganizationTab() {
 
   return (
     <div className="space-y-6 max-w-xl">
+      {isStale && <OfflineNotice cachedAt={cachedAt} onRetry={refresh} />}
       <div className="docid-panel p-6 space-y-5">
         <h3 className="text-sm font-semibold text-docid-text">Dados da Organização</h3>
-        {error && <p className="text-xs text-docid-error">{error}</p>}
+        {(error || loadError) && <p className="text-xs text-docid-error">{error || loadError}</p>}
         <div>
           <label className="mb-1.5 block text-xs font-semibold text-docid-muted">Nome</label>
           <input value={name} onChange={e => setName(e.target.value)} className="docid-input w-full" />
@@ -264,34 +306,57 @@ function DevicesTab() {
   const isOrgAdmin = user?.roles?.includes("ORG_ADMIN") ?? false;
   const [devices, setDevices] = useState<DeviceRow[]>([]);
   const [leases, setLeases] = useState<LeaseRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const [writeError, setWriteError] = useState("");
   const [releasing, setReleasing] = useState<string | null>(null);
   const [deactivating, setDeactivating] = useState<string | null>(null);
   const [isTauri] = useState(() => sync.isAvailable());
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
-    setError("");
+  const { loading, error: loadError, isStale, cachedAt, refresh } = useOfflineCache<DeviceRow[]>({
+    endpoint: "/devices",
+    fetcher: async () => {
+      const res = await api.get<{ data: DeviceRow[] }>("/devices");
+      return res.data || [];
+    },
+    onData: setDevices,
+  });
+
+  const reloadLeases = async () => {
+    if (!isTauri) return;
     try {
-      const [devRes] = await Promise.all([
-        api.get<{ data: DeviceRow[] }>("/devices"),
-      ]);
-      setDevices(devRes.data);
+      const { invoke } = await import("@tauri-apps/api/core");
+      setLeases(await invoke<LeaseRow[]>("get_leases"));
+    } catch {}
+  };
 
-      if (isTauri) {
-        const { invoke } = await import("@tauri-apps/api/core");
-        const result = await invoke<LeaseRow[]>("get_leases");
-        setLeases(result);
-      }
-    } catch (e: any) {
-      setError(e.message || "Erro ao carregar dados.");
-    } finally {
-      setLoading(false);
+  const handleRefresh = async () => { await refresh(); await reloadLeases(); };
+
+  useEffect(() => { reloadLeases(); }, [isTauri]);
+
+  const scannerDevices = useScannerStore(s => s.devices);
+  const defaultScanner = useScannerStore(s => s.selectedDevice);
+  const loadScanners = useScannerStore(s => s.loadDevices);
+  const selectScanner = useScannerStore(s => s.selectDevice);
+  const [scannerLoaded, setScannerLoaded] = useState(false);
+  const printers = usePrinterStore(s => s.printers);
+  const selectedPrinter = usePrinterStore(s => s.selectedPrinter);
+  const loadPrinters = usePrinterStore(s => s.loadPrinters);
+  const selectPrinter = usePrinterStore(s => s.selectPrinter);
+  const printersLoading = usePrinterStore(s => s.loading);
+  const [printersLoaded, setPrintersLoaded] = useState(false);
+
+  useEffect(() => {
+    if (isTauri && !scannerLoaded) {
+      loadScanners();
+      setScannerLoaded(true);
     }
-  }, [isTauri]);
+  }, [isTauri, scannerLoaded, loadScanners]);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => {
+    if (isTauri && !printersLoaded) {
+      loadPrinters();
+      setPrintersLoaded(true);
+    }
+  }, [isTauri, printersLoaded, loadPrinters]);
 
   const calcUsage = (lease: LeaseRow) => {
     const total = lease.end_seq - lease.start_seq + 1;
@@ -303,12 +368,12 @@ function DevicesTab() {
     if (!confirm(`Tem a certeza que deseja desactivar o dispositivo "${device.name}"?\n\nEsta acção impede que o dispositivo gere novos identificadores offline. As leases activas neste dispositivo não serão afectadas.`)) return;
 
     setDeactivating(device.id);
-    setError("");
+    setWriteError("");
     try {
       await api.patch(`/devices/${device.id}/deactivate`, {});
-      await loadData();
+      await handleRefresh();
     } catch (e: any) {
-      setError(e.message || "Erro ao desactivar dispositivo.");
+      setWriteError(mapError(e, "Erro ao desactivar dispositivo."));
     } finally {
       setDeactivating(null);
     }
@@ -318,7 +383,7 @@ function DevicesTab() {
     if (!confirm(`Tem a certeza? Esta acção é irreversível.\n\nLease: ${lease.id}\nCategoria: ${lease.category_id}\nSector: ${lease.sector_id}\nIntervalo: ${lease.start_seq}–${lease.end_seq}\n\nOs identificadores pendentes associados a este lease serão marcados como conflito.`)) return;
 
     setReleasing(lease.id);
-    setError("");
+    setWriteError("");
     try {
       await api.post("/identifiers/force-release", { leaseId: lease.id });
 
@@ -327,9 +392,9 @@ function DevicesTab() {
         await invoke("mark_lease_remote_released", { leaseId: lease.id });
       }
 
-      await loadData();
+      await handleRefresh();
     } catch (e: any) {
-      setError(e.message || "Erro ao forçar libertação.");
+      setWriteError(mapError(e, "Erro ao forçar libertação."));
     } finally {
       setReleasing(null);
     }
@@ -337,12 +402,13 @@ function DevicesTab() {
 
   return (
     <div className="space-y-6 max-w-xl">
-      {error && <div className="rounded-lg border border-docid-error/30 bg-docid-error/10 p-3 text-sm text-docid-error">{error}</div>}
+      {isStale && <OfflineNotice cachedAt={cachedAt} onRetry={refresh} />}
+      {(loadError || writeError) && <div className="rounded-lg border border-docid-error/30 bg-docid-error/10 p-3 text-sm text-docid-error">{loadError || writeError}</div>}
 
       <div className="docid-panel p-6 space-y-4">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-semibold text-docid-text">Dispositivos Registados</h3>
-          <button onClick={loadData} className="docid-button-secondary text-xs" disabled={loading}>
+          <button onClick={handleRefresh} className="docid-button-secondary text-xs" disabled={loading}>
             <RefreshCw className={`h-3 w-3 ${loading ? "animate-spin" : ""}`} /> Actualizar
           </button>
         </div>
@@ -405,6 +471,52 @@ function DevicesTab() {
 
       {isTauri && (
         <>
+          <div className="docid-panel p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-docid-text">Scanner Predefinido</h3>
+              <button onClick={loadScanners} className="docid-button-secondary text-xs" disabled={scannerDevices.length === 0}>
+                <RefreshCw className="h-3 w-3" /> Actualizar
+              </button>
+            </div>
+            {scannerDevices.length === 0 ? (
+              <div className="flex flex-col items-center gap-3 py-6 text-center">
+                <Smartphone className="h-8 w-8 text-docid-outline" />
+                <p className="text-sm text-docid-muted">Nenhum scanner encontrado.</p>
+                <button onClick={loadScanners} className="docid-button-secondary text-xs"><RefreshCw className="h-3 w-3" /> Procurar scanners</button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-xs text-docid-muted">Scanner usado por omissão na página Digitalizar.</p>
+                <select value={defaultScanner || ""} onChange={e => selectScanner(e.target.value)} className="docid-input w-full text-sm">
+                  {scannerDevices.map(d => <option key={d.name} value={d.name}>{d.name}</option>)}
+                </select>
+              </div>
+            )}
+          </div>
+
+          <div className="docid-panel p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-docid-text">Impressora Predefinida</h3>
+              <button onClick={loadPrinters} className="docid-button-secondary text-xs" disabled={printersLoading}>
+                <RefreshCw className={`h-3 w-3 ${printersLoading ? "animate-spin" : ""}`} /> Actualizar
+              </button>
+            </div>
+            {printers.length === 0 ? (
+              <div className="flex flex-col items-center gap-3 py-6 text-center">
+                <Printer className="h-8 w-8 text-docid-outline" />
+                <p className="text-sm text-docid-muted">Nenhuma impressora encontrada.</p>
+                <button onClick={loadPrinters} className="docid-button-secondary text-xs"><RefreshCw className="h-3 w-3" /> Procurar impressoras</button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-xs text-docid-muted">Usada por omissão ao imprimir digitalizações e documentos.</p>
+                <select value={selectedPrinter || ""} onChange={e => selectPrinter(e.target.value)} className="docid-input w-full text-sm">
+                  {printers.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
+                </select>
+              </div>
+            )}
+          </div>
+
           <div className="docid-panel p-6 space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold text-docid-text">Leases Locais</h3>
@@ -486,31 +598,33 @@ function DevicesTab() {
 
 function NotificationsTab() {
   const [prefs, setPrefs] = useState<Record<string, boolean>>({});
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
-  const [error, setError] = useState("");
+  const setNotificationPrefs = useAppConfigStore(s => s.setNotificationPrefs);
+  const patchNotificationPref = useAppConfigStore(s => s.patchNotificationPref);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await api.get<{ notificationPreferences?: Record<string, boolean> }>("/auth/me");
-        setPrefs(res.notificationPreferences ?? {});
-      } catch (e: any) {
-        setError(e.message);
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, []);
+  const { loading, error, isStale, cachedAt, refresh } = useOfflineCache<Record<string, boolean>>({
+    endpoint: "/auth/me",
+    fetcher: async () => {
+      const res = await api.get<{ notificationPreferences?: Record<string, boolean> }>("/auth/me");
+      return res.notificationPreferences ?? {};
+    },
+    onData: (data) => {
+      setPrefs(data);
+      setNotificationPrefs(data);
+    },
+  });
 
   const handleToggle = async (key: string) => {
-    const newVal = !prefs[key];
+    const current = key in prefs ? !!prefs[key] : true;
+    const newVal = !current;
     setPrefs(p => ({ ...p, [key]: newVal }));
+    patchNotificationPref(key, newVal);
     setSaving(key);
     try {
       await api.patch("/auth/me/notifications-preferences", { [key]: newVal });
     } catch {
-      setPrefs(p => ({ ...p, [key]: !newVal }));
+      setPrefs(p => ({ ...p, [key]: current }));
+      patchNotificationPref(key, current);
     } finally {
       setSaving(null);
     }
@@ -522,14 +636,18 @@ function NotificationsTab() {
     { key: "approval_pending", label: "Aprovação pendente", desc: "Quando um documento necessita da sua aprovação" },
     { key: "approval_resolved", label: "Aprovação resolvida", desc: "Quando uma aprovação foi concedida ou rejeitada" },
     { key: "document_shared", label: "Documento partilhado", desc: "Quando um documento é partilhado consigo ou com o seu sector" },
-    { key: "sync_complete", label: "Sync completo", desc: "Quando uma sincronização de ficheiros é concluída" },
+    { key: "sync_complete", label: "Sync completo", desc: "Quando a fila offline envia documentos com sucesso" },
+    { key: "sync_failed", label: "Falha de sync", desc: "Quando um upload da fila offline falha" },
+    { key: "queue_enqueued", label: "Enfileirado offline", desc: "Quando um documento é guardado na fila por falta de rede" },
+    { key: "write_enqueued", label: "Escrita pendente", desc: "Quando uma alteração de dados fica na fila de escritas offline" },
     { key: "watcher_detected", label: "Ficheiro detectado pelo watcher", desc: "Quando um novo ficheiro é detectado na pasta vigiada" },
   ];
 
   return (
     <div className="docid-panel p-6 max-w-xl space-y-5">
       <h3 className="text-sm font-semibold text-docid-text">Preferências de Notificação</h3>
-      <p className="text-xs text-docid-muted">Seleccione para que eventos pretende ser notificado.</p>
+      <p className="text-xs text-docid-muted">Seleccione para que eventos pretende ser notificado. Eventos de fila/watcher usam notificações nativas do sistema (Tauri).</p>
+      {isStale && <OfflineNotice cachedAt={cachedAt} onRetry={refresh} />}
       {error && <p className="text-xs text-docid-error">{error}</p>}
       {items.map(({ key, label, desc }) => (
         <label key={key} className="flex items-center justify-between gap-4 rounded-lg border border-docid-border p-4 hover:bg-docid-surface-high cursor-pointer">
@@ -537,7 +655,7 @@ function NotificationsTab() {
             <p className="text-sm font-medium text-docid-text">{label}</p>
             <p className="text-xs text-docid-muted">{desc}</p>
           </div>
-          <input type="checkbox" checked={!!prefs[key]} onChange={() => handleToggle(key)} disabled={saving === key} className="rounded border-docid-border bg-docid-surface-low text-docid-primary focus:ring-docid-primary" />
+          <input type="checkbox" checked={key in prefs ? !!prefs[key] : true} onChange={() => handleToggle(key)} disabled={saving === key} className="rounded border-docid-border bg-docid-surface-low text-docid-primary focus:ring-docid-primary" />
         </label>
       ))}
     </div>
@@ -545,7 +663,10 @@ function NotificationsTab() {
 }
 
 function WatcherTab() {
-  const { folders, running, loading, error, detectedCount, loadFolders, addFolder, removeFolder, start, stop, bumpDetected, clearDetected } = useWatcherStore();
+  const navigate = useNavigate();
+  const { folders, running, loading, error, detectedCount, files, reminders, report, loadFolders, addFolder, removeFolder, start, stop, refreshFiles, refreshReminders, refreshReport, setFileStatus, attachDetectedFile, bumpDetected } = useWatcherStore();
+  const [busyPath, setBusyPath] = useState<string | null>(null);
+  const [actionInfo, setActionInfo] = useState("");
 
   useEffect(() => { loadFolders(); }, [loadFolders]);
 
@@ -554,12 +675,21 @@ function WatcherTab() {
     (async () => {
       if (typeof window !== "undefined" && !("__TAURI_INTERNALS__" in window)) return;
       const { listen } = await import("@tauri-apps/api/event");
-      const f1 = await listen("watcher:file_detected", () => bumpDetected());
-      const f2 = await listen("watcher:identifier_found", () => bumpDetected());
-      unlisteners = [f1, f2];
+      const f1 = await listen("watcher:file_detected", () => {
+        bumpDetected();
+        refreshFiles(); refreshReport();
+      });
+      const f2 = await listen("watcher:identifier_found", () => {
+        bumpDetected();
+        refreshFiles(); refreshReport();
+      });
+      const f3 = await listen("watcher:status_changed", () => {
+        refreshFiles(); refreshReminders(); refreshReport();
+      });
+      unlisteners = [f1, f2, f3];
     })();
     return () => unlisteners.forEach(f => f());
-  }, [bumpDetected]);
+  }, [bumpDetected, refreshFiles, refreshReminders, refreshReport]);
 
   const handleAddFolder = async () => {
     try {
@@ -569,9 +699,41 @@ function WatcherTab() {
     } catch {}
   };
 
+  const reportCards = report ? [
+    { label: "Detectados", value: report.detected, tone: "text-docid-primary-soft" },
+    { label: "Com identificador", value: report.identifier_found, tone: "text-docid-secondary" },
+    { label: "Lembretes", value: report.pending, tone: "text-docid-tertiary" },
+    { label: "Adicionados", value: report.added, tone: "text-docid-success" },
+    { label: "Ignorados", value: report.ignored, tone: "text-docid-muted" },
+    { label: "Sem identificador", value: report.file_detected, tone: "text-docid-muted" },
+  ] : [];
+
+  const detectedFiles = files.filter(f => f.status === "detected");
+  const fileLabel = (p: string) => decodeURIComponent(p.split("/").pop() || p);
+
+  const handleAddNow = async (f: WatcherFileRow) => {
+    setActionInfo("");
+    if (!f.identifier) {
+      navigate(`/documentos?attachPath=${encodeURIComponent(f.path)}`);
+      return;
+    }
+    setBusyPath(f.path);
+    try {
+      const result = await attachDetectedFile(f.path, f.identifier);
+      setActionInfo(result === "queued"
+        ? "Guardado na fila offline — será enviado quando houver ligação."
+        : "Documento anexado.");
+    } catch {
+      // o store já preenche `error`
+    } finally {
+      setBusyPath(null);
+    }
+  };
+
   return (
-    <div className="space-y-6 max-w-xl">
+    <div className="space-y-6 max-w-2xl">
       {error && <div className="rounded-lg border border-docid-error/30 bg-docid-error/10 p-3 text-sm text-docid-error">{error}</div>}
+      {actionInfo && <div className="rounded-lg border border-docid-secondary/30 bg-docid-secondary/10 p-3 text-sm text-docid-secondary">{actionInfo}</div>}
       <div className="flex items-center gap-3">
         {running ? (
           <button onClick={stop} className="docid-button-secondary"><Square className="h-4 w-4" /> Parar</button>
@@ -586,6 +748,18 @@ function WatcherTab() {
           </span>
         )}
       </div>
+
+      {report && (
+        <div className="grid grid-cols-3 gap-2">
+          {reportCards.map(c => (
+            <div key={c.label} className="rounded-lg bg-docid-surface-low p-3 text-center">
+              <p className={`text-xl font-bold ${c.tone}`}>{c.value}</p>
+              <p className="text-xs text-docid-muted">{c.label}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className="docid-panel overflow-hidden">
         {loading ? (
           <div className="flex items-center justify-center py-12 text-sm text-docid-muted">A carregar...</div>
@@ -606,7 +780,49 @@ function WatcherTab() {
           </ul>
         )}
       </div>
-      <p className="text-xs text-docid-muted">Os ficheiros detectados podem ser anexados a identificadores na página Documentos.</p>
+
+      {detectedFiles.length > 0 && (
+        <div>
+          <h3 className="mb-2 text-sm font-semibold text-docid-text">Ficheiros detectados</h3>
+          <div className="docid-panel divide-y divide-docid-border">
+            {detectedFiles.map(f => (
+              <div key={f.path} className="flex items-center justify-between gap-3 px-4 py-3">
+                <div className="min-w-0">
+                  <p className="truncate text-sm text-docid-text" title={f.path}>{fileLabel(f.path)}</p>
+                  <p className="text-xs text-docid-muted">{f.kind === "identifier_found" ? `Identificador: ${f.identifier}` : "Sem identificador encontrado"}</p>
+                </div>
+                <div className="flex shrink-0 flex-wrap justify-end gap-2">
+                  <button onClick={() => handleAddNow(f)} disabled={busyPath === f.path} className="docid-button-primary text-xs py-1.5">{busyPath === f.path ? "A anexar..." : "Adicionar agora"}</button>
+                  <button onClick={() => setFileStatus(f.path, "pending")} disabled={!!busyPath} className="docid-button-secondary text-xs py-1.5">Mais tarde</button>
+                  <button onClick={() => setFileStatus(f.path, "ignored")} disabled={!!busyPath} className="docid-button-secondary text-xs py-1.5 text-docid-error">Não pertence</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {reminders.length > 0 && (
+        <div>
+          <h3 className="mb-2 text-sm font-semibold text-docid-text">Lembretes <span className="font-normal text-docid-muted">({reminders.length})</span></h3>
+          <div className="docid-panel divide-y divide-docid-border">
+            {reminders.map(f => (
+              <div key={f.path} className="flex items-center justify-between gap-3 px-4 py-3">
+                <div className="min-w-0">
+                  <p className="truncate text-sm text-docid-text" title={f.path}>{fileLabel(f.path)}</p>
+                  <p className="text-xs text-docid-muted">{f.identifier ? `Identificador: ${f.identifier}` : "Sem identificador encontrado"}</p>
+                </div>
+                <div className="flex shrink-0 flex-wrap justify-end gap-2">
+                  <button onClick={() => handleAddNow(f)} disabled={busyPath === f.path} className="docid-button-primary text-xs py-1.5">{busyPath === f.path ? "A anexar..." : "Adicionar agora"}</button>
+                  <button onClick={() => setFileStatus(f.path, "ignored")} disabled={!!busyPath} className="docid-button-secondary text-xs py-1.5 text-docid-error">Dispensar</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <p className="text-xs text-docid-muted">Com identificador, «Adicionar agora» anexa já (ou enfileira se estiver offline). Sem identificador, abre Documentos para completar o anexo.</p>
     </div>
   );
 }

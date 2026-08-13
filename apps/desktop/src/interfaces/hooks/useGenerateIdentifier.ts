@@ -56,6 +56,10 @@ export function useGenerateIdentifier() {
       }
 
       if (await sync.isOnline()) {
+        try {
+          const { invoke } = await import("@tauri-apps/api/core");
+          await invoke("ensure_offline_lease", { categoryId: input.categoryId, sectorId: input.sectorId });
+        } catch { /* best effort — não bloqueia a geração online */ }
         const res = await api.post<{ data: { identifier: string } }>("/identifiers/generate", {
           categoryId: input.categoryId,
           issuedTo: input.issuedTo || undefined,

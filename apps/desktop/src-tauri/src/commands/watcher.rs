@@ -1,6 +1,9 @@
-use crate::commands::text_extraction::{extract_text_from_pdf, extract_text_from_txt};
+use crate::commands::text_extraction::{extract_text_from_docx, extract_text_from_pdf, extract_text_from_txt};
+use crate::db;
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use regex::Regex;
+use rusqlite::params;
+use serde::Serialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -65,32 +68,90 @@ fn supported_ext(ext: &str) -> bool {
     matches!(ext, "pdf" | "txt" | "md" | "csv" | "docx" | "xlsx" | "png" | "jpg" | "jpeg")
 }
 
+fn app_db_path(app_data: &Path) -> PathBuf {
+    app_data.join("offline.db")
+}
+
+/// Insere ou actualiza o registo de um ficheiro detectado (upsert por path).
+/// Devolve `true` se o ficheiro está em `detected` (novo ou ainda por decidir)
+/// e deve emitir evento; `false` se o utilizador já escolheu pending/added/ignored.
+fn upsert_watcher_file(
+    app_data: &Path,
+    path: &Path,
+    mtime: u64,
+    identifier: Option<&str>,
+) -> rusqlite::Result<bool> {
+    let conn = db::open(&app_db_path(app_data))?;
+    let now = chrono::Utc::now().to_rfc3339();
+    // Não reseta um "mais tarde"/ignorado/adicionado se o ficheiro for re-detectado.
+    conn.execute(
+        "INSERT INTO watcher_files (path, mtime, status, kind, identifier, created_at, updated_at)
+         VALUES (?1, ?2, 'detected', ?3, ?4, ?5, ?5)
+         ON CONFLICT(path) DO UPDATE SET
+            mtime = excluded.mtime,
+            kind = excluded.kind,
+            identifier = COALESCE(excluded.identifier, watcher_files.identifier),
+            updated_at = excluded.updated_at",
+        params![
+            path.to_string_lossy(),
+            mtime,
+            if identifier.is_some() { "identifier_found" } else { "file_detected" },
+            identifier,
+            now,
+        ],
+    )?;
+    let status: String = conn.query_row(
+        "SELECT status FROM watcher_files WHERE path = ?1",
+        params![path.to_string_lossy()],
+        |r| r.get(0),
+    )?;
+    Ok(status == "detected")
+}
+
 fn check_and_emit(path: &Path, app: &AppHandle, seen: &mut HashMap<String, u64>, app_data: &Path) {
     let canonical = match path.canonicalize() { Ok(c) => c, Err(_) => return };
     let mtime = match file_mtime(&canonical) { Some(m) => m, None => return };
     let key = canonical.to_string_lossy().to_string();
-    if seen.get(&key) == Some(&mtime) { return; }
+    let is_new = seen.get(&key) != Some(&mtime);
+    if !is_new { return; }
     seen.insert(key, mtime);
     save_seen(app_data, seen);
 
     let ext = canonical.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
     if !supported_ext(&ext) { return; }
 
-    match ext.as_str() {
-        "pdf" | "txt" | "md" | "csv" => {
-            let text = if ext == "pdf" { extract_text_from_pdf(&canonical) } else { extract_text_from_txt(&canonical) };
+    let (kind, identifier) = match ext.as_str() {
+        "pdf" | "txt" | "md" | "csv" | "docx" => {
+            let text = match ext.as_str() {
+                "pdf" => extract_text_from_pdf(&canonical),
+                "docx" => extract_text_from_docx(&canonical),
+                _ => extract_text_from_txt(&canonical),
+            };
             match text {
                 Ok(t) => {
                     if let Some(id) = find_identifier(&t) {
-                        let _ = app.emit("watcher:identifier_found", serde_json::json!({"path": canonical.to_string_lossy(), "identifier": id, "ext": ext}));
+                        ("identifier_found", Some(id))
                     } else {
-                        let _ = app.emit("watcher:file_detected", serde_json::json!({"path": canonical.to_string_lossy(), "ext": ext}));
+                        ("file_detected", None)
                     }
                 }
-                Err(_) => { let _ = app.emit("watcher:file_detected", serde_json::json!({"path": canonical.to_string_lossy(), "ext": ext})); }
+                Err(_) => ("file_detected", None),
             }
         }
-        _ => { let _ = app.emit("watcher:file_detected", serde_json::json!({"path": canonical.to_string_lossy(), "ext": ext})); }
+        _ => ("file_detected", None),
+    };
+
+    let should_emit = upsert_watcher_file(app_data, &canonical, mtime, identifier.as_deref()).unwrap_or(true);
+    if !should_emit { return; }
+
+    let payload = serde_json::json!({
+        "path": canonical.to_string_lossy(),
+        "ext": ext,
+        "identifier": identifier,
+    });
+    match kind {
+        "identifier_found" => { let _ = app.emit("watcher:identifier_found", payload); }
+        _ => { let _ = app.emit("watcher:file_detected", payload); }
     }
 }
 
@@ -216,9 +277,207 @@ pub async fn get_watched_folders(state: tauri::State<'_, WatcherState>) -> Resul
     Ok(folders.iter().map(|f| f.to_string_lossy().to_string()).collect())
 }
 
+#[derive(Serialize)]
+pub struct WatcherFileRow {
+    pub path: String,
+    pub status: String,
+    pub kind: String,
+    pub identifier: Option<String>,
+    pub mtime: i64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+fn open_watcher_db(app: &AppHandle) -> Result<rusqlite::Connection, String> {
+    let app_data = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    db::open(&app_db_path(&app_data)).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn watcher_get_files(app: AppHandle, status: Option<String>) -> Result<Vec<WatcherFileRow>, String> {
+    let conn = open_watcher_db(&app)?;
+    let mut stmt = conn.prepare(
+        "SELECT path, status, kind, identifier, mtime, created_at, updated_at
+         FROM watcher_files
+         WHERE (?1 IS NULL OR status = ?1)
+         ORDER BY updated_at DESC",
+    ).map_err(|e| e.to_string())?;
+    let rows = stmt.query_map(params![status], |r| Ok(WatcherFileRow {
+        path: r.get(0)?, status: r.get(1)?, kind: r.get(2)?,
+        identifier: r.get(3)?, mtime: r.get(4)?, created_at: r.get(5)?, updated_at: r.get(6)?,
+    })).map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
+    Ok(rows)
+}
+
+#[tauri::command]
+pub async fn watcher_set_file_status(app: AppHandle, path: String, status: String) -> Result<(), String> {
+    let valid = matches!(status.as_str(), "detected" | "pending" | "added" | "ignored");
+    if !valid {
+        return Err("Status inválido. Use detected, pending, added ou ignored.".to_string());
+    }
+    let conn = open_watcher_db(&app)?;
+    let now = chrono::Utc::now().to_rfc3339();
+    let rows = conn.execute(
+        "UPDATE watcher_files SET status = ?1, updated_at = ?2 WHERE path = ?3",
+        params![status, now, path],
+    ).map_err(|e| e.to_string())?;
+    if rows == 0 {
+        return Err("Ficheiro não encontrado no registo do watcher.".to_string());
+    }
+    app.emit("watcher:status_changed", serde_json::json!({"path": path, "status": status})).ok();
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn watcher_get_reminders(app: AppHandle) -> Result<Vec<WatcherFileRow>, String> {
+    let conn = open_watcher_db(&app)?;
+    let mut stmt = conn.prepare(
+        "SELECT path, status, kind, identifier, mtime, created_at, updated_at
+         FROM watcher_files WHERE status = 'pending' ORDER BY updated_at DESC",
+    ).map_err(|e| e.to_string())?;
+    let rows = stmt.query_map([], |r| Ok(WatcherFileRow {
+        path: r.get(0)?, status: r.get(1)?, kind: r.get(2)?,
+        identifier: r.get(3)?, mtime: r.get(4)?, created_at: r.get(5)?, updated_at: r.get(6)?,
+    })).map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
+    Ok(rows)
+}
+
+#[derive(Serialize)]
+pub struct WatcherReport {
+    pub detected: i64,
+    pub pending: i64,
+    pub added: i64,
+    pub ignored: i64,
+    pub identifier_found: i64,
+    pub file_detected: i64,
+}
+
+#[tauri::command]
+pub async fn watcher_get_report(app: AppHandle) -> Result<WatcherReport, String> {
+    let conn = open_watcher_db(&app)?;
+    let mut out = WatcherReport { detected: 0, pending: 0, added: 0, ignored: 0, identifier_found: 0, file_detected: 0 };
+    let statuses = ["detected", "pending", "added", "ignored"];
+    for s in statuses {
+        let v: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM watcher_files WHERE status = ?1",
+            params![s],
+            |r| r.get(0),
+        ).unwrap_or(0);
+        match s {
+            "detected" => out.detected = v,
+            "pending" => out.pending = v,
+            "added" => out.added = v,
+            "ignored" => out.ignored = v,
+            _ => {}
+        }
+    }
+    let kinds = ["identifier_found", "file_detected"];
+    for k in kinds {
+        let v: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM watcher_files WHERE kind = ?1",
+            params![k],
+            |r| r.get(0),
+        ).unwrap_or(0);
+        match k {
+            "identifier_found" => out.identifier_found = v,
+            "file_detected" => out.file_detected = v,
+            _ => {}
+        }
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db;
+    use std::fs;
+
+    fn tmp_dir() -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("docid_watcher_{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    // Regista um ficheiro via upsert, marca como "pending", reabre a BD (simula
+    // reinício) e confirma que o lembrete persiste.
+    #[test]
+    fn pending_reminder_survives_restart() {
+        let dir = tmp_dir();
+        let path = dir.join("docs").join("contrato.pdf");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, "VL-PROP-2026-0725-001").unwrap();
+        let mtime = file_mtime(&path).unwrap();
+
+        // Sessão 1: detectar + marcar "mais tarde"
+        {
+            upsert_watcher_file(&dir, &path, mtime, Some("VL-PROP-2026-0725-001")).unwrap();
+            let conn = db::open(&dir.join("offline.db")).unwrap();
+            conn.execute(
+                "UPDATE watcher_files SET status = 'pending' WHERE path = ?1",
+                params![path.to_string_lossy()],
+            ).unwrap();
+        }
+
+        // Sessão 2 (reabrir): lembrete deve persistir
+        {
+            let conn = db::open(&dir.join("offline.db")).unwrap();
+            let status: String = conn.query_row(
+                "SELECT status FROM watcher_files WHERE path = ?1",
+                params![path.to_string_lossy()],
+                |r| r.get(0),
+            ).unwrap();
+            assert_eq!(status, "pending");
+            let kind: String = conn.query_row(
+                "SELECT kind FROM watcher_files WHERE path = ?1",
+                params![path.to_string_lossy()],
+                |r| r.get(0),
+            ).unwrap();
+            assert_eq!(kind, "identifier_found");
+            let identifier: Option<String> = conn.query_row(
+                "SELECT identifier FROM watcher_files WHERE path = ?1",
+                params![path.to_string_lossy()],
+                |r| r.get(0),
+            ).unwrap();
+            assert_eq!(identifier.as_deref(), Some("VL-PROP-2026-0725-001"));
+        }
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    // Upsert re-detecto não reseta o status 'pending' (o utilizador pediu "mais tarde").
+    #[test]
+    fn upsert_keeps_pending_on_redetect() {
+        let dir = tmp_dir();
+        let path = dir.join("nota.txt");
+        fs::write(&path, "sem identificador").unwrap();
+        let mtime = file_mtime(&path).unwrap();
+
+        upsert_watcher_file(&dir, &path, mtime, None).unwrap();
+        {
+            let conn = db::open(&dir.join("offline.db")).unwrap();
+            conn.execute(
+                "UPDATE watcher_files SET status = 'pending' WHERE path = ?1",
+                params![path.to_string_lossy()],
+            ).unwrap();
+        }
+        // Re-detecta o mesmo ficheiro (mesmo mtime → mesmo path, mas upsert corre).
+        let should_emit = upsert_watcher_file(&dir, &path, mtime, None).unwrap();
+        assert!(!should_emit, "re-detecto de lembrete não deve emitir de novo");
+        {
+            let conn = db::open(&dir.join("offline.db")).unwrap();
+            let status: String = conn.query_row(
+                "SELECT status FROM watcher_files WHERE path = ?1",
+                params![path.to_string_lossy()],
+                |r| r.get(0),
+            ).unwrap();
+            assert_eq!(status, "pending", "re-detecto não deve descartar o lembrete");
+        }
+
+        fs::remove_dir_all(&dir).ok();
+    }
 
     #[test]
     fn find_1char_prefix() {

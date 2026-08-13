@@ -1,6 +1,8 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { api } from "../../infrastructure/di/container";
-import { PageHeader, Modal, EmptyState, Pagination } from "../components/docid-ui";
+import { PageHeader, Modal, EmptyState, Pagination, OfflineNotice } from "../components/docid-ui";
+import { useOfflineCache } from "../hooks/useOfflineCache";
+import { useCachedAux } from "../hooks/useCachedAux";
 import { History, Search, Filter, ChevronDown, ChevronRight, User, Globe, Clock, Tag, Fingerprint, HardDrive, Info } from "lucide-react";
 
 interface AuditLog {
@@ -66,41 +68,47 @@ function toneIcon(action: string): string {
 export default function Audit() {
   const [rows, setRows] = useState<AuditLog[]>([]);
   const [meta, setMeta] = useState({ total: 0, page: 1, limit: 50 });
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
   const [actionFilter, setActionFilter] = useState("");
   const [resourceFilter, setResourceFilter] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [sectorMap, setSectorMap] = useState<Record<string, string>>({});
   const [userMap, setUserMap] = useState<Record<string, string>>({});
 
+  const fetchAux = useCachedAux();
+
   useEffect(() => {
-    api.get<{ data: Sector[] }>("/sectors").then(r => {
-      const m: Record<string, string> = {};
-      (r.data || []).forEach(s => { m[s.id] = s.name; });
-      setSectorMap(m);
-    }).catch(() => {});
-    api.get<{ data: User[] }>("/users").then(r => {
-      const m: Record<string, string> = {};
-      (r.data || []).forEach(u => { m[u.id] = u.fullName; });
-      setUserMap(m);
-    }).catch(() => {});
-  }, []);
+    (async () => {
+      const sectors = await fetchAux<Sector[]>("/sectors");
+      if (sectors) {
+        const m: Record<string, string> = {};
+        sectors.forEach(s => { m[s.id] = s.name; });
+        setSectorMap(m);
+      }
+      const users = await fetchAux<User[]>("/users");
+      if (users) {
+        const m: Record<string, string> = {};
+        users.forEach(u => { m[u.id] = u.fullName; });
+        setUserMap(m);
+      }
+    })();
+  }, [fetchAux]);
 
-  const load = useCallback(async (page = 1) => {
-    setLoading(true); setError("");
-    try {
-      const params = new URLSearchParams({ page: String(page), limit: "50" });
-      if (actionFilter) params.set("action", actionFilter);
-      if (resourceFilter) params.set("resource", resourceFilter);
-      const res = await api.get<{ data: AuditLog[]; meta: { total: number; page: number; limit: number } }>(`/audit?${params}`);
-      setRows(res.data || []);
-      setMeta(res.meta || { total: 0, page: 1, limit: 50 });
-    } catch (err: any) { setError(err.message || "Erro ao carregar registos de auditoria."); }
-    finally { setLoading(false); }
-  }, [actionFilter, resourceFilter]);
+  const listParams = (() => {
+    const p = new URLSearchParams({ page: "1", limit: "50" });
+    if (actionFilter) p.set("action", actionFilter);
+    if (resourceFilter) p.set("resource", resourceFilter);
+    return p.toString();
+  })();
 
-  useEffect(() => { load(); }, [load]);
+  const { loading, error, isStale, cachedAt, refresh } = useOfflineCache<{ data: AuditLog[]; meta: { total: number; page: number; limit: number } }>({
+    endpoint: "/audit",
+    params: listParams,
+    fetcher: async () => {
+      const res = await api.get<{ data: AuditLog[]; meta: { total: number; page: number; limit: number } }>(`/audit?${listParams}`);
+      return { data: res.data || [], meta: res.meta || { total: 0, page: 1, limit: 50 } };
+    },
+    onData: result => { setRows(result.data); setMeta(result.meta); },
+  });
 
   const actionLabel = (a: string) => ({
     GENERATE: "Gerar", QUERY: "Consultar", CANCEL: "Cancelar",
@@ -112,6 +120,7 @@ export default function Audit() {
     <div>
       <PageHeader title="Auditoria" description="Registo de todas as acções realizadas na organização" />
       {error && <div className="mb-4 rounded-lg border border-docid-error/30 bg-docid-error/10 p-3 text-sm text-docid-error">{error}</div>}
+      {isStale && <OfflineNotice cachedAt={cachedAt} onRetry={refresh} />}
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <div className="relative flex-1 max-w-xs">
           <Filter className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-docid-outline" />

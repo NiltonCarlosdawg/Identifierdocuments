@@ -4,7 +4,9 @@ import { useAuthStore } from "../stores/authStore";
 import { useAppConfigStore } from "../stores/configStore";
 import { LayoutDashboard, FileText, Fingerprint, CheckSquare, Users, UserPlus, Cog, History, Scan, CloudOff, Search, Menu, LogOut, User } from "lucide-react";
 import OfflineQueuePanel, { OfflineQueueBadge } from "./OfflineQueuePanel";
+import WriteQueuePanel, { WriteQueueBadge } from "./WriteQueuePanel";
 import NotificationBell from "./NotificationBell";
+import NativeNotificationsBridge from "./NativeNotificationsBridge";
 
 const navItems = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -65,7 +67,7 @@ export default function Layout() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <OfflineQueueBadge /><NotificationBell />
+            <OfflineQueueBadge /><WriteQueueBadge /><NotificationBell />
             <div ref={menuRef} className="relative">
               <button onClick={() => setMenuOpen(!menuOpen)} className="flex items-center gap-2 rounded-lg p-1.5 pr-3 transition hover:bg-docid-surface-high">
                 {avatar ? <img src={avatar} alt="Avatar" className="h-8 w-8 rounded-full object-cover" /> : <div className="flex h-8 w-8 items-center justify-center rounded-full bg-docid-primary/15 text-xs font-semibold text-docid-primary-soft">{(user?.fullName || "AD").split(" ").map(p => p[0]).join("").slice(0, 2).toUpperCase()}</div>}
@@ -84,6 +86,8 @@ export default function Layout() {
         <main className="flex-1 overflow-y-auto bg-docid-background"><div className="mx-auto max-w-7xl px-6 py-7"><Outlet /></div></main>
       </div>
       <OfflineQueuePanel />
+      <WriteQueuePanel />
+      <NativeNotificationsBridge />
     </div>
   );
 }

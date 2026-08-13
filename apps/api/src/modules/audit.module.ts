@@ -40,6 +40,7 @@ export const auditModule = new Elysia({ prefix: "/audit" })
       }
       if (query.action) conditions.push(eq(auditLogs.action, query.action));
       if (query.resource) conditions.push(eq(auditLogs.resource, query.resource));
+      if (query.resourceId) conditions.push(eq(auditLogs.resourceId, query.resourceId));
 
       const parsedPage = query.page ? parseInt(query.page, 10) : 1;
       const page = Math.max(1, Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : 1);
@@ -71,6 +72,7 @@ export const auditModule = new Elysia({ prefix: "/audit" })
     query: t.Object({
       action: t.Optional(t.String()),
       resource: t.Optional(t.String()),
+      resourceId: t.Optional(t.String()),
       page: t.Optional(t.String()),
       limit: t.Optional(t.String()),
     }),

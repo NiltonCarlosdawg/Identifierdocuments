@@ -8,11 +8,12 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 use tauri::{AppHandle, Emitter, Manager, State};
 use uuid::Uuid;
 
 const MAX_ATTEMPTS: i32 = 3;
+const MAX_WRITE_ATTEMPTS: i32 = 5;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct UploadOutcome {
@@ -41,6 +42,94 @@ fn compute_upload_outcome(item: &QueueItem, upload_result: &Result<(), String>) 
                 new_last_error: Some(err.clone()),
             }
         }
+    }
+}
+
+// ============================================================
+// Write queue — offline write mutations (Fase 4)
+//
+// classifica a resposta HTTP de um replay de escrita em
+// categorias de desfecho. O estado do servidor manda:
+//   - 2xx / ALREADY_RESOLVED  → done (já aplicado)
+//   - 400/404/409/410         → conflict (recurso divergiu)
+//   - 403/422                 → failed (permanente, não re-tenta)
+//   - 401                     → AuthExpired (pausa o ciclo)
+//   - transitórios            → pending (re-tenta com backoff)
+// ============================================================
+#[derive(Debug, Clone, PartialEq)]
+pub enum WriteClass {
+    Done,
+    AlreadyApplied,
+    Conflict,
+    Permanent,
+    Transient,
+    AuthExpired,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct WriteOutcome {
+    pub new_status: String,
+    pub new_attempts: i32,
+    pub new_last_error: Option<String>,
+}
+
+fn body_has_error_code(body: &str, code: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .and_then(|v| v.get("error")?.get("code")?.as_str().map(|c| c.to_string()))
+        .map(|c| c == code)
+        .unwrap_or(false)
+}
+
+fn classify_write_status(status: u16, body: &str) -> WriteClass {
+    match status {
+        200..=299 => WriteClass::Done,
+        401 => WriteClass::AuthExpired,
+        400 if body_has_error_code(body, "ALREADY_RESOLVED") => WriteClass::AlreadyApplied,
+        400 | 404 | 409 | 410 => WriteClass::Conflict,
+        403 | 422 => WriteClass::Permanent,
+        408 | 425 | 429 | 500..=599 => WriteClass::Transient,
+        400..=499 => WriteClass::Permanent,
+        _ => WriteClass::Transient,
+    }
+}
+
+fn compute_write_outcome(item: &WriteItem, class: &WriteClass, detail: &str) -> WriteOutcome {
+    match class {
+        WriteClass::Done | WriteClass::AlreadyApplied => WriteOutcome {
+            new_status: "done".to_string(),
+            new_attempts: item.attempts,
+            new_last_error: None,
+        },
+        WriteClass::Conflict => WriteOutcome {
+            new_status: "conflict".to_string(),
+            new_attempts: item.attempts,
+            new_last_error: Some(detail.to_string()),
+        },
+        WriteClass::Permanent => WriteOutcome {
+            new_status: "failed".to_string(),
+            new_attempts: item.attempts,
+            new_last_error: Some(detail.to_string()),
+        },
+        WriteClass::Transient => {
+            let attempts = item.attempts + 1;
+            let status = if attempts >= MAX_WRITE_ATTEMPTS {
+                "failed"
+            } else {
+                "pending"
+            };
+            WriteOutcome {
+                new_status: status.to_string(),
+                new_attempts: attempts,
+                new_last_error: Some(detail.to_string()),
+            }
+        }
+        WriteClass::AuthExpired => WriteOutcome {
+            // nunca persistido — o chamador pausa o replay antes de gravar
+            new_status: "pending".to_string(),
+            new_attempts: item.attempts,
+            new_last_error: Some(detail.to_string()),
+        },
     }
 }
 
@@ -712,6 +801,184 @@ async fn renew_exhausted_leases(state: &SyncState) -> Result<usize, String> {
     Ok(renewed)
 }
 
+// ============================================================
+// Offline seeding — popula caches locais enquanto online
+// ============================================================
+
+async fn seed_offline_caches(
+    state: &SyncState,
+    api_base_url: &str,
+    token: &str,
+) -> Result<(), String> {
+    let client = build_tls_client(30)?;
+
+    // 1. Categorias → local_category_cache
+    let cat_resp = client
+        .get(format!("{api_base_url}/categories"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(|e| format!("Erro ao buscar categorias: {e}"))?;
+
+    if cat_resp.status().is_success() {
+        let body: serde_json::Value = cat_resp
+            .json()
+            .await
+            .map_err(|e| format!("Resposta inválida de /categories: {e}"))?;
+        let groups = body
+            .get("data")
+            .and_then(|d| d.get("groups"))
+            .and_then(|g| g.as_object())
+            .cloned()
+            .unwrap_or_default();
+
+        let conn = state.conn()?;
+        let now = Utc::now().to_rfc3339();
+        for cats in groups.values() {
+            let Some(arr) = cats.as_array() else {
+                continue;
+            };
+            for cat in arr {
+                let Some(id) = cat.get("id").and_then(|v| v.as_str()) else {
+                    continue;
+                };
+                let Some(prefix) = cat.get("prefix").and_then(|v| v.as_str()) else {
+                    continue;
+                };
+                let req_seq = cat
+                    .get("requiresSequential")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                conn.execute(
+                    "INSERT INTO local_category_cache (category_id, prefix, requires_sequential, last_synced_at)
+                     VALUES (?1, ?2, ?3, ?4)
+                     ON CONFLICT(category_id) DO UPDATE SET
+                        prefix = excluded.prefix,
+                        requires_sequential = excluded.requires_sequential,
+                        last_synced_at = excluded.last_synced_at",
+                    params![id, prefix, req_seq as i32, now],
+                )
+                .map_err(|e| e.to_string())?;
+            }
+        }
+    }
+
+    // 2. Estado do tenant → local_tenant_state
+    let ten_resp = client
+        .get(format!("{api_base_url}/tenants/me"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(|e| format!("Erro ao buscar estado do tenant: {e}"))?;
+
+    if ten_resp.status().is_success() {
+        let body: serde_json::Value = ten_resp
+            .json()
+            .await
+            .map_err(|e| format!("Resposta inválida de /tenants/me: {e}"))?;
+        let data = body.get("data").cloned().unwrap_or_default();
+        let tenant_id = data.get("id").and_then(|v| v.as_str()).unwrap_or("");
+        if !tenant_id.is_empty() {
+            let org_prefix = data
+                .get("identifierPrefix")
+                .and_then(|v| v.as_str())
+                .unwrap_or("VL");
+            let lease_batch_size = data
+                .get("identifierLeaseBatchSize")
+                .and_then(|v| v.as_i64())
+                .map(|v| v as i32)
+                .unwrap_or(50);
+            let conn = state.conn()?;
+            let now = Utc::now().to_rfc3339();
+            conn.execute(
+                "INSERT INTO local_tenant_state (tenant_id, org_prefix, lease_batch_size, last_sync_at)
+                 VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(tenant_id) DO UPDATE SET
+                    org_prefix = excluded.org_prefix,
+                    lease_batch_size = COALESCE(excluded.lease_batch_size, local_tenant_state.lease_batch_size),
+                    last_sync_at = excluded.last_sync_at",
+                params![tenant_id, org_prefix, lease_batch_size, now],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+    }
+
+    Ok(())
+}
+
+async fn seed_missing_leases(state: &SyncState) -> Result<usize, String> {
+    let conn = state.conn()?;
+
+    // Combinações (categoria, sector) já em uso, sem lease activo
+    let combos: Vec<(String, String)> = {
+        let mut stmt = conn
+            .prepare(
+                "SELECT category_id, sector_id FROM local_pending_identifiers
+                 WHERE status = 'pending'
+                 UNION
+                 SELECT category_id, sector_id FROM local_loose_counters",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        rows
+    };
+
+    let device_id: Option<String> = conn
+        .query_row(
+            "SELECT device_id FROM local_device_identity LIMIT 1",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .ok();
+
+    let Some(device_id) = device_id else {
+        return Ok(0);
+    };
+
+    let mut seeded = 0usize;
+    for (category_id, sector_id) in combos {
+        let mut conn = state.conn()?;
+        let requires_sequential: i32 = conn
+            .query_row(
+                "SELECT requires_sequential FROM local_category_cache WHERE category_id = ?1",
+                params![category_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+        if requires_sequential == 0 {
+            continue;
+        }
+        let has_active: i32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM local_identifier_lease
+                 WHERE category_id = ?1 AND sector_id = ?2 AND status = 'active'",
+                params![category_id, sector_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+        if has_active > 0 {
+            continue;
+        }
+        match crate::commands::identifiers::request_lease_inner(
+            state,
+            category_id.clone(),
+            device_id.clone(),
+            sector_id.clone(),
+        )
+        .await
+        {
+            Ok(_) => seeded += 1,
+            Err(e) => eprintln!("Erro ao reservar lease para {category_id}/{sector_id}: {e}"),
+        }
+    }
+
+    Ok(seeded)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueueItem {
     pub id: String,
@@ -724,11 +991,32 @@ pub struct QueueItem {
     pub attempts: i32,
     pub last_error: Option<String>,
     pub created_at: String,
+    #[serde(default = "default_upload_mode")]
+    pub upload_mode: String,
+}
+
+fn default_upload_mode() -> String {
+    "attach".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WriteItem {
+    pub id: String,
+    pub method: String,
+    pub path: String,
+    pub body: Option<String>,
+    pub idempotency_key: String,
+    pub resource_key: Option<String>,
+    pub status: String,
+    pub attempts: i32,
+    pub last_error: Option<String>,
+    pub created_at: String,
 }
 
 pub struct SyncState {
     pub db_path: PathBuf,
     pub uploads_dir: PathBuf,
+    pub downloads_dir: PathBuf,
     pub api_base_url: Mutex<String>,
     pub auth_token: Mutex<Option<String>>,
     pub syncing: Mutex<bool>,
@@ -752,13 +1040,14 @@ fn row_to_item(row: &rusqlite::Row<'_>) -> rusqlite::Result<QueueItem> {
         attempts: row.get(7)?,
         last_error: row.get(8)?,
         created_at: row.get(9)?,
+        upload_mode: row.get::<_, Option<String>>(10)?.unwrap_or_else(|| "attach".to_string()),
     })
 }
 
 fn fetch_all(conn: &Connection) -> Result<Vec<QueueItem>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT id, file_path, filename, identifier, tenant_id, user_id, status, attempts, last_error, created_at
+            "SELECT id, file_path, filename, identifier, tenant_id, user_id, status, attempts, last_error, created_at, COALESCE(upload_mode, 'attach')
              FROM upload_queue ORDER BY created_at ASC",
         )
         .map_err(|e| e.to_string())?;
@@ -777,13 +1066,15 @@ fn insert_item(
     identifier: &str,
     tenant_id: &str,
     user_id: &str,
+    upload_mode: &str,
 ) -> Result<QueueItem, String> {
     let id = Uuid::new_v4().to_string();
     let created_at = Utc::now().to_rfc3339();
+    let mode = if upload_mode == "attachment" { "attachment" } else { "attach" };
     conn.execute(
-        "INSERT INTO upload_queue (id, file_path, filename, identifier, tenant_id, user_id, status, attempts, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'pending', 0, ?7)",
-        params![id, file_path.to_string_lossy(), filename, identifier, tenant_id, user_id, created_at],
+        "INSERT INTO upload_queue (id, file_path, filename, identifier, tenant_id, user_id, status, attempts, created_at, upload_mode)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'pending', 0, ?7, ?8)",
+        params![id, file_path.to_string_lossy(), filename, identifier, tenant_id, user_id, created_at, mode],
     )
     .map_err(|e| e.to_string())?;
 
@@ -798,7 +1089,78 @@ fn insert_item(
         attempts: 0,
         last_error: None,
         created_at,
+        upload_mode: mode.to_string(),
     })
+}
+
+fn row_to_write_item(row: &rusqlite::Row<'_>) -> rusqlite::Result<WriteItem> {
+    Ok(WriteItem {
+        id: row.get(0)?,
+        method: row.get(1)?,
+        path: row.get(2)?,
+        body: row.get(3)?,
+        idempotency_key: row.get(4)?,
+        resource_key: row.get(5)?,
+        status: row.get(6)?,
+        attempts: row.get(7)?,
+        last_error: row.get(8)?,
+        created_at: row.get(9)?,
+    })
+}
+
+fn fetch_writes_pending(conn: &Connection) -> Result<Vec<WriteItem>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, method, path, body, idempotency_key, resource_key, status, attempts, last_error, created_at
+             FROM local_write_queue
+             WHERE status IN ('pending', 'failed') AND attempts < ?1
+             ORDER BY created_at ASC",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![MAX_WRITE_ATTEMPTS], row_to_write_item)
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(rows)
+}
+
+fn insert_write(
+    conn: &Connection,
+    method: &str,
+    path: &str,
+    body: Option<String>,
+    idempotency_key: &str,
+    resource_key: Option<String>,
+) -> Result<WriteItem, String> {
+    let id = Uuid::new_v4().to_string();
+    let created_at = Utc::now().to_rfc3339();
+    conn.execute(
+        "INSERT INTO local_write_queue (id, method, path, body, idempotency_key, resource_key, status, attempts, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'pending', 0, ?7)",
+        params![id, method, path, body, idempotency_key, resource_key, created_at],
+    )
+    .map_err(|e| e.to_string())?;
+
+    Ok(WriteItem {
+        id,
+        method: method.to_string(),
+        path: path.to_string(),
+        body,
+        idempotency_key: idempotency_key.to_string(),
+        resource_key,
+        status: "pending".to_string(),
+        attempts: 0,
+        last_error: None,
+        created_at,
+    })
+}
+
+fn reset_stuck_writes(conn: &Connection) -> Result<usize, String> {
+    let count = conn
+        .execute("UPDATE local_write_queue SET status = 'pending' WHERE status = 'applying'", [])
+        .map_err(|e| e.to_string())?;
+    Ok(count)
 }
 
 fn build_tls_client(timeout_secs: u64) -> Result<reqwest::Client, String> {
@@ -832,21 +1194,64 @@ pub async fn upload_document(
     identifier: &str,
     upload_source: &str,
 ) -> Result<serde_json::Value, String> {
+    upload_document_mode(
+        api_base_url,
+        token,
+        file_path,
+        filename,
+        "attach",
+        Some(identifier),
+        None,
+        None,
+        upload_source,
+    )
+    .await
+}
+
+pub async fn upload_document_mode(
+    api_base_url: &str,
+    token: &str,
+    file_path: &str,
+    filename: &str,
+    mode: &str,
+    identifier: Option<&str>,
+    document_id: Option<&str>,
+    label: Option<&str>,
+    upload_source: &str,
+) -> Result<serde_json::Value, String> {
     let bytes = std::fs::read(file_path).map_err(|e| e.to_string())?;
     let part = multipart::Part::bytes(bytes)
         .file_name(filename.to_string())
         .mime_str("application/octet-stream")
         .map_err(|e| e.to_string())?;
 
-    let form = multipart::Form::new()
-        .text("identifier", identifier.to_string())
+    let endpoint = match mode {
+        "version" => {
+            let id = document_id.ok_or_else(|| "documentId é obrigatório para nova versão.".to_string())?;
+            format!("{api_base_url}/documents/{id}/versions")
+        }
+        "attachment" => format!("{api_base_url}/documents/attachments"),
+        _ => format!("{api_base_url}/documents/attach"),
+    };
+
+    let mut form = multipart::Form::new()
         .text("uploadSource", upload_source.to_string())
         .part("file", part);
+
+    if mode != "version" {
+        let ident = identifier.ok_or_else(|| "identifier é obrigatório.".to_string())?;
+        form = form.text("identifier", ident.to_string());
+    }
+    if let Some(lbl) = label {
+        if !lbl.is_empty() {
+            form = form.text("label", lbl.to_string());
+        }
+    }
 
     let client = build_tls_client(120)?;
 
     let res = client
-        .post(format!("{api_base_url}/documents/attach"))
+        .post(&endpoint)
         .bearer_auth(token)
         .multipart(form)
         .send()
@@ -869,16 +1274,134 @@ async fn upload_item(
     token: &str,
     item: &QueueItem,
 ) -> Result<(), String> {
-    upload_document(
+    let mode = if item.upload_mode == "attachment" {
+        "attachment"
+    } else {
+        "attach"
+    };
+    let label = if mode == "attachment" {
+        Some(item.filename.as_str())
+    } else {
+        None
+    };
+    upload_document_mode(
         api_base_url,
         token,
         &item.file_path,
         &item.filename,
-        &item.identifier,
+        mode,
+        Some(&item.identifier),
+        None,
+        label,
         "sync",
     )
     .await
     .map(|_| ())
+}
+
+// ============================================================
+// Write queue — replay (Fase 4)
+// ============================================================
+
+struct WriteHttpResponse {
+    status: u16,
+    body: String,
+}
+
+async fn apply_write_http(
+    api_base_url: &str,
+    token: &str,
+    item: &WriteItem,
+) -> Result<WriteHttpResponse, String> {
+    let url = format!("{}{}", api_base_url.trim_end_matches('/'), item.path);
+    let client = build_tls_client(120)?;
+
+    let mut builder = match item.method.as_str() {
+        "POST" => client.post(&url),
+        "PATCH" => client.patch(&url),
+        "PUT" => client.put(&url),
+        "DELETE" => client.delete(&url),
+        _ => return Err(format!("Método não suportado: {}", item.method)),
+    };
+    builder = builder
+        .bearer_auth(token)
+        .header("Idempotency-Key", &item.idempotency_key);
+
+    let res = if let Some(b) = &item.body {
+        builder
+            .header("Content-Type", "application/json")
+            .body(b.clone())
+            .send()
+            .await
+    } else {
+        builder.send().await
+    }
+    .map_err(|e| e.to_string())?;
+
+    let status = res.status().as_u16();
+    let body = res.text().await.unwrap_or_default();
+    Ok(WriteHttpResponse { status, body })
+}
+
+pub async fn replay_write_queue(
+    state: &SyncState,
+    api_base_url: &str,
+    token: &str,
+) -> Result<usize, String> {
+    let conn = state.conn()?;
+    let _ = reset_stuck_writes(&conn);
+
+    let items = fetch_writes_pending(&conn)?;
+    if items.is_empty() {
+        return Ok(0);
+    }
+
+    let mut applied = 0usize;
+
+    for item in &items {
+        conn.execute(
+            "UPDATE local_write_queue SET status = 'applying' WHERE id = ?1",
+            params![item.id],
+        )
+        .map_err(|e| e.to_string())?;
+
+        let outcome = match apply_write_http(api_base_url, token, item).await {
+            Ok(resp) => {
+                let class = classify_write_status(resp.status, &resp.body);
+                if matches!(class, WriteClass::AuthExpired) {
+                    conn.execute(
+                        "UPDATE local_write_queue SET status = 'pending', last_error = ?1 WHERE id = ?2",
+                        params!["Sessão expirada — faça login para retomar o sync.", item.id],
+                    )
+                    .map_err(|e| e.to_string())?;
+                    return Err(
+                        "Sessão expirada. Faça login novamente para retomar o sync offline."
+                            .to_string(),
+                    );
+                }
+                compute_write_outcome(item, &class, &resp.body)
+            }
+            Err(err) => compute_write_outcome(item, &WriteClass::Transient, &err),
+        };
+
+        conn.execute(
+            "UPDATE local_write_queue SET status = ?1, attempts = ?2, last_error = ?3 WHERE id = ?4",
+            params![outcome.new_status, outcome.new_attempts, outcome.new_last_error, item.id],
+        )
+        .map_err(|e| e.to_string())?;
+
+        if outcome.new_status == "done" {
+            applied += 1;
+        } else if outcome.new_status == "pending" {
+            let backoff = Duration::from_secs(2u64.pow(outcome.new_attempts as u32));
+            tokio::time::sleep(backoff).await;
+        }
+    }
+
+    // Limpeza: remove itens já aplicados (análogo ao clear_uploaded)
+    let _ = conn.execute("DELETE FROM local_write_queue WHERE status = 'done'", []);
+
+    Ok(applied)
 }
 
 pub async fn run_sync_cycle(app: &AppHandle, state: &SyncState) -> Result<usize, String> {
@@ -900,6 +1423,8 @@ pub async fn run_sync_cycle(app: &AppHandle, state: &SyncState) -> Result<usize,
 }
 
 async fn run_sync_cycle_inner(app: &AppHandle, state: &SyncState) -> Result<usize, String> {
+    maybe_evict_download_cache(&state.downloads_dir);
+
     let api_base_url = state.api_base_url.lock().map_err(|e| e.to_string())?.clone();
     let token = state
         .auth_token
@@ -916,6 +1441,12 @@ async fn run_sync_cycle_inner(app: &AppHandle, state: &SyncState) -> Result<usiz
         return Ok(0);
     }
 
+    // Seed de caches offline (categorias + estado do tenant) e leases em falta
+    if let Err(e) = seed_offline_caches(state, &api_base_url, &token).await {
+        eprintln!("seed_offline_caches: {e}");
+    }
+    let seeded_leases = seed_missing_leases(state).await.unwrap_or(0);
+
     let conn = state.conn()?;
 
     // Crash recovery: reset items stuck in 'uploading' back to 'pending'
@@ -929,11 +1460,16 @@ async fn run_sync_cycle_inner(app: &AppHandle, state: &SyncState) -> Result<usiz
         .await
         .unwrap_or(0);
 
-    let total_renewed_or_synced = renewed + identifiers_synced;
+    let total_renewed_or_synced = renewed + identifiers_synced + seeded_leases;
+
+    // Fase 4: replay da fila de escritas offline (pausa em sessão expirada)
+    let writes_applied = replay_write_queue(state, &api_base_url, &token).await?;
+
+    let total_renewed_or_synced = total_renewed_or_synced + writes_applied;
 
     let items: Vec<QueueItem> = conn
         .prepare(
-            "SELECT id, file_path, filename, identifier, tenant_id, user_id, status, attempts, last_error, created_at
+            "SELECT id, file_path, filename, identifier, tenant_id, user_id, status, attempts, last_error, created_at, COALESCE(upload_mode, 'attach')
              FROM upload_queue
              WHERE status IN ('pending', 'failed') AND attempts < ?1
              ORDER BY created_at ASC",
@@ -1059,12 +1595,23 @@ pub fn start_background_sync(app: AppHandle) {
                 let conn = state.conn().ok();
                 let has_pending = conn
                     .and_then(|c| {
-                        c.query_row(
-                            "SELECT COUNT(*) FROM upload_queue WHERE status IN ('pending', 'failed') AND attempts < ?1",
-                            params![MAX_ATTEMPTS],
-                            |row| row.get::<_, i32>(0),
-                        )
-                        .ok()
+                        let uploads: i32 = c
+                            .query_row(
+                                "SELECT COUNT(*) FROM upload_queue WHERE status IN ('pending', 'failed') AND attempts < ?1",
+                                params![MAX_ATTEMPTS],
+                                |row| row.get::<_, i32>(0),
+                            )
+                            .ok()
+                            .unwrap_or(0);
+                        let writes: i32 = c
+                            .query_row(
+                                "SELECT COUNT(*) FROM local_write_queue WHERE status IN ('pending', 'failed') AND attempts < ?1",
+                                params![MAX_WRITE_ATTEMPTS],
+                                |row| row.get::<_, i32>(0),
+                            )
+                            .ok()
+                            .unwrap_or(0);
+                        Some(uploads + writes)
                     })
                     .unwrap_or(0)
                     > 0;
@@ -1155,11 +1702,13 @@ fn safe_dest_path(uploads_dir: &PathBuf, filename: &str) -> Result<PathBuf, Stri
 
 #[tauri::command]
 pub fn enqueue_upload(
+    app: AppHandle,
     state: State<'_, SyncState>,
     source_path: String,
     identifier: String,
     tenant_id: String,
     user_id: String,
+    upload_mode: Option<String>,
 ) -> Result<QueueItem, String> {
     let source = PathBuf::from(&source_path);
     if !source.exists() {
@@ -1180,17 +1729,29 @@ pub fn enqueue_upload(
 
     let conn = state.conn()?;
     let safe_name = sanitize_filename(&filename);
-    insert_item(&conn, &dest, &safe_name, &identifier, &tenant_id, &user_id)
+    let mode = upload_mode.as_deref().unwrap_or("attach");
+    let item = insert_item(&conn, &dest, &safe_name, &identifier, &tenant_id, &user_id, mode)?;
+    let _ = app.emit(
+        "queue:enqueued",
+        serde_json::json!({
+            "id": item.id,
+            "filename": item.filename,
+            "identifier": item.identifier,
+        }),
+    );
+    Ok(item)
 }
 
 #[tauri::command]
 pub fn enqueue_upload_bytes(
+    app: AppHandle,
     state: State<'_, SyncState>,
     filename: String,
     bytes: Vec<u8>,
     identifier: String,
     tenant_id: String,
     user_id: String,
+    upload_mode: Option<String>,
 ) -> Result<QueueItem, String> {
     std::fs::create_dir_all(&state.uploads_dir).map_err(|e| e.to_string())?;
     let dest = safe_dest_path(&state.uploads_dir, &filename)?;
@@ -1202,7 +1763,17 @@ pub fn enqueue_upload_bytes(
 
     let conn = state.conn()?;
     let safe_name = sanitize_filename(&filename);
-    insert_item(&conn, &dest, &safe_name, &identifier, &tenant_id, &user_id)
+    let mode = upload_mode.as_deref().unwrap_or("attach");
+    let item = insert_item(&conn, &dest, &safe_name, &identifier, &tenant_id, &user_id, mode)?;
+    let _ = app.emit(
+        "queue:enqueued",
+        serde_json::json!({
+            "id": item.id,
+            "filename": item.filename,
+            "identifier": item.identifier,
+        }),
+    );
+    Ok(item)
 }
 
 #[tauri::command]
@@ -1290,6 +1861,93 @@ pub fn retry_queue_item(state: State<'_, SyncState>, id: String) -> Result<(), S
 }
 
 #[tauri::command]
+pub fn enqueue_write(
+    app: AppHandle,
+    state: State<'_, SyncState>,
+    method: String,
+    path: String,
+    body: Option<String>,
+    idempotency_key: String,
+    resource_key: Option<String>,
+) -> Result<WriteItem, String> {
+    if !matches!(method.as_str(), "POST" | "PATCH" | "PUT" | "DELETE") {
+        return Err(format!("Método não suportado: {method}"));
+    }
+    if !path.starts_with('/') {
+        return Err("Path deve começar com '/'.".to_string());
+    }
+    if idempotency_key.trim().is_empty() {
+        return Err("idempotency_key é obrigatória.".to_string());
+    }
+
+    let conn = state.conn()?;
+
+    // Idempotência: devolve o item já existente se a mesma chave foi enfileirada
+    let existing: Option<WriteItem> = conn
+        .query_row(
+            "SELECT id, method, path, body, idempotency_key, resource_key, status, attempts, last_error, created_at
+             FROM local_write_queue WHERE idempotency_key = ?1",
+            params![idempotency_key],
+            row_to_write_item,
+        )
+        .ok();
+    if let Some(existing) = existing {
+        return Ok(existing);
+    }
+
+    let item = insert_write(&conn, &method, &path, body, &idempotency_key, resource_key)?;
+    let _ = app.emit(
+        "write:enqueued",
+        serde_json::json!({
+            "id": item.id,
+            "method": item.method,
+            "path": item.path,
+        }),
+    );
+    Ok(item)
+}
+
+#[tauri::command]
+pub fn get_write_queue(state: State<'_, SyncState>) -> Result<Vec<WriteItem>, String> {
+    let conn = state.conn()?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, method, path, body, idempotency_key, resource_key, status, attempts, last_error, created_at
+             FROM local_write_queue ORDER BY created_at ASC",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], row_to_write_item)
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(rows)
+}
+
+fn retry_write_item_raw(conn: &Connection, id: &str) -> Result<(), String> {
+    conn.execute(
+        "UPDATE local_write_queue SET status = 'pending', attempts = 0, last_error = NULL WHERE id = ?1",
+        params![id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn remove_write_item(state: State<'_, SyncState>, id: String) -> Result<(), String> {
+    let conn = state.conn()?;
+    conn.execute("DELETE FROM local_write_queue WHERE id = ?1", params![id])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn retry_write_item(state: State<'_, SyncState>, id: String) -> Result<(), String> {
+    let conn = state.conn()?;
+    retry_write_item_raw(&conn, &id)
+}
+
+#[tauri::command]
 pub async fn force_sync(app: AppHandle, state: State<'_, SyncState>) -> Result<usize, String> {
     run_sync_cycle(&app, &state).await
 }
@@ -1298,8 +1956,11 @@ pub async fn force_sync(app: AppHandle, state: State<'_, SyncState>) -> Result<u
 pub async fn attach_document_native(
     state: State<'_, SyncState>,
     path: String,
-    identifier: String,
+    identifier: Option<String>,
     upload_source: Option<String>,
+    mode: Option<String>,
+    document_id: Option<String>,
+    label: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let api_base_url = state.api_base_url.lock().map_err(|e| e.to_string())?.clone();
     let token = state
@@ -1315,8 +1976,217 @@ pub async fn attach_document_native(
         .and_then(|n| n.to_str())
         .unwrap_or("documento");
     let source = upload_source.as_deref().unwrap_or("manual");
+    let mode_str = mode.as_deref().unwrap_or("attach");
 
-    upload_document(&api_base_url, &token, &path, filename, &identifier, source).await
+    if mode_str == "version" && document_id.is_none() {
+        return Err("documentId é obrigatório para mode=version.".to_string());
+    }
+    if mode_str != "version" && identifier.as_ref().map(|s| s.trim().is_empty()).unwrap_or(true) {
+        return Err("identifier é obrigatório.".to_string());
+    }
+
+    upload_document_mode(
+        &api_base_url,
+        &token,
+        &path,
+        filename,
+        mode_str,
+        identifier.as_deref(),
+        document_id.as_deref(),
+        label.as_deref(),
+        source,
+    )
+    .await
+}
+
+fn doc_cache_dir(downloads_dir: &PathBuf, document_param: &str) -> PathBuf {
+    downloads_dir.join(sanitize_filename(document_param))
+}
+
+fn first_file_in_dir(dir: &Path) -> Option<PathBuf> {
+    let entries = std::fs::read_dir(dir).ok()?;
+    entries.flatten().map(|e| e.path()).find(|p| p.is_file())
+}
+
+fn parse_content_disposition_filename(value: &str) -> String {
+    if let Some(idx) = value.find("filename*=UTF-8''") {
+        return value[idx + "filename*=UTF-8''".len()..]
+            .split(';')
+            .next()
+            .unwrap_or("")
+            .trim_matches('"')
+            .to_string();
+    }
+    if let Some(idx) = value.find("filename=") {
+        return value[idx + "filename=".len()..]
+            .split(';')
+            .next()
+            .unwrap_or("")
+            .trim_matches('"')
+            .trim()
+            .to_string();
+    }
+    String::new()
+}
+
+const MAX_CACHE_BYTES: usize = 52_428_800;
+
+async fn download_document_file(
+    api_base_url: &str,
+    token: &str,
+    document_param: &str,
+) -> Result<(Vec<u8>, String), String> {
+    let client = build_tls_client(120)?;
+    let res = client
+        .get(format!("{api_base_url}/documents/{document_param}/download"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let status = res.status();
+    if !status.is_success() {
+        return Err(format!("Download falhou (HTTP {status})."));
+    }
+    let filename = res
+        .headers()
+        .get(reqwest::header::CONTENT_DISPOSITION)
+        .and_then(|v| v.to_str().ok())
+        .map(parse_content_disposition_filename)
+        .unwrap_or_default();
+    let bytes = res.bytes().await.map_err(|e| e.to_string())?.to_vec();
+    Ok((bytes, filename))
+}
+
+#[tauri::command]
+pub async fn download_document_offline(
+    state: State<'_, SyncState>,
+    document_param: String,
+    filename: String,
+) -> Result<String, String> {
+    let cache_dir = doc_cache_dir(&state.downloads_dir, &document_param);
+    if let Some(existing) = first_file_in_dir(&cache_dir) {
+        return Ok(existing.to_string_lossy().to_string());
+    }
+
+    let api_base_url = state.api_base_url.lock().map_err(|e| e.to_string())?.clone();
+    let token = state
+        .auth_token
+        .lock()
+        .map_err(|e| e.to_string())?
+        .clone()
+        .ok_or_else(|| "Sessão não autenticada.".to_string())?;
+
+    if !check_online(&api_base_url).await {
+        return Err("Documento não disponível offline — ainda não foi descarregado.".to_string());
+    }
+
+    let (bytes, server_filename) = download_document_file(&api_base_url, &token, &document_param).await?;
+    if bytes.len() > MAX_CACHE_BYTES {
+        return Err("Ficheiro demasiado grande para a cache offline (máx. 50MB).".to_string());
+    }
+
+    std::fs::create_dir_all(&cache_dir).map_err(|e| e.to_string())?;
+    let safe_name = if server_filename.is_empty() {
+        sanitize_filename(&filename)
+    } else {
+        sanitize_filename(&server_filename)
+    };
+    if safe_name.is_empty() {
+        return Err("Nome de ficheiro inválido.".to_string());
+    }
+    let dest = cache_dir.join(safe_name);
+    std::fs::write(&dest, &bytes).map_err(|e| e.to_string())?;
+    Ok(dest.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub fn is_document_cached(state: State<'_, SyncState>, document_param: String) -> Result<bool, String> {
+    Ok(first_file_in_dir(&doc_cache_dir(&state.downloads_dir, &document_param)).is_some())
+}
+
+#[tauri::command]
+pub fn open_local_file(path: String) -> Result<(), String> {
+    let result = if cfg!(target_os = "windows") {
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", &path])
+            .spawn()
+    } else if cfg!(target_os = "macos") {
+        std::process::Command::new("open").arg(&path).spawn()
+    } else {
+        std::process::Command::new("xdg-open").arg(&path).spawn()
+    };
+    result
+        .map(|_| ())
+        .map_err(|e| format!("Erro ao abrir o ficheiro: {e}"))
+}
+
+const DOWNLOAD_CACHE_MAX_AGE_DAYS: u64 = 30;
+const DOWNLOAD_CACHE_EVICT_INTERVAL: Duration = Duration::from_secs(3600);
+
+static LAST_DOWNLOAD_EVICTION: Mutex<Option<SystemTime>> = Mutex::new(None);
+
+fn evict_expired_downloads(downloads_dir: &Path) -> Result<usize, String> {
+    let cutoff = SystemTime::now()
+        .checked_sub(Duration::from_secs(DOWNLOAD_CACHE_MAX_AGE_DAYS * 24 * 3600))
+        .ok_or("Erro de relógio do sistema.")?;
+    if !downloads_dir.exists() {
+        return Ok(0);
+    }
+
+    let mut removed = 0usize;
+    let mut doc_dirs: Vec<PathBuf> = Vec::new();
+    for entry in std::fs::read_dir(downloads_dir).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        if entry.path().is_dir() {
+            doc_dirs.push(entry.path());
+        }
+    }
+
+    for dir in doc_dirs {
+        for entry in std::fs::read_dir(&dir).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let modified = std::fs::metadata(&path)
+                .and_then(|m| m.modified())
+                .ok()
+                .map_or(false, |m| m < cutoff);
+            if modified && std::fs::remove_file(&path).is_ok() {
+                removed += 1;
+            }
+        }
+        let is_empty = std::fs::read_dir(&dir)
+            .map(|mut it| it.next().is_none())
+            .unwrap_or(false);
+        if is_empty {
+            let _ = std::fs::remove_dir(&dir);
+        }
+    }
+
+    Ok(removed)
+}
+
+fn maybe_evict_download_cache(downloads_dir: &Path) {
+    let now = SystemTime::now();
+    let due = {
+        let mut last = LAST_DOWNLOAD_EVICTION.lock().unwrap_or_else(|p| p.into_inner());
+        let fresh = last
+            .map(|t| now.duration_since(t).map(|d| d < DOWNLOAD_CACHE_EVICT_INTERVAL).unwrap_or(false))
+            .unwrap_or(false);
+        if fresh {
+            false
+        } else {
+            *last = Some(now);
+            true
+        }
+    };
+    if due {
+        if let Err(e) = evict_expired_downloads(downloads_dir) {
+            eprintln!("evict_expired_downloads: {e}");
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1439,7 +2309,7 @@ mod tests {
         let file_path = dir.join("doc.pdf");
         fs::write(&file_path, "dummy").unwrap();
 
-        let item = insert_item(&conn, &file_path, "doc.pdf", "TST-001", "t1", "u1").unwrap();
+        let item = insert_item(&conn, &file_path, "doc.pdf", "TST-001", "t1", "u1", "attach").unwrap();
         assert_eq!(item.status, "pending");
         assert_eq!(item.filename, "doc.pdf");
         assert_eq!(item.identifier, "TST-001");
@@ -1457,12 +2327,12 @@ mod tests {
         let file_path = dir.join("doc.pdf");
         fs::write(&file_path, "dummy").unwrap();
 
-        insert_item(&conn, &file_path, "doc.pdf", "TST-001", "t1", "u1").unwrap();
+        insert_item(&conn, &file_path, "doc.pdf", "TST-001", "t1", "u1", "attach").unwrap();
 
         // second insert (different path, same identifier) should succeed (no unique constraint on identifier alone)
         let file_path2 = dir.join("doc2.pdf");
         fs::write(&file_path2, "dummy2").unwrap();
-        let result = insert_item(&conn, &file_path2, "doc2.pdf", "TST-002", "t1", "u1");
+        let result = insert_item(&conn, &file_path2, "doc2.pdf", "TST-002", "t1", "u1", "attach");
         assert!(result.is_ok());
 
         let all = fetch_all(&conn).unwrap();
@@ -1476,7 +2346,7 @@ mod tests {
         let (dir, conn) = tmp_db();
         let fp = dir.join("ok.pdf");
         fs::write(&fp, "ok").unwrap();
-        insert_item(&conn, &fp, "ok.pdf", "TST-001", "t1", "u1").unwrap();
+        insert_item(&conn, &fp, "ok.pdf", "TST-001", "t1", "u1", "attach").unwrap();
 
         // manually mark as uploaded
         conn.execute(
@@ -1499,7 +2369,7 @@ mod tests {
         let (dir, conn) = tmp_db();
         let fp = dir.join("remover.pdf");
         fs::write(&fp, "remover").unwrap();
-        let item = insert_item(&conn, &fp, "remover.pdf", "TST-001", "t1", "u1").unwrap();
+        let item = insert_item(&conn, &fp, "remover.pdf", "TST-001", "t1", "u1", "attach").unwrap();
 
         remove_queue_item_raw(&conn, &item.id, &dir).unwrap();
 
@@ -1515,7 +2385,7 @@ mod tests {
 
     #[test]
     fn outcome_success_returns_uploaded() {
-        let item = QueueItem { id: "x".into(), file_path: "".into(), filename: "".into(), identifier: "".into(), tenant_id: "".into(), user_id: "".into(), status: "uploading".into(), attempts: 2, last_error: Some("erro anterior".into()), created_at: "".into() };
+        let item = QueueItem { id: "x".into(), file_path: "".into(), filename: "".into(), identifier: "".into(), tenant_id: "".into(), user_id: "".into(), status: "uploading".into(), attempts: 2, last_error: Some("erro anterior".into()), created_at: "".into(), upload_mode: "attach".into() };
         let outcome = compute_upload_outcome(&item, &Ok(()));
         assert_eq!(outcome.new_status, "uploaded");
         assert_eq!(outcome.new_attempts, 2);
@@ -1524,7 +2394,7 @@ mod tests {
 
     #[test]
     fn outcome_first_failure_is_pending() {
-        let item = QueueItem { id: "x".into(), file_path: "".into(), filename: "".into(), identifier: "".into(), tenant_id: "".into(), user_id: "".into(), status: "uploading".into(), attempts: 0, last_error: None, created_at: "".into() };
+        let item = QueueItem { id: "x".into(), file_path: "".into(), filename: "".into(), identifier: "".into(), tenant_id: "".into(), user_id: "".into(), status: "uploading".into(), attempts: 0, last_error: None, created_at: "".into(), upload_mode: "attach".into() };
         let outcome = compute_upload_outcome(&item, &Err("timeout".into()));
         assert_eq!(outcome.new_status, "pending");
         assert_eq!(outcome.new_attempts, 1);
@@ -1533,7 +2403,7 @@ mod tests {
 
     #[test]
     fn outcome_second_failure_is_pending() {
-        let item = QueueItem { id: "x".into(), file_path: "".into(), filename: "".into(), identifier: "".into(), tenant_id: "".into(), user_id: "".into(), status: "uploading".into(), attempts: 1, last_error: Some("timeout".into()), created_at: "".into() };
+        let item = QueueItem { id: "x".into(), file_path: "".into(), filename: "".into(), identifier: "".into(), tenant_id: "".into(), user_id: "".into(), status: "uploading".into(), attempts: 1, last_error: Some("timeout".into()), created_at: "".into(), upload_mode: "attach".into() };
         let outcome = compute_upload_outcome(&item, &Err("erro rede".into()));
         assert_eq!(outcome.new_status, "pending");
         assert_eq!(outcome.new_attempts, 2);
@@ -1541,7 +2411,7 @@ mod tests {
 
     #[test]
     fn outcome_third_failure_is_failed() {
-        let item = QueueItem { id: "x".into(), file_path: "".into(), filename: "".into(), identifier: "".into(), tenant_id: "".into(), user_id: "".into(), status: "uploading".into(), attempts: 2, last_error: Some("timeout".into()), created_at: "".into() };
+        let item = QueueItem { id: "x".into(), file_path: "".into(), filename: "".into(), identifier: "".into(), tenant_id: "".into(), user_id: "".into(), status: "uploading".into(), attempts: 2, last_error: Some("timeout".into()), created_at: "".into(), upload_mode: "attach".into() };
         let outcome = compute_upload_outcome(&item, &Err("limite excedido".into()));
         assert_eq!(outcome.new_status, "failed");
         assert_eq!(outcome.new_attempts, 3);
@@ -1556,7 +2426,7 @@ mod tests {
         let fp = dir.join("stuck.pdf");
         fs::write(&fp, "stuck").unwrap();
 
-        let item = insert_item(&conn, &fp, "stuck.pdf", "TST-STUCK", "t1", "u1").unwrap();
+        let item = insert_item(&conn, &fp, "stuck.pdf", "TST-STUCK", "t1", "u1", "attach").unwrap();
         // simulate crash mid-upload
         conn.execute("UPDATE upload_queue SET status = 'uploading' WHERE id = ?1", params![item.id]).unwrap();
 
@@ -1575,8 +2445,8 @@ mod tests {
         fs::write(&dir.join("a.pdf"), "a").unwrap();
         fs::write(&dir.join("b.pdf"), "b").unwrap();
 
-        let a = insert_item(&conn, &dir.join("a.pdf"), "a.pdf", "TST-A", "t1", "u1").unwrap();
-        let b = insert_item(&conn, &dir.join("b.pdf"), "b.pdf", "TST-B", "t1", "u1").unwrap();
+        let a = insert_item(&conn, &dir.join("a.pdf"), "a.pdf", "TST-A", "t1", "u1", "attach").unwrap();
+        let b = insert_item(&conn, &dir.join("b.pdf"), "b.pdf", "TST-B", "t1", "u1", "attach").unwrap();
 
         conn.execute("UPDATE upload_queue SET status = 'uploading' WHERE id = ?1", params![a.id]).unwrap();
         conn.execute("UPDATE upload_queue SET status = 'uploaded' WHERE id = ?1", params![b.id]).unwrap();
@@ -1600,7 +2470,7 @@ mod tests {
         let fp = dir.join("ok.pdf");
         fs::write(&fp, "ok").unwrap();
 
-        let item = insert_item(&conn, &fp, "ok.pdf", "TST-OK", "t1", "u1").unwrap();
+        let item = insert_item(&conn, &fp, "ok.pdf", "TST-OK", "t1", "u1", "attach").unwrap();
         assert_eq!(item.status, "pending");
 
         // simulate the cycle logic manually (same as run_sync_cycle_inner does per item)
@@ -1624,7 +2494,7 @@ mod tests {
         let fp = dir.join("fail.pdf");
         fs::write(&fp, "fail").unwrap();
 
-        let item = insert_item(&conn, &fp, "fail.pdf", "TST-FAIL", "t1", "u1").unwrap();
+        let item = insert_item(&conn, &fp, "fail.pdf", "TST-FAIL", "t1", "u1", "attach").unwrap();
 
         // simulate 3 upload attempts, all failing
         for attempt in 1..=3 {
@@ -1831,7 +2701,7 @@ mod tests {
         let (dir, conn) = tmp_db();
         let fp = dir.join("retry.pdf");
         fs::write(&fp, "retry").unwrap();
-        let item = insert_item(&conn, &fp, "retry.pdf", "TST-001", "t1", "u1").unwrap();
+        let item = insert_item(&conn, &fp, "retry.pdf", "TST-001", "t1", "u1", "attach").unwrap();
 
         conn.execute(
             "UPDATE upload_queue SET status = 'failed', attempts = 3, last_error = 'timeout' WHERE id = ?1",
@@ -1868,6 +2738,7 @@ mod tests {
         let state = SyncState {
             db_path: db_path.clone(),
             uploads_dir: dir.clone(),
+            downloads_dir: dir.clone(),
             api_base_url: std::sync::Mutex::new("http://localhost:3000".to_string()),
             auth_token: std::sync::Mutex::new(None),
             syncing: std::sync::Mutex::new(false),
@@ -2574,5 +3445,356 @@ mod tests {
             .unwrap();
         assert_eq!(active_count, 1, "unique index must prevent duplicate active leases");
         fs::remove_dir_all(&dir).ok();
+    }
+
+    // ============================================================
+    // Fase 4 — Fila de escritas offline
+    // ============================================================
+
+    fn make_write_item() -> WriteItem {
+        WriteItem {
+            id: "w1".to_string(),
+            method: "PATCH".to_string(),
+            path: "/approvals/abc".to_string(),
+            body: Some(r#"{"status":"approved"}"#.to_string()),
+            idempotency_key: "k1".to_string(),
+            resource_key: Some("approvals/abc".to_string()),
+            status: "pending".to_string(),
+            attempts: 0,
+            last_error: None,
+            created_at: "2026-07-21T12:00:00Z".to_string(),
+        }
+    }
+
+    #[test]
+    fn classify_2xx_is_done() {
+        assert_eq!(classify_write_status(200, ""), WriteClass::Done);
+        assert_eq!(classify_write_status(204, ""), WriteClass::Done);
+    }
+
+    #[test]
+    fn classify_already_resolved_is_done() {
+        let body = r#"{"error":{"code":"ALREADY_RESOLVED","message":"Aprovação já resolvida"}}"#;
+        assert_eq!(classify_write_status(400, body), WriteClass::AlreadyApplied);
+        assert_eq!(classify_write_status(400, "{}"), WriteClass::Conflict);
+    }
+
+    #[test]
+    fn classify_conflict_statuses() {
+        assert_eq!(classify_write_status(404, "{}"), WriteClass::Conflict);
+        assert_eq!(classify_write_status(409, "{}"), WriteClass::Conflict);
+        assert_eq!(classify_write_status(410, "{}"), WriteClass::Conflict);
+    }
+
+    #[test]
+    fn classify_auth_expired() {
+        assert_eq!(classify_write_status(401, "{}"), WriteClass::AuthExpired);
+    }
+
+    #[test]
+    fn classify_permanent_and_transient() {
+        assert_eq!(classify_write_status(403, "{}"), WriteClass::Permanent);
+        assert_eq!(classify_write_status(422, "{}"), WriteClass::Permanent);
+        assert_eq!(classify_write_status(500, "{}"), WriteClass::Transient);
+        assert_eq!(classify_write_status(429, "{}"), WriteClass::Transient);
+        assert_eq!(classify_write_status(408, "{}"), WriteClass::Transient);
+    }
+
+    #[test]
+    fn write_outcome_done_resets_error() {
+        let item = make_write_item();
+        let outcome = compute_write_outcome(&item, &WriteClass::Done, "");
+        assert_eq!(outcome.new_status, "done");
+        assert_eq!(outcome.new_attempts, 0);
+        assert!(outcome.new_last_error.is_none());
+    }
+
+    #[test]
+    fn write_outcome_already_applied_is_done() {
+        let item = make_write_item();
+        let outcome = compute_write_outcome(&item, &WriteClass::AlreadyApplied, "ALREADY_RESOLVED");
+        assert_eq!(outcome.new_status, "done");
+        assert_eq!(outcome.new_attempts, 0);
+        assert!(outcome.new_last_error.is_none());
+    }
+
+    #[test]
+    fn write_outcome_conflict_preserves_attempts() {
+        let item = make_write_item();
+        let outcome = compute_write_outcome(&item, &WriteClass::Conflict, "409 Conflict");
+        assert_eq!(outcome.new_status, "conflict");
+        assert_eq!(outcome.new_attempts, 0);
+        assert_eq!(outcome.new_last_error.as_deref(), Some("409 Conflict"));
+    }
+
+    #[test]
+    fn write_outcome_transient_increments_and_retries() {
+        let item = make_write_item();
+        let outcome = compute_write_outcome(&item, &WriteClass::Transient, "timeout");
+        assert_eq!(outcome.new_status, "pending");
+        assert_eq!(outcome.new_attempts, 1);
+    }
+
+    #[test]
+    fn write_outcome_transient_exhausts_to_failed() {
+        let mut item = make_write_item();
+        item.attempts = MAX_WRITE_ATTEMPTS - 1;
+        let outcome = compute_write_outcome(&item, &WriteClass::Transient, "timeout");
+        assert_eq!(outcome.new_status, "failed");
+        assert_eq!(outcome.new_attempts, MAX_WRITE_ATTEMPTS);
+    }
+
+    #[test]
+    fn write_outcome_permanent_fails() {
+        let item = make_write_item();
+        let outcome = compute_write_outcome(&item, &WriteClass::Permanent, "422 validation");
+        assert_eq!(outcome.new_status, "failed");
+    }
+
+    #[test]
+    fn write_queue_insert_and_fetch_pending() {
+        let (_dir, conn) = tmp_db();
+        let item = insert_write(
+            &conn,
+            "POST",
+            "/sectors",
+            Some(r#"{"name":"RH"}"#.to_string()),
+            "k-sector-1",
+            None,
+        )
+        .unwrap();
+        assert_eq!(item.status, "pending");
+        assert_eq!(item.attempts, 0);
+
+        let pending = fetch_writes_pending(&conn).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].path, "/sectors");
+        assert_eq!(pending[0].method, "POST");
+        assert_eq!(pending[0].body.as_deref(), Some(r#"{"name":"RH"}"#));
+
+        conn.execute(
+            "UPDATE local_write_queue SET status = 'done' WHERE id = ?1",
+            params![item.id],
+        )
+        .unwrap();
+        let pending = fetch_writes_pending(&conn).unwrap();
+        assert!(pending.is_empty());
+
+        fs::remove_dir_all(&_dir).ok();
+    }
+
+    #[test]
+    fn write_queue_idempotency_key_unique() {
+        let (_dir, conn) = tmp_db();
+        insert_write(&conn, "PATCH", "/approvals/1", None, "dup-key", None).unwrap();
+        let second = insert_write(&conn, "PATCH", "/approvals/1", None, "dup-key", None);
+        assert!(second.is_err(), "UNIQUE idempotency_key deve rejeitar duplicados");
+        fs::remove_dir_all(&_dir).ok();
+    }
+
+    #[test]
+    fn write_queue_reset_stuck_applying() {
+        let (_dir, conn) = tmp_db();
+        let item = insert_write(
+            &conn,
+            "DELETE",
+            "/identifiers/VL-1/cancel",
+            None,
+            "k-del",
+            None,
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE local_write_queue SET status = 'applying' WHERE id = ?1",
+            params![item.id],
+        )
+        .unwrap();
+
+        let reset = reset_stuck_writes(&conn).unwrap();
+        assert_eq!(reset, 1);
+
+        let status: String = conn
+            .query_row(
+                "SELECT status FROM local_write_queue WHERE id = ?1",
+                params![item.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(status, "pending");
+        fs::remove_dir_all(&_dir).ok();
+    }
+
+    // --- evict_expired_downloads ---
+
+    #[test]
+    fn evict_downloads_removes_old_files_and_keeps_recent() {
+        let dir = tmp_uploads();
+        let doc_dir = dir.join("VL-FAT-0001");
+        fs::create_dir_all(&doc_dir).unwrap();
+        let old_file = doc_dir.join("antigo.pdf");
+        let recent_file = doc_dir.join("recente.pdf");
+        fs::write(&old_file, "x").unwrap();
+        fs::write(&recent_file, "y").unwrap();
+
+        let now = std::time::SystemTime::now();
+        let old_time = now
+            .checked_sub(Duration::from_secs(45 * 24 * 3600))
+            .unwrap();
+        fs::File::options()
+            .write(true)
+            .open(&old_file)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(old_time.into()))
+            .unwrap();
+
+        let removed = evict_expired_downloads(&dir).unwrap();
+        assert_eq!(removed, 1);
+        assert!(!old_file.exists());
+        assert!(recent_file.exists());
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn evict_downloads_prunes_empty_doc_dir() {
+        let dir = tmp_uploads();
+        let doc_dir = dir.join("VL-CTR-0002");
+        fs::create_dir_all(&doc_dir).unwrap();
+        let old_file = doc_dir.join("velho.pdf");
+        fs::write(&old_file, "x").unwrap();
+        let old_time = std::time::SystemTime::now()
+            .checked_sub(Duration::from_secs(40 * 24 * 3600))
+            .unwrap();
+        fs::File::options()
+            .write(true)
+            .open(&old_file)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(old_time.into()))
+            .unwrap();
+
+        evict_expired_downloads(&dir).unwrap();
+        assert!(!old_file.exists());
+        assert!(!doc_dir.exists(), "pasta vazia deve ser removida");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn evict_downloads_missing_dir_is_ok() {
+        let dir = std::env::temp_dir().join(format!("docid_test_missing_{}", Uuid::new_v4()));
+        assert_eq!(evict_expired_downloads(&dir).unwrap(), 0);
+    }
+
+    // --- P1 runtime verification (Fases 9 / 11 / 12) ---
+
+    #[test]
+    fn p1_fase9_enqueue_success_then_clear_leaves_queue_empty() {
+        let (dir, conn) = tmp_db();
+        let uploads = dir.join("uploads");
+        fs::create_dir_all(&uploads).unwrap();
+        let fp = uploads.join("doc.txt");
+        fs::write(&fp, "conteudo").unwrap();
+
+        let item = insert_item(&conn, &fp, "doc.txt", "VER-PROP-1", "t1", "u1", "attach").unwrap();
+        assert_eq!(item.status, "pending");
+
+        conn.execute(
+            "UPDATE upload_queue SET status = 'uploading' WHERE id = ?1",
+            params![item.id],
+        )
+        .unwrap();
+        let outcome = compute_upload_outcome(&item, &Ok(()));
+        conn.execute(
+            "UPDATE upload_queue SET status = ?1, attempts = ?2, last_error = ?3 WHERE id = ?4",
+            params![
+                outcome.new_status,
+                outcome.new_attempts,
+                outcome.new_last_error,
+                item.id
+            ],
+        )
+        .unwrap();
+        assert_eq!(outcome.new_status, "uploaded");
+
+        let pending: i32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM upload_queue WHERE status IN ('pending', 'uploading', 'failed')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(pending, 0, "após flush com sucesso não deve haver pendentes");
+
+        let cleared = clear_uploaded_raw(&conn, &uploads).unwrap();
+        assert_eq!(cleared, 1);
+        let total: i32 = conn
+            .query_row("SELECT COUNT(*) FROM upload_queue", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(total, 0, "clear_uploaded remove os uploaded da fila");
+
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn p1_fase11_document_cache_hit_and_miss() {
+        let dir = std::env::temp_dir().join(format!("docid_dl_cache_{}", Uuid::new_v4()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+
+        let param = "doc-uuid-abc";
+        assert!(
+            first_file_in_dir(&doc_cache_dir(&dir, param)).is_none(),
+            "documento nunca visto → não disponível offline"
+        );
+
+        let cache = doc_cache_dir(&dir, param);
+        fs::create_dir_all(&cache).unwrap();
+        fs::write(cache.join("ficheiro.pdf"), b"%PDF").unwrap();
+        assert!(
+            first_file_in_dir(&cache).is_some(),
+            "após download → disponível offline no disco"
+        );
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn p1_fase12_write_idempotency_returns_same_logical_item() {
+        let (_dir, conn) = tmp_db();
+        let first = insert_write(
+            &conn,
+            "POST",
+            "/sectors",
+            Some(r#"{"name":"Finanças"}"#.to_string()),
+            "idem-sector-1",
+            Some("sector:financas".to_string()),
+        )
+        .unwrap();
+
+        // Mesma chave: lookup como enqueue_write (não duplica)
+        let existing: WriteItem = conn
+            .query_row(
+                "SELECT id, method, path, body, idempotency_key, resource_key, status, attempts, last_error, created_at
+                 FROM local_write_queue WHERE idempotency_key = ?1",
+                params!["idem-sector-1"],
+                row_to_write_item,
+            )
+            .unwrap();
+        assert_eq!(existing.id, first.id);
+
+        let count: i32 = conn
+            .query_row("SELECT COUNT(*) FROM local_write_queue", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+
+        // Replay: ALREADY_RESOLVED → done (não cria registo novo no servidor)
+        let outcome = compute_write_outcome(&first, &WriteClass::AlreadyApplied, "ALREADY_RESOLVED");
+        assert_eq!(outcome.new_status, "done");
+        conn.execute(
+            "UPDATE local_write_queue SET status = ?1 WHERE id = ?2",
+            params![outcome.new_status, first.id],
+        )
+        .unwrap();
+        assert!(fetch_writes_pending(&conn).unwrap().is_empty());
+
+        fs::remove_dir_all(&_dir).ok();
     }
 }

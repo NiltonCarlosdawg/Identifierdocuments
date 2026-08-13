@@ -1,10 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { DB } from "../db";
-import { identifiers, documents, documentShares, auditLogs } from "../db/schema";
-import { eq, and, or, isNull } from "drizzle-orm";
+import { identifiers, documents, documentVersions, documentShares, auditLogs } from "../db/schema";
+import { eq, and, or, isNull, desc } from "drizzle-orm";
 import { verifyDocumentContainsIdentifier } from "./document.service";
+import { getSharedDocIds } from "./identifier.service";
 import type { AuthPayload } from "../middleware/auth";
+import { tryEnqueueThumbnail } from "../jobs/queues";
 
 const APP_ROOT = path.resolve(import.meta.dir, "../..");
 const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(APP_ROOT, "uploads");
@@ -18,7 +20,19 @@ const RESOLVED_THUMBNAIL_DIR = path.resolve(THUMBNAIL_DIR);
 if (!fs.existsSync(RESOLVED_UPLOAD_DIR)) fs.mkdirSync(RESOLVED_UPLOAD_DIR, { recursive: true });
 if (!fs.existsSync(RESOLVED_THUMBNAIL_DIR)) fs.mkdirSync(RESOLVED_THUMBNAIL_DIR, { recursive: true });
 
-export function generateThumbnailAsync(filePath: string, docId: string) {
+export type DocumentKind = "primary" | "attachment";
+
+export function pickPrimaryDocument<T extends { kind: string }>(docs: T[] | null | undefined): T | undefined {
+  if (!docs?.length) return undefined;
+  return docs.find((d) => d.kind === "primary") ?? undefined;
+}
+
+export function generateThumbnailAsync(filePath: string, docId: string): void {
+  void runThumbnailJob(filePath, docId);
+}
+
+/** Gera thumbnail e espera o processo terminar (usado pelo worker BullMQ). */
+export async function runThumbnailJob(filePath: string, docId: string): Promise<void> {
   const supported = [".pdf", ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".docx"];
   const ext = path.extname(filePath).toLowerCase();
   if (!supported.includes(ext)) return;
@@ -35,28 +49,88 @@ export function generateThumbnailAsync(filePath: string, docId: string) {
     stdio: ["ignore", "ignore", "pipe"],
   });
 
-  (async () => {
-    const stderrText = await new Response(child.stderr).text().catch(() => "");
-    const exitCode = await child.exited;
-    if (exitCode !== 0) {
-      console.error(
-        `[THUMBNAIL] Falha ao gerar thumbnail para docId=${docId} (exit code ${exitCode}).` +
-        (stderrText ? ` stderr: ${stderrText.slice(0, 2000)}` : " Sem output em stderr — verifique se python3 e as dependências do script estão instaladas neste ambiente."),
-      );
-      return;
-    }
-    if (!fs.existsSync(thumbPath)) {
-      console.error(`[THUMBNAIL] Script terminou com sucesso (exit 0) mas não criou ${thumbPath}. docId=${docId}`);
-    }
-  })().catch((err) => {
-    console.error(`[THUMBNAIL] Erro inesperado ao acompanhar geração de thumbnail para docId=${docId}:`, err);
+  const stderrText = await new Response(child.stderr).text().catch(() => "");
+  const exitCode = await child.exited;
+  if (exitCode !== 0) {
+    console.error(
+      `[THUMBNAIL] Falha ao gerar thumbnail para docId=${docId} (exit code ${exitCode}).` +
+      (stderrText ? ` stderr: ${stderrText.slice(0, 2000)}` : " Sem output em stderr — verifique se python3 e as dependências do script estão instaladas neste ambiente."),
+    );
+    return;
+  }
+  if (!fs.existsSync(thumbPath)) {
+    console.error(`[THUMBNAIL] Script terminou com sucesso (exit 0) mas não criou ${thumbPath}. docId=${docId}`);
+  }
+}
+
+/** Preferência: fila BullMQ; fallback spawn local. */
+export function scheduleThumbnail(filePath: string, docId: string): void {
+  void tryEnqueueThumbnail(filePath, docId).then((queued) => {
+    if (!queued) generateThumbnailAsync(filePath, docId);
   });
+}
+
+export function parseDocumentTags(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return [...new Set(parsed.filter((t): t is string => typeof t === "string").map((t) => t.trim()).filter(Boolean))];
+  } catch {
+    return [];
+  }
+}
+
+export function serializeDocumentTags(tags: string[]): string {
+  const unique = [...new Set(tags.map((t) => t.trim()).filter(Boolean))].slice(0, 24);
+  return JSON.stringify(unique);
 }
 
 function sanitizeFilename(name: string): string {
   return path.basename(name).replace(/[<>:"/\\|?*\x00-\x1F]/g, "_").slice(0, 255);
 }
 
+async function writeUploadFile(file: File, identifier: string): Promise<{ finalPath: string; safeName: string; buffer: Buffer }> {
+  if (file.size > MAX_FILE_SIZE) throw new Error(`Ficheiro demasiado grande. Máximo: ${MAX_FILE_SIZE / 1024 / 1024}MB`);
+  const safeName = sanitizeFilename(file.name);
+  const arrayBuffer = await file.arrayBuffer();
+  const buffer = Buffer.from(arrayBuffer);
+  const ext = path.extname(file.name) || "";
+  const finalName = `${identifier.replace(/-/g, "_")}_${Date.now()}${ext}`;
+  const finalPath = path.join(UPLOAD_DIR, finalName);
+  const fd = fs.openSync(finalPath, "wx");
+  fs.writeSync(fd, buffer);
+  fs.closeSync(fd);
+  return { finalPath, safeName, buffer };
+}
+
+function hydrateDocument(
+  doc: typeof documents.$inferSelect,
+  current: typeof documentVersions.$inferSelect | null | undefined,
+  extra?: Record<string, unknown>,
+) {
+  const { tags: tagsRaw, ...rest } = doc;
+  return {
+    ...rest,
+    tags: parseDocumentTags(tagsRaw),
+    filename: current?.filename ?? null,
+    mimeType: current?.mimeType ?? null,
+    filePath: current?.filePath ?? null,
+    fileSize: current?.fileSize ?? null,
+    extractedText: current?.extractedText ?? null,
+    uploadSource: current?.uploadSource ?? null,
+    currentVersion: current?.version ?? null,
+    ...extra,
+  };
+}
+
+async function getCurrentVersion(tx: DB, documentId: string) {
+  return tx.query.documentVersions.findFirst({
+    where: and(eq(documentVersions.documentId, documentId), eq(documentVersions.isCurrent, true)),
+  });
+}
+
+/** Primary attach: creates document kind=primary + version 1. Rejects if primary already exists. */
 export async function attachDocument(
   tx: DB,
   auth: AuthPayload,
@@ -64,25 +138,20 @@ export async function attachDocument(
   ip: string = "unknown",
 ) {
   const { identifier, file, uploadSource = "manual" } = opts;
-  const safeName = sanitizeFilename(file.name);
 
   const idRow = await tx.query.identifiers.findFirst({
     where: and(eq(identifiers.identifier, identifier), eq(identifiers.tenantId, auth.tenantId)),
+    with: { documents: true },
   });
   if (!idRow) throw new Error(`Identificador '${identifier}' não encontrado.`);
   if (idRow.status === "cancelled") throw new Error("Não é possível associar a um identificador cancelado.");
-  if (idRow.status === "attached") throw new Error("Este identificador já possui um documento associado.");
 
-  if (file.size > MAX_FILE_SIZE) throw new Error(`Ficheiro demasiado grande. Máximo: ${MAX_FILE_SIZE / 1024 / 1024}MB`);
-  const arrayBuffer = await file.arrayBuffer();
-  const buffer = Buffer.from(arrayBuffer);
-  const ext = path.extname(file.name) || "";
-  const finalName = `${identifier.replace(/-/g, "_")}_${Date.now()}${ext}`;
-  const finalPath = path.join(UPLOAD_DIR, finalName);
+  const existingPrimary = pickPrimaryDocument(idRow.documents);
+  if (existingPrimary || idRow.status === "attached") {
+    throw new Error("Este identificador já possui um documento principal. Use uma nova versão ou um anexo.");
+  }
 
-  const fd = fs.openSync(finalPath, "wx");
-  fs.writeSync(fd, buffer);
-  fs.closeSync(fd);
+  const { finalPath, safeName } = await writeUploadFile(file, identifier);
 
   let verification: Awaited<ReturnType<typeof verifyDocumentContainsIdentifier>>;
   try {
@@ -103,11 +172,20 @@ export async function attachDocument(
   }
 
   let doc: typeof documents.$inferSelect;
+  let version: typeof documentVersions.$inferSelect;
   try {
-    [doc] = await tx.transaction(async (tx2) => {
-      const inserted = await tx2.insert(documents).values({
+    const inserted = await tx.transaction(async (tx2) => {
+      const [newDoc] = await tx2.insert(documents).values({
         tenantId: auth.tenantId,
         identifierId: idRow.id,
+        kind: "primary",
+        uploadedBy: auth.userId,
+      }).returning();
+
+      const [newVersion] = await tx2.insert(documentVersions).values({
+        tenantId: auth.tenantId,
+        documentId: newDoc.id,
+        version: 1,
         filename: safeName,
         mimeType: file.type || "application/octet-stream",
         filePath: finalPath,
@@ -115,10 +193,14 @@ export async function attachDocument(
         extractedText: verification.excerpt ?? null,
         uploadedBy: auth.userId,
         uploadSource,
+        isCurrent: true,
       }).returning();
+
       await tx2.update(identifiers).set({ status: "attached" }).where(eq(identifiers.id, idRow.id));
-      return inserted;
+      return { newDoc, newVersion };
     });
+    doc = inserted.newDoc;
+    version = inserted.newVersion;
   } catch (err: any) {
     fs.unlinkSync(finalPath);
     await tx.insert(auditLogs).values({
@@ -129,7 +211,7 @@ export async function attachDocument(
     throw new Error("Este identificador já foi associado a um documento entretanto. Tente novamente.");
   }
 
-  generateThumbnailAsync(finalPath, doc.id);
+  scheduleThumbnail(finalPath, doc.id);
 
   await tx.insert(auditLogs).values({
     tenantId: auth.tenantId, userId: auth.userId, action: "ATTACH",
@@ -142,7 +224,170 @@ export async function attachDocument(
     with: { identifier: true },
   });
 
-  return { success: true, message: "Documento associado com sucesso.", document: fullDoc, verification };
+  return {
+    success: true,
+    message: "Documento associado com sucesso.",
+    document: hydrateDocument(fullDoc!, version),
+    verification,
+  };
+}
+
+/** Attachment: creates document kind=attachment + version 1. Identifier must already have a primary. */
+export async function attachAttachment(
+  tx: DB,
+  auth: AuthPayload,
+  opts: { identifier: string; file: File; label?: string; uploadSource?: "manual" | "scanner" | "sync" },
+  ip: string = "unknown",
+) {
+  const { identifier, file, label, uploadSource = "manual" } = opts;
+
+  const idRow = await tx.query.identifiers.findFirst({
+    where: and(eq(identifiers.identifier, identifier), eq(identifiers.tenantId, auth.tenantId)),
+    with: { documents: true },
+  });
+  if (!idRow) throw new Error(`Identificador '${identifier}' não encontrado.`);
+  if (idRow.status === "cancelled") throw new Error("Não é possível associar a um identificador cancelado.");
+
+  const primary = pickPrimaryDocument(idRow.documents);
+  if (!primary) throw new Error("O identificador ainda não tem documento principal. Associe o documento principal primeiro.");
+
+  const { finalPath, safeName } = await writeUploadFile(file, identifier);
+
+  const [doc] = await tx.insert(documents).values({
+    tenantId: auth.tenantId,
+    identifierId: idRow.id,
+    kind: "attachment",
+    label: label?.trim() || null,
+    uploadedBy: auth.userId,
+  }).returning();
+
+  const [version] = await tx.insert(documentVersions).values({
+    tenantId: auth.tenantId,
+    documentId: doc.id,
+    version: 1,
+    filename: safeName,
+    mimeType: file.type || "application/octet-stream",
+    filePath: finalPath,
+    fileSize: file.size,
+    extractedText: null,
+    uploadedBy: auth.userId,
+    uploadSource,
+    isCurrent: true,
+  }).returning();
+
+  scheduleThumbnail(finalPath, doc.id);
+
+  await tx.insert(auditLogs).values({
+    tenantId: auth.tenantId, userId: auth.userId, action: "ATTACH_ATTACHMENT",
+    resource: "documents", resourceId: doc.id,
+    metadata: JSON.stringify({ identifier, filename: safeName, label: label ?? null }), ip,
+  });
+
+  const fullDoc = await tx.query.documents.findFirst({
+    where: eq(documents.id, doc.id),
+    with: { identifier: true },
+  });
+
+  return {
+    success: true,
+    message: "Anexo associado com sucesso.",
+    document: hydrateDocument(fullDoc!, version),
+  };
+}
+
+/** New version of an existing document (primary or attachment). */
+export async function createDocumentVersion(
+  tx: DB,
+  auth: AuthPayload,
+  opts: { documentId: string; file: File; uploadSource?: "manual" | "scanner" | "sync" },
+  ip: string = "unknown",
+) {
+  const { documentId, file, uploadSource = "manual" } = opts;
+
+  const doc = await tx.query.documents.findFirst({
+    where: and(eq(documents.id, documentId), eq(documents.tenantId, auth.tenantId)),
+    with: { identifier: true },
+  });
+  if (!doc) throw new Error("Documento não encontrado.");
+  if (!doc.identifier) throw new Error("Identificador do documento não encontrado.");
+  if (doc.identifier.status === "cancelled") throw new Error("Não é possível versionar um documento de identificador cancelado.");
+
+  const identifier = doc.identifier.identifier;
+  const { finalPath, safeName } = await writeUploadFile(file, identifier);
+
+  let verification: Awaited<ReturnType<typeof verifyDocumentContainsIdentifier>> | null = null;
+  if (doc.kind === "primary") {
+    try {
+      verification = await verifyDocumentContainsIdentifier(finalPath, file.type || "application/octet-stream", identifier);
+    } catch (err: any) {
+      fs.unlinkSync(finalPath);
+      throw new Error(`Erro na verificação: ${err.message}`);
+    }
+    if (!verification.found) {
+      fs.unlinkSync(finalPath);
+      await tx.insert(auditLogs).values({
+        tenantId: auth.tenantId, userId: auth.userId, action: "VERSION_FAILED",
+        resource: "documents", resourceId: doc.id,
+        metadata: JSON.stringify({ filename: file.name, reason: "identifier_not_found" }), ip,
+      });
+      return { success: false, message: `O documento não contém o identificador '${identifier}'.`, verification };
+    }
+  }
+
+  let version: typeof documentVersions.$inferSelect;
+  try {
+    version = await tx.transaction(async (tx2) => {
+      const latest = await tx2.query.documentVersions.findFirst({
+        where: eq(documentVersions.documentId, doc.id),
+        orderBy: [desc(documentVersions.version)],
+      });
+      const nextVersion = (latest?.version ?? 0) + 1;
+
+      await tx2.update(documentVersions)
+        .set({ isCurrent: false })
+        .where(and(eq(documentVersions.documentId, doc.id), eq(documentVersions.isCurrent, true)));
+
+      const [newVersion] = await tx2.insert(documentVersions).values({
+        tenantId: auth.tenantId,
+        documentId: doc.id,
+        version: nextVersion,
+        filename: safeName,
+        mimeType: file.type || "application/octet-stream",
+        filePath: finalPath,
+        fileSize: file.size,
+        extractedText: verification?.excerpt ?? null,
+        uploadedBy: auth.userId,
+        uploadSource,
+        isCurrent: true,
+      }).returning();
+      return newVersion;
+    });
+  } catch (err: any) {
+    fs.unlinkSync(finalPath);
+    throw new Error(`Erro ao criar versão: ${err.message}`);
+  }
+
+  scheduleThumbnail(finalPath, doc.id);
+
+  await tx.insert(auditLogs).values({
+    tenantId: auth.tenantId, userId: auth.userId, action: "VERSION",
+    resource: "documents", resourceId: doc.id,
+    metadata: JSON.stringify({
+      identifier,
+      filename: safeName,
+      version: version.version,
+      kind: doc.kind,
+      method: verification?.method ?? null,
+    }), ip,
+  });
+
+  return {
+    success: true,
+    message: `Versão ${version.version} criada com sucesso.`,
+    document: hydrateDocument(doc, version),
+    version,
+    verification,
+  };
 }
 
 export async function canAccessDocument(tx: DB, auth: AuthPayload, sectorId: string | null, visibility: string | null, docId: string | null, uploadedBy: string | null = null): Promise<{ allowed: boolean; restricted: boolean }> {
@@ -177,20 +422,19 @@ export async function canAccessDocument(tx: DB, auth: AuthPayload, sectorId: str
     if (share) return { allowed: true, restricted: false };
   }
 
-  // CORREÇÃO: antes só ORG_ADMIN recebia { restricted: true } aqui; qualquer
-  // outro user caía sempre em { allowed:false, restricted:false } (→ 404),
-  // mesmo quando o documento existe e é apenas sector_only. Isso impedia o
-  // user de perceber que podia pedir acesso (POST /documents/:param/request-access).
-  // Qualquer user autenticado do tenant que chegue a este ponto está perante um
-  // documento que existe, não é público, não é do seu sector, e não tem
-  // partilha activa — deve ver restricted:true (→ 403 ACCESS_REQUIRED).
   return { allowed: false, restricted: true };
 }
 
 export async function getDocumentMeta(tx: DB, auth: AuthPayload, docId: string) {
   const doc = await tx.query.documents.findFirst({
     where: and(eq(documents.id, docId), eq(documents.tenantId, auth.tenantId)),
-    with: { identifier: { with: { category: true } } },
+    with: {
+      identifier: { with: { category: true } },
+      versions: {
+        orderBy: [desc(documentVersions.version)],
+        with: { uploader: true },
+      },
+    },
   });
   if (!doc) return null;
 
@@ -199,15 +443,71 @@ export async function getDocumentMeta(tx: DB, auth: AuthPayload, docId: string) 
   );
   if (!allowed && !restricted) return null;
 
-  return { ...doc, restricted };
+  const current = doc.versions.find((v) => v.isCurrent) ?? doc.versions[0];
+  const versions = doc.versions.map((v) => ({
+    id: v.id,
+    version: v.version,
+    filename: v.filename,
+    fileSize: v.fileSize,
+    mimeType: v.mimeType,
+    isCurrent: v.isCurrent,
+    createdAt: v.createdAt,
+    uploadedBy: v.uploader?.fullName || null,
+    uploadSource: v.uploadSource,
+  }));
+
+  const siblings = await tx.query.documents.findMany({
+    where: and(eq(documents.identifierId, doc.identifierId), eq(documents.tenantId, auth.tenantId)),
+    with: {
+      versions: {
+        where: eq(documentVersions.isCurrent, true),
+      },
+    },
+    orderBy: [desc(documents.createdAt)],
+  });
+
+  const attachments = siblings
+    .filter((s) => s.kind === "attachment" && s.id !== doc.id)
+    .map((s) => {
+      const cur = s.versions[0];
+      return {
+        id: s.id,
+        kind: s.kind,
+        label: s.label,
+        filename: cur?.filename ?? null,
+        fileSize: cur?.fileSize ?? null,
+        mimeType: cur?.mimeType ?? null,
+        createdAt: s.createdAt,
+      };
+    });
+
+  const primarySibling = siblings.find((s) => s.kind === "primary");
+
+  return {
+    ...hydrateDocument(doc, current, { versions, attachments, primaryDocumentId: primarySibling?.id ?? null }),
+    restricted,
+  };
 }
 
-export async function downloadDocument(tx: DB, auth: AuthPayload, docId: string): Promise<{ filePath: string; fileName: string } | { error: "NOT_FOUND" | "ACCESS_REQUIRED" }> {
+export async function downloadDocument(
+  tx: DB,
+  auth: AuthPayload,
+  docId: string,
+  versionNumber?: number,
+): Promise<{ filePath: string; fileName: string } | { error: "NOT_FOUND" | "ACCESS_REQUIRED" }> {
   const doc = await tx.query.documents.findFirst({
     where: and(eq(documents.id, docId), eq(documents.tenantId, auth.tenantId)),
     with: { identifier: true },
   });
-  if (!doc || !fs.existsSync(doc.filePath)) return { error: "NOT_FOUND" };
+  if (!doc) return { error: "NOT_FOUND" };
+
+  const version = versionNumber != null
+    ? await tx.query.documentVersions.findFirst({
+        where: and(eq(documentVersions.documentId, docId), eq(documentVersions.version, versionNumber)),
+      })
+    : await getCurrentVersion(tx, docId);
+
+  if (!version || !fs.existsSync(version.filePath)) return { error: "NOT_FOUND" };
 
   const { allowed, restricted } = await canAccessDocument(
     tx, auth, doc.identifier?.sectorId ?? null, doc.identifier?.visibility ?? null, doc.id, doc.uploadedBy,
@@ -215,10 +515,101 @@ export async function downloadDocument(tx: DB, auth: AuthPayload, docId: string)
   if (!allowed && restricted) return { error: "ACCESS_REQUIRED" };
   if (!allowed) return { error: "NOT_FOUND" };
 
-  const resolvedPath = path.resolve(doc.filePath);
+  const resolvedPath = path.resolve(version.filePath);
   if (!resolvedPath.startsWith(RESOLVED_UPLOAD_DIR)) {
     return { error: "NOT_FOUND" };
   }
 
-  return { filePath: resolvedPath, fileName: doc.filename };
+  return { filePath: resolvedPath, fileName: version.filename };
+}
+
+export async function updateDocumentTags(
+  tx: DB,
+  auth: AuthPayload,
+  docId: string,
+  tags: string[],
+) {
+  const doc = await tx.query.documents.findFirst({
+    where: and(eq(documents.id, docId), eq(documents.tenantId, auth.tenantId)),
+    with: { identifier: true },
+  });
+  if (!doc) return { error: "NOT_FOUND" as const };
+
+  const { allowed, restricted } = await canAccessDocument(
+    tx, auth, doc.identifier?.sectorId ?? null, doc.identifier?.visibility ?? null, doc.id, doc.uploadedBy,
+  );
+  if (!allowed && !restricted) return { error: "NOT_FOUND" as const };
+  if (restricted) return { error: "FORBIDDEN" as const };
+
+  const serialized = serializeDocumentTags(tags);
+  await tx.update(documents).set({ tags: serialized }).where(eq(documents.id, docId));
+
+  return { success: true as const, tags: parseDocumentTags(serialized) };
+}
+
+export async function listDocumentsForApi(
+  tx: DB,
+  auth: AuthPayload,
+  opts: { tenantId: string; identifierId?: string; page: number; limit: number },
+) {
+  const conditions = [eq(documents.tenantId, opts.tenantId)];
+  if (opts.identifierId) conditions.push(eq(documents.identifierId, opts.identifierId));
+
+  const allRows = await tx.query.documents.findMany({
+    where: and(...conditions),
+    with: {
+      identifier: { with: { category: true } },
+      uploader: true,
+      versions: {
+        where: eq(documentVersions.isCurrent, true),
+      },
+    },
+    orderBy: [desc(documents.createdAt)],
+  });
+
+  const sharedDocIds = await getSharedDocIds(tx, auth);
+  const visibleRows = allRows.filter((d) => {
+    const visibility = d.identifier?.visibility ?? "public";
+    if (d.uploadedBy === auth.userId) return true;
+    if (visibility === "public") return true;
+    if (d.identifier?.sectorId != null && d.identifier.sectorId === auth.sectorId) return true;
+    if (sharedDocIds.has(d.id)) return true;
+    return false;
+  });
+
+  // Default listing: one row per identifier (primary). When filtering by identifierId, return all kinds.
+  const filtered = opts.identifierId
+    ? visibleRows
+    : visibleRows.filter((d) => d.kind === "primary");
+
+  const total = filtered.length;
+  const offset = (opts.page - 1) * opts.limit;
+  const paginated = filtered.slice(offset, offset + opts.limit);
+
+  const baseUrl = process.env.API_BASE_URL || "http://localhost:3000";
+  const safe = paginated.map((d) => {
+    const current = d.versions[0];
+    return {
+      id: d.id,
+      kind: d.kind,
+      label: d.label,
+      tags: parseDocumentTags(d.tags),
+      filename: current?.filename ?? null,
+      fileSize: current?.fileSize ?? null,
+      mimeType: current?.mimeType ?? null,
+      status: d.identifier?.status || "active",
+      createdAt: d.createdAt,
+      fileUrl: `${baseUrl}/documents/${d.id}/download`,
+      thumbnailUrl: `${baseUrl}/documents/${d.id}/thumbnail`,
+      identifier: d.identifier ? {
+        id: d.identifier.id,
+        identifier: d.identifier.identifier,
+        categoryId: d.identifier.category?.id,
+        categoryName: d.identifier.category?.name,
+      } : null,
+      uploadedBy: d.uploader?.fullName || null,
+    };
+  });
+
+  return { data: safe, meta: { total, page: opts.page, limit: opts.limit } };
 }

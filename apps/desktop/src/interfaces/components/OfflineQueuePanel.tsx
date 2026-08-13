@@ -70,7 +70,13 @@ export function OfflineQueueBadge() {
     const interval = setInterval(refresh, 10000);
     let unlisten: (() => void) | undefined;
     if (sync.isAvailable()) {
-      listen<{ uploaded: number }>("sync:complete", e => { refresh(); if (e.payload.uploaded > 0) { setSyncToast(`${e.payload.uploaded} sincronizado(s)`); setTimeout(() => setSyncToast(null), 4000); } }).then(fn => { unlisten = fn; });
+      listen<{ uploaded: number }>("sync:complete", e => {
+        refresh();
+        if (e.payload.uploaded > 0) {
+          setSyncToast(`${e.payload.uploaded} sincronizado(s)`);
+          setTimeout(() => setSyncToast(null), 4000);
+        }
+      }).then(fn => { unlisten = fn; });
     }
     return () => { clearInterval(interval); unlisten?.(); };
   }, [refresh]);

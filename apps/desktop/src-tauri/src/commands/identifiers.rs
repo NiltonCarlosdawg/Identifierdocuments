@@ -662,9 +662,8 @@ fn insert_pending(
 // ============================================================
 // request_lease — pede lease ao servidor e guarda localmente
 // ============================================================
-#[tauri::command]
-pub async fn request_lease(
-    state: State<'_, SyncState>,
+pub async fn request_lease_inner(
+    state: &SyncState,
     category_id: String,
     device_id: String,
     sector_id: String,
@@ -809,6 +808,91 @@ pub async fn request_lease(
         status: "active".to_string(),
         created_at: now,
     })
+}
+
+#[tauri::command]
+pub async fn request_lease(
+    state: State<'_, SyncState>,
+    category_id: String,
+    device_id: String,
+    sector_id: String,
+) -> Result<LeaseItem, String> {
+    request_lease_inner(state.inner(), category_id, device_id, sector_id).await
+}
+
+// ============================================================
+// ensure_offline_lease — garante lease activo para (categoria, sector)
+// ============================================================
+#[tauri::command]
+pub async fn ensure_offline_lease(
+    state: State<'_, SyncState>,
+    category_id: String,
+    sector_id: String,
+) -> Result<bool, String> {
+    let requires_sequential: i32;
+    let has_active: i32;
+    {
+        let conn = state.conn()?;
+        requires_sequential = conn
+            .query_row(
+                "SELECT requires_sequential FROM local_category_cache WHERE category_id = ?1",
+                params![category_id],
+                |row| row.get(0),
+            )
+            .map_err(|_| {
+                "Categoria não encontrada na cache local. Sincronize categorias enquanto online."
+                    .to_string()
+            })?;
+        has_active = conn
+            .query_row(
+                "SELECT COUNT(*) FROM local_identifier_lease
+                 WHERE category_id = ?1 AND sector_id = ?2 AND status = 'active'",
+                params![category_id, sector_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+    }
+
+    // Categorias não-sequenciais usam contadores locais, não leases.
+    if requires_sequential == 0 {
+        return Ok(false);
+    }
+
+    if has_active > 0 {
+        return Ok(true);
+    }
+
+    let identity = read_local_identity(state.inner())?.ok_or_else(|| {
+        "OFFLINE_NO_DEVICE: Dispositivo ainda nao registado. Ligue-se a internet uma vez para ativar a geracao offline neste dispositivo.".to_string()
+    })?;
+
+    match request_lease_inner(
+        state.inner(),
+        category_id.clone(),
+        identity.device_id,
+        sector_id.clone(),
+    )
+    .await
+    {
+        Ok(_) => Ok(true),
+        Err(e) => {
+            // Corrida: outra chamada pode ter criado o lease entretanto
+            let conn = state.conn()?;
+            let now_active: i32 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM local_identifier_lease
+                     WHERE category_id = ?1 AND sector_id = ?2 AND status = 'active'",
+                    params![category_id, sector_id],
+                    |row| row.get(0),
+                )
+                .unwrap_or(0);
+            if now_active > 0 {
+                Ok(true)
+            } else {
+                Err(e)
+            }
+        }
+    }
 }
 
 // ============================================================
@@ -968,6 +1052,7 @@ mod tests {
         let state = SyncState {
             db_path: db_path.clone(),
             uploads_dir: dir.clone(),
+            downloads_dir: dir.clone(),
             api_base_url: std::sync::Mutex::new("http://localhost:3000".to_string()),
             auth_token: std::sync::Mutex::new(None),
             syncing: std::sync::Mutex::new(false),
@@ -1234,6 +1319,7 @@ mod tests {
         let state = SyncState {
             db_path: db_path.clone(),
             uploads_dir: dir.clone(),
+            downloads_dir: dir.clone(),
             api_base_url: std::sync::Mutex::new("http://localhost:3000".to_string()),
             auth_token: std::sync::Mutex::new(None),
             syncing: std::sync::Mutex::new(false),
@@ -1262,6 +1348,7 @@ mod tests {
         let state2 = SyncState {
             db_path,
             uploads_dir: dir.clone(),
+            downloads_dir: dir.clone(),
             api_base_url: std::sync::Mutex::new("http://localhost:3000".to_string()),
             auth_token: std::sync::Mutex::new(None),
             syncing: std::sync::Mutex::new(false),
@@ -1298,6 +1385,7 @@ mod tests {
         let state = SyncState {
             db_path: db_path.clone(),
             uploads_dir: dir.clone(),
+            downloads_dir: dir.clone(),
             api_base_url: std::sync::Mutex::new("http://localhost:3000".to_string()),
             auth_token: std::sync::Mutex::new(None),
             syncing: std::sync::Mutex::new(false),
@@ -1312,6 +1400,7 @@ mod tests {
         let _state2 = SyncState {
             db_path: db_path.clone(),
             uploads_dir: dir.clone(),
+            downloads_dir: dir.clone(),
             api_base_url: std::sync::Mutex::new("http://localhost:3000".to_string()),
             auth_token: std::sync::Mutex::new(None),
             syncing: std::sync::Mutex::new(false),

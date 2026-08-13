@@ -1,9 +1,11 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { api, sync } from "../../infrastructure/di/container";
 import { useGenerateIdentifier } from "../hooks/useGenerateIdentifier";
 import { usePendingIdentifiers, conflictLabel } from "../hooks/usePendingIdentifiers";
+import { useOfflineCache } from "../hooks/useOfflineCache";
+import { mapError } from "../../shared/errors/mapError";
 import { useAuthStore } from "../stores/authStore";
-import { PageHeader, Modal, StatusChip, EmptyState, Pagination } from "../components/docid-ui";
+import { PageHeader, Modal, StatusChip, EmptyState, Pagination, OfflineNotice } from "../components/docid-ui";
 import { Fingerprint, Plus, Copy, Ban, Search, WifiOff, RefreshCw, AlertTriangle, Trash2, RotateCcw, Clock, Smartphone } from "lucide-react";
 
 interface Category { id: string; name: string; group: string; prefix: string; requiresSequential: boolean; }
@@ -13,8 +15,6 @@ export default function Identifiers() {
   const [view, setView] = useState<"server" | "pending">("server");
   const [rows, setRows] = useState<IdentifierRow[]>([]);
   const [meta, setMeta] = useState({ total: 0, page: 1, limit: 20 });
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
   const [filterOrigin, setFilterOrigin] = useState("");
   const [showGenerate, setShowGenerate] = useState(false);
@@ -25,21 +25,40 @@ export default function Identifiers() {
   const { items: pendingItems, loading: pendingLoading, error: pendingError, refresh: refreshPending, retryItem, deleteItem, pendingCount, conflictCount, failedCount } = usePendingIdentifiers();
   const pendingTotal = pendingCount + conflictCount + failedCount;
 
-  const load = useCallback(async (page = 1) => {
-    setLoading(true); setError("");
-    try {
-      const params = new URLSearchParams({ page: String(page), limit: "20" });
-      if (filterStatus) params.set("status", filterStatus);
-      if (filterOrigin) params.set("origin", filterOrigin);
-      const res = await api.get<{ data: IdentifierRow[]; meta: { total: number; page: number; limit: number } }>(`/identifiers?${params}`);
-      setRows(res.data || []);
-      setMeta(res.meta || { total: 0, page: 1, limit: 20 });
-    } catch (err: any) { setError(err.message || "Erro ao carregar identificadores."); }
-    finally { setLoading(false); }
-  }, [filterStatus, filterOrigin]);
+  const listParams = (() => {
+    const p = new URLSearchParams({ page: "1", limit: "20" });
+    if (filterStatus) p.set("status", filterStatus);
+    if (filterOrigin) p.set("origin", filterOrigin);
+    return p.toString();
+  })();
 
-  useEffect(() => { if (view === "server") load(); }, [view, load]);
-  useEffect(() => { api.get<{ data: { groups: Record<string, Category[]> } }>("/categories").then(r => { const all: Category[] = []; for (const g of Object.values(r.data?.groups || {})) all.push(...g); setCategories(all); }).catch(() => {}); }, []);
+  const { loading, error, isStale, cachedAt, refresh } = useOfflineCache<{ data: IdentifierRow[]; meta: { total: number; page: number; limit: number } }>({
+    endpoint: "/identifiers",
+    params: listParams,
+    enabled: view === "server",
+    fetcher: async () => {
+      const res = await api.get<{ data: IdentifierRow[]; meta: { total: number; page: number; limit: number } }>(`/identifiers?${listParams}`);
+      return { data: res.data || [], meta: res.meta || { total: 0, page: 1, limit: 20 } };
+    },
+    onData: result => { setRows(result.data); setMeta(result.meta); },
+  });
+
+  useOfflineCache<Category[]>({
+    endpoint: "/categories",
+    fetcher: async () => {
+      const res = await api.get<{ data: { groups: Record<string, Category[]> } }>("/categories");
+      const all: Category[] = [];
+      for (const g of Object.values(res.data?.groups || {})) all.push(...g);
+      if (sync.isAvailable()) {
+        try {
+          const { invoke } = await import("@tauri-apps/api/core");
+          await invoke("cache_categories", { categories: all.map(c => ({ category_id: c.id, prefix: c.prefix, requires_sequential: c.requiresSequential })) });
+        } catch { /* best effort — o sync também sementeia */ }
+      }
+      return all;
+    },
+    onData: setCategories,
+  });
 
   return (
     <div>
@@ -57,6 +76,7 @@ export default function Identifiers() {
       {view === "server" ? (
         <>
           {error && <div className="mb-4 rounded-lg border border-docid-error/30 bg-docid-error/10 p-3 text-sm text-docid-error">{error}</div>}
+          {isStale && <OfflineNotice cachedAt={cachedAt} onRetry={refresh} />}
           <div className="mb-4 flex flex-wrap items-center gap-3">
             <div className="relative flex-1 max-w-xs"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-docid-outline" /><input value={search} onChange={e => setSearch(e.target.value)} className="docid-input w-full pl-9" placeholder="Pesquisar identificador..." /></div>
             <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="docid-input w-36"><option value="">Todos os estados</option><option value="active">Activo</option><option value="attached">Associado</option><option value="cancelled">Cancelado</option><option value="draft">Rascunho</option></select>
@@ -100,8 +120,8 @@ export default function Identifiers() {
         />
       )}
 
-      {showGenerate && <GenerateModal categories={categories} onClose={() => setShowGenerate(false)} onDone={() => { setShowGenerate(false); load(); refreshPending(); }} />}
-      {selected && <DetailModal row={selected} onClose={() => setSelected(null)} onCancelled={() => { setSelected(null); load(); }} />}
+      {showGenerate && <GenerateModal categories={categories} onClose={() => setShowGenerate(false)} onDone={() => { setShowGenerate(false); refresh(); refreshPending(); }} />}
+      {selected && <DetailModal row={selected} onClose={() => setSelected(null)} onCancelled={() => { setSelected(null); refresh(); }} />}
     </div>
   );
 }
@@ -379,7 +399,7 @@ function DetailModal({ row, onClose, onCancelled }: { row: IdentifierRow; onClos
     try {
       await api.patch(`/identifiers/${row.identifier}/cancel`, { reason: cancelReason });
       onCancelled();
-    } catch (err: any) { setError(err.message || "Erro ao cancelar."); } finally { setLoading(false); }
+    } catch (err: any) { setError(mapError(err, "Erro ao cancelar.")); } finally { setLoading(false); }
   };
 
   const statusTone = row.status === "active" ? "success" as const : row.status === "cancelled" ? "error" as const : row.status === "attached" ? "info" as const : "neutral" as const;
@@ -400,6 +420,8 @@ function DetailModal({ row, onClose, onCancelled }: { row: IdentifierRow; onClos
         </div>
         {row.document && <div className="rounded-lg border border-docid-border bg-docid-surface-low p-3"><p className="text-xs text-docid-muted mb-1">Documento associado</p><p className="text-sm font-medium">{row.document.filename}</p></div>}
 
+        <HistorySection identifierId={row.id} />
+
         {showCancel && (
           <div className="rounded-lg border border-docid-error/30 bg-docid-error/10 p-4 space-y-3">
             <p className="text-sm font-medium text-docid-error">Cancelar identificador</p>
@@ -410,5 +432,76 @@ function DetailModal({ row, onClose, onCancelled }: { row: IdentifierRow; onClos
         )}
       </div>
     </Modal>
+  );
+}
+
+interface HistoryEvent { id: string; action: string; resource: string; resourceId: string; metadata: string | null; ip: string | null; createdAt: string; userName: string | null; }
+
+const ACTION_LABELS: Record<string, string> = {
+  GENERATE: "Identificador gerado",
+  QUERY: "Consultado",
+  CANCEL: "Cancelado",
+  ATTACH: "Documento associado",
+  SHARE: "Partilhado",
+  APPROVE: "Aprovação",
+};
+
+function HistorySection({ identifierId }: { identifierId: string }) {
+  const [events, setEvents] = useState<HistoryEvent[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true); setError(null);
+      try {
+        const res = await api.get<{ data: HistoryEvent[] }>(`/audit?resource=identifiers&resourceId=${encodeURIComponent(identifierId)}&limit=20`);
+        if (!cancelled) setEvents(res.data || []);
+      } catch (err: any) {
+        if (!cancelled) setError(err.message || "Erro ao carregar histórico.");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [identifierId]);
+
+  const formatMetadata = (action: string, metadata: string | null): string | null => {
+    if (!metadata) return null;
+    try {
+      const m = JSON.parse(metadata);
+      if (action === "CANCEL" && m.reason) return `Motivo: ${m.reason}`;
+      if (action === "GENERATE" && m.identifier) return m.identifier;
+      return null;
+    } catch { return null; }
+  };
+
+  return (
+    <div className="space-y-3">
+      <h4 className="text-sm font-semibold text-docid-text">Histórico de eventos</h4>
+      {loading ? (
+        <p className="text-xs text-docid-muted">A carregar histórico...</p>
+      ) : error ? (
+        <p className="text-xs text-docid-error">{error}</p>
+      ) : events.length === 0 ? (
+        <p className="text-xs text-docid-muted">Sem eventos registados.</p>
+      ) : (
+        <ol className="space-y-3 border-l border-docid-border pl-4">
+          {events.map(ev => (
+            <li key={ev.id} className="relative">
+              <span className="absolute -left-[21px] top-1 h-2.5 w-2.5 rounded-full border-2 border-docid-primary bg-docid-surface" />
+              <div className="flex items-baseline justify-between gap-3">
+                <p className="text-xs font-medium text-docid-text">{ACTION_LABELS[ev.action] ?? ev.action}</p>
+                <p className="shrink-0 text-[11px] text-docid-muted">{new Date(ev.createdAt).toLocaleString("pt-AO")}</p>
+              </div>
+              <p className="mt-0.5 text-[11px] text-docid-muted">
+                por {ev.userName || "—"}{formatMetadata(ev.action, ev.metadata) ? ` · ${formatMetadata(ev.action, ev.metadata)}` : ""}
+              </p>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
   );
 }
