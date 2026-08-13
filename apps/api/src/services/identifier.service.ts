@@ -1,11 +1,30 @@
 import type { DB } from "../db";
-import { identifiers, categories, documents, documentShares, auditLogs, organizations, sectors, idempotencyRecords } from "../db/schema";
+import { identifiers, categories, documents, documentShares, auditLogs, organizations, sectors, idempotencyRecords, documentVersions } from "../db/schema";
 import { eq, and, or, desc, sql, isNull } from "drizzle-orm";
 import type { AuthPayload } from "../middleware/auth";
 
 function buildIdentifier(orgPrefix: string, catPrefix: string, year: number, month: number, day: number, seq: number): string {
   const mmdd = `${String(month).padStart(2, "0")}${String(day).padStart(2, "0")}`;
   return `${orgPrefix}-${catPrefix}-${year}-${mmdd}-${String(seq).padStart(3, "0")}`;
+}
+
+function hydratePrimaryDocument(
+  docs: Array<{
+    kind: string;
+    versions?: Array<{ isCurrent: boolean; filename: string; mimeType: string; fileSize: number }> | null;
+    [key: string]: unknown;
+  }> | null | undefined,
+) {
+  const primary = docs?.find((d) => d.kind === "primary") ?? null;
+  if (!primary) return null;
+  const current = primary.versions?.find((v) => v.isCurrent) ?? primary.versions?.[0];
+  const { versions: _versions, ...rest } = primary;
+  return {
+    ...rest,
+    filename: current?.filename ?? null,
+    mimeType: current?.mimeType ?? null,
+    fileSize: current?.fileSize ?? null,
+  };
 }
 
 export async function getSharedDocIds(tx: DB, auth: AuthPayload): Promise<Set<string>> {
@@ -182,7 +201,18 @@ export async function listIdentifiers(tx: DB, auth: AuthPayload, filters: {
 
   const allRows = await tx.query.identifiers.findMany({
     where: and(...conditions),
-    with: { category: true, documents: true, sector: true, createdByUser: true },
+    with: {
+      category: true,
+      documents: {
+        with: {
+          versions: {
+            where: eq(documentVersions.isCurrent, true),
+          },
+        },
+      },
+      sector: true,
+      createdByUser: true,
+    },
     orderBy: desc(identifiers.createdAt),
   });
 
@@ -195,8 +225,7 @@ export async function listIdentifiers(tx: DB, auth: AuthPayload, filters: {
 
   const data = filtered.map(row => {
     const { restricted } = checkVisibility(row, auth, sharedDocIds);
-    const primary = row.documents?.find((d) => d.kind === "primary") ?? null;
-    return { ...row, document: primary, restricted };
+    return { ...row, document: hydratePrimaryDocument(row.documents), restricted };
   });
 
   const paginated = data.slice(offset, offset + limit);
@@ -207,7 +236,18 @@ export async function listIdentifiers(tx: DB, auth: AuthPayload, filters: {
 export async function getIdentifier(tx: DB, auth: AuthPayload, identifierStr: string, ip: string = "unknown") {
   const row = await tx.query.identifiers.findFirst({
     where: and(eq(identifiers.identifier, identifierStr), eq(identifiers.tenantId, auth.tenantId)),
-    with: { category: true, documents: true, sector: true, createdByUser: true },
+    with: {
+      category: true,
+      documents: {
+        with: {
+          versions: {
+            where: eq(documentVersions.isCurrent, true),
+          },
+        },
+      },
+      sector: true,
+      createdByUser: true,
+    },
   });
 
   if (!row) return null;
@@ -226,8 +266,7 @@ export async function getIdentifier(tx: DB, auth: AuthPayload, identifierStr: st
     ip,
   });
 
-  const primary = row.documents?.find((d) => d.kind === "primary") ?? null;
-  return { ...row, document: primary, restricted };
+  return { ...row, document: hydratePrimaryDocument(row.documents), restricted };
 }
 
 export async function cancelIdentifier(tx: DB, auth: AuthPayload, identifierStr: string, reason: string, ip: string = "unknown") {

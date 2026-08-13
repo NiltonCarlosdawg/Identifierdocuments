@@ -341,12 +341,24 @@ function UploadModal({ onClose, onDone, initialPath = "", initialIdentifier = ""
     }
 
     if (row.file) {
-      const fd = new FormData();
-      fd.append("identifier", identifier);
-      fd.append("file", row.file);
-      if (uploadMode === "attachment") fd.append("label", row.filename);
-      await api.post(uploadMode === "attachment" ? "/documents/attachments" : "/documents/attach", fd);
-      return { status: "ok" as const };
+      try {
+        const fd = new FormData();
+        fd.append("identifier", identifier);
+        fd.append("file", row.file);
+        if (uploadMode === "attachment") fd.append("label", row.filename);
+        await api.post(uploadMode === "attachment" ? "/documents/attachments" : "/documents/attach", fd);
+        return { status: "ok" as const };
+      } catch (err: any) {
+        if (isNetworkError(err) && sync.isAvailable()) {
+          const user = useAuthStore.getState().user;
+          if (!user?.tenantId || !user?.id) throw err;
+          const item = await sync.enqueueFromFile(row.file, identifier, user.tenantId, user.id, uploadMode);
+          if (!item) throw err;
+          useQueueStore.getState().refresh().catch(() => {});
+          return { status: "queued" as const };
+        }
+        throw err;
+      }
     }
     throw new Error("Ficheiro em falta.");
   };

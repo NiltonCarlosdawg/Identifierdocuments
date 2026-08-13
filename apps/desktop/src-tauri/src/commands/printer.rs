@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use tauri::State;
+use crate::sync::SyncState;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct PrinterDevice {
@@ -13,6 +15,33 @@ pub fn printer_name_ok(name: &str) -> bool {
         && !trimmed.chars().any(|c| {
             matches!(c, '\n' | '\r' | ';' | '|' | '&' | '$' | '`' | '"' | '\0' | '<' | '>')
         })
+}
+
+fn assert_printable_path(state: &SyncState, path: &Path) -> Result<PathBuf, String> {
+    let canonical = path
+        .canonicalize()
+        .map_err(|_| "Caminho inválido ou ficheiro inexistente.".to_string())?;
+    if !canonical.is_file() {
+        return Err("O caminho não é um ficheiro.".to_string());
+    }
+    let downloads = state
+        .downloads_dir
+        .canonicalize()
+        .unwrap_or_else(|_| state.downloads_dir.clone());
+    let uploads = state
+        .uploads_dir
+        .canonicalize()
+        .unwrap_or_else(|_| state.uploads_dir.clone());
+    let temp = std::env::temp_dir()
+        .canonicalize()
+        .unwrap_or_else(|_| std::env::temp_dir());
+    if canonical.starts_with(&downloads)
+        || canonical.starts_with(&uploads)
+        || canonical.starts_with(&temp)
+    {
+        return Ok(canonical);
+    }
+    Err("Só é permitido imprimir ficheiros da cache local DocID ou temporários.".to_string())
 }
 
 pub fn parse_lpstat(stdout: &str) -> Vec<PrinterDevice> {
@@ -104,8 +133,8 @@ async fn print_path(printer: &str, path: &Path) -> Result<String, String> {
         let path_str = path.to_string_lossy().replace('\'', "''");
         let printer_str = printer.replace('\'', "''");
         let script = format!(
-            "Get-CimInstance Win32_Printer | Where-Object {{ $_.Name -eq '{printer_str}' }} | ForEach-Object {{ $null }}; \
-             Start-Process -FilePath '{path_str}' -Verb Print"
+            "Get-CimInstance Win32_Printer | Where-Object {{ $_.Name -eq '{printer_str}' }} | Out-Null; \
+             Start-Process -LiteralPath '{path_str}' -Verb Print"
         );
         let output = tokio::process::Command::new("powershell")
             .args(["-NoProfile", "-Command", &script])
@@ -126,8 +155,13 @@ async fn print_path(printer: &str, path: &Path) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub async fn print_file(printer: String, path: String) -> Result<String, String> {
-    print_path(&printer, Path::new(&path)).await
+pub async fn print_file(
+    state: State<'_, SyncState>,
+    printer: String,
+    path: String,
+) -> Result<String, String> {
+    let safe = assert_printable_path(&state, Path::new(&path))?;
+    print_path(&printer, &safe).await
 }
 
 #[tauri::command]

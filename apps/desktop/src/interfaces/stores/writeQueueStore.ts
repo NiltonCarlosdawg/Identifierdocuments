@@ -13,6 +13,8 @@ interface WriteQueueState {
   refresh: () => Promise<void>;
 }
 
+let refreshChain: Promise<void> = Promise.resolve();
+
 export const useWriteQueueStore = create<WriteQueueState>((set, get) => ({
   items: [], online: true, panelOpen: false,
   loadQueue: async () => {
@@ -21,7 +23,14 @@ export const useWriteQueueStore = create<WriteQueueState>((set, get) => ({
   },
   checkOnline: async () => set({ online: await sync.isOnline() }),
   setPanelOpen: (open) => set({ panelOpen: open }),
-  refresh: async () => { await get().checkOnline(); await get().loadQueue(); },
+  refresh: async () => {
+    const run = async () => {
+      await get().checkOnline();
+      await get().loadQueue();
+    };
+    refreshChain = refreshChain.then(run, run);
+    await refreshChain;
+  },
 }));
 
 export { activeWriteCount };

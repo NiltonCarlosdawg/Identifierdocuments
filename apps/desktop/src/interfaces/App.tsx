@@ -27,6 +27,15 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function RoleProtectedRoute({ children, roles }: { children: React.ReactNode; roles: string[] }) {
+  const token = useAuthStore(s => s.token);
+  const user = useAuthStore(s => s.user);
+  if (!token) return <Navigate to="/login" replace />;
+  // Enquanto o perfil hidrata, permite render; a API continua a ser a fonte de authz.
+  if (user && !roles.some(r => user.roles?.includes(r))) return <Navigate to="/" replace />;
+  return <>{children}</>;
+}
+
 function ConfigSync() {
   const token = useAuthStore(s => s.token);
   const apiBaseUrl = useAppConfigStore(s => s.apiBaseUrl);
@@ -66,9 +75,14 @@ export default function App() {
     if (!token) return;
     (async () => {
       try {
-        const res = await api.get<{ data: StoredUser | null }>("/auth/me");
-        if (res.data === null) { logout(); return; }
-        setUser(res.data);
+        const res = await api.get<StoredUser | { data: StoredUser | null } | null>("/auth/me");
+        const me =
+          res == null ? null
+          : typeof res === "object" && res !== null && "data" in res
+            ? (res as { data: StoredUser | null }).data
+            : (res as StoredUser);
+        if (!me || !me.id) { logout(); return; }
+        setUser(me);
         if (sync.isAvailable()) {
           useDeviceStore.getState().initialize().catch(() => {});
         }
@@ -88,13 +102,13 @@ export default function App() {
           <Route index element={<Dashboard />} />
           <Route path="identificadores" element={<Identifiers />} />
           <Route path="documentos" element={<Documents />} />
-          <Route path="aprovacoes" element={<Approvals />} />
-          <Route path="sectores" element={<Sectors />} />
-          <Route path="utilizadores" element={<Users />} />
-          <Route path="utilizadores/:id" element={<UserProfile />} />
-          <Route path="auditoria" element={<Audit />} />
+          <Route path="aprovacoes" element={<RoleProtectedRoute roles={["ORG_ADMIN", "SECTOR_SUPERVISOR"]}><Approvals /></RoleProtectedRoute>} />
+          <Route path="sectores" element={<RoleProtectedRoute roles={["ORG_ADMIN"]}><Sectors /></RoleProtectedRoute>} />
+          <Route path="utilizadores" element={<RoleProtectedRoute roles={["ORG_ADMIN", "SECTOR_SUPERVISOR"]}><Users /></RoleProtectedRoute>} />
+          <Route path="utilizadores/:id" element={<RoleProtectedRoute roles={["ORG_ADMIN", "SECTOR_SUPERVISOR"]}><UserProfile /></RoleProtectedRoute>} />
+          <Route path="auditoria" element={<RoleProtectedRoute roles={["ORG_ADMIN"]}><Audit /></RoleProtectedRoute>} />
           <Route path="digitalizar" element={<Scanner />} />
-          <Route path="configuracoes" element={<Settings />} />
+          <Route path="configuracoes" element={<RoleProtectedRoute roles={["ORG_ADMIN"]}><Settings /></RoleProtectedRoute>} />
           <Route path="perfil" element={<Profile />} />
         </Route>
       </Routes>

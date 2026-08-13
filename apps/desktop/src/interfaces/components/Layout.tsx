@@ -14,7 +14,7 @@ const navItems = [
   { to: "/documentos", label: "Documentos", icon: FileText },
   { to: "/aprovacoes", label: "Aprovações", icon: CheckSquare, roles: ["ORG_ADMIN", "SECTOR_SUPERVISOR"] },
   { to: "/sectores", label: "Sectores", icon: Users, roles: ["ORG_ADMIN"] },
-  { to: "/utilizadores", label: "Utilizadores", icon: UserPlus, roles: ["ORG_ADMIN"] },
+  { to: "/utilizadores", label: "Utilizadores", icon: UserPlus, roles: ["ORG_ADMIN", "SECTOR_SUPERVISOR"] },
   { to: "/auditoria", label: "Auditoria", icon: History, roles: ["ORG_ADMIN"] },
   { to: "/digitalizar", label: "Digitalizar", icon: Scan },
   { to: "/configuracoes", label: "Configurações", icon: Cog, roles: ["ORG_ADMIN"] },

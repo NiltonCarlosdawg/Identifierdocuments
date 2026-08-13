@@ -1,5 +1,6 @@
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use tauri::{AppHandle, Manager};
 
 pub fn extract_text_from_pdf(path: &Path) -> Result<String, String> {
     let bytes = std::fs::read(path).map_err(|e| format!("Erro ao ler PDF: {e}"))?;
@@ -75,24 +76,61 @@ fn docx_xml_to_text(xml: &str) -> String {
         .join("\n")
 }
 
-#[tauri::command]
-pub fn extract_text_command(path: String) -> Result<String, String> {
-    let p = Path::new(&path);
-    if !p.exists() {
-        return Err("Ficheiro não encontrado.".to_string());
+fn path_under_root(canonical: &Path, root: &Path) -> bool {
+    match root.canonicalize() {
+        Ok(r) => canonical.starts_with(&r),
+        Err(_) => canonical.starts_with(root),
     }
-    match p
+}
+
+fn assert_readable_user_file(app: &AppHandle, path: &Path) -> Result<PathBuf, String> {
+    let canonical = path
+        .canonicalize()
+        .map_err(|_| "Caminho inválido ou ficheiro inexistente.".to_string())?;
+    if !canonical.is_file() {
+        return Err("O caminho não é um ficheiro.".to_string());
+    }
+
+    let mut roots: Vec<PathBuf> = Vec::new();
+    if let Ok(p) = app.path().app_data_dir() {
+        roots.push(p);
+    }
+    if let Ok(p) = app.path().document_dir() {
+        roots.push(p);
+    }
+    if let Ok(p) = app.path().download_dir() {
+        roots.push(p);
+    }
+    if let Ok(p) = app.path().home_dir() {
+        roots.push(p);
+    }
+    roots.push(std::env::temp_dir());
+
+    if roots.iter().any(|r| path_under_root(&canonical, r)) {
+        return Ok(canonical);
+    }
+    Err("Leitura não permitida fora das pastas do utilizador / app DocID.".to_string())
+}
+
+fn extract_text_from_path(path: &Path) -> Result<String, String> {
+    match path
         .extension()
         .and_then(|e| e.to_str())
         .map(|e| e.to_lowercase())
         .as_deref()
     {
-        Some("pdf") => extract_text_from_pdf(p),
-        Some("txt" | "md" | "csv") => extract_text_from_txt(p),
-        Some("docx") => extract_text_from_docx(p),
+        Some("pdf") => extract_text_from_pdf(path),
+        Some("txt" | "md" | "csv") => extract_text_from_txt(path),
+        Some("docx") => extract_text_from_docx(path),
         Some(other) => Err(format!("Formato não suportado: .{other}")),
         None => Err("Ficheiro sem extensão.".to_string()),
     }
+}
+
+#[tauri::command]
+pub fn extract_text_command(app: AppHandle, path: String) -> Result<String, String> {
+    let canonical = assert_readable_user_file(&app, Path::new(&path))?;
+    extract_text_from_path(&canonical)
 }
 
 #[cfg(test)]
@@ -127,7 +165,7 @@ mod tests {
     #[test]
     fn extract_txt_returns_content() {
         let (_dir, path) = tmp_file("conteúdo de teste\nlinha 2", "txt");
-        let result = extract_text_command(path);
+        let result = extract_text_from_path(Path::new(&path));
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), "conteúdo de teste\nlinha 2");
     }
@@ -135,7 +173,7 @@ mod tests {
     #[test]
     fn extract_md_returns_content() {
         let (_dir, path) = tmp_file("# Markdown\n**teste**", "md");
-        let result = extract_text_command(path);
+        let result = extract_text_from_path(Path::new(&path));
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), "# Markdown\n**teste**");
     }
@@ -143,22 +181,21 @@ mod tests {
     #[test]
     fn extract_csv_returns_content() {
         let (_dir, path) = tmp_file("a,b,c\n1,2,3", "csv");
-        let result = extract_text_command(path);
+        let result = extract_text_from_path(Path::new(&path));
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), "a,b,c\n1,2,3");
     }
 
     #[test]
     fn extract_nonexistent_file_returns_error() {
-        let result = extract_text_command("/tmp/docid_test_nonexistent_file_xyz.pdf".to_string());
+        let result = extract_text_from_path(Path::new("/tmp/docid_test_nonexistent_file_xyz.pdf"));
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "Ficheiro não encontrado.");
     }
 
     #[test]
     fn extract_unsupported_extension_returns_error() {
         let (_dir, path) = tmp_file("{}", "json");
-        let result = extract_text_command(path);
+        let result = extract_text_from_path(Path::new(&path));
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Formato não suportado"));
     }
@@ -169,7 +206,7 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         let path = dir.join("sem_extensao");
         fs::write(&path, "conteúdo").unwrap();
-        let result = extract_text_command(path.to_string_lossy().to_string());
+        let result = extract_text_from_path(&path);
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), "Ficheiro sem extensão.");
     }
@@ -192,7 +229,7 @@ mod tests {
             &path,
             r#"<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Identificador VL-FAT-2026-0813-002 no corpo</w:t></w:r></w:p></w:body></w:document>"#,
         );
-        let result = extract_text_command(path.to_string_lossy().to_string());
+        let result = extract_text_from_path(&path);
         assert!(result.is_ok(), "{result:?}");
         assert!(result.unwrap().contains("VL-FAT-2026-0813-002"));
         fs::remove_dir_all(&dir).ok();

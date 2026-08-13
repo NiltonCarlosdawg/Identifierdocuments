@@ -8,6 +8,7 @@ import { User, Lock, Save, Sun, Moon } from "lucide-react";
 
 export default function Profile() {
   const user = useAuthStore(s => s.user);
+  const setUser = useAuthStore(s => s.setUser);
   const theme = useAppConfigStore(s => s.theme);
   const setTheme = useAppConfigStore(s => s.setTheme);
   const [fullName, setFullName] = useState(user?.fullName || "");
@@ -24,7 +25,9 @@ export default function Profile() {
     if (!fullName.trim() || fullName === user?.fullName) return;
     setSaving(true); setSaveMsg("");
     try {
-      await api.patch("/auth/me", { fullName: fullName.trim() });
+      const res = await api.patch<{ data?: { fullName?: string }; fullName?: string }>("/auth/me", { fullName: fullName.trim() });
+      const updatedName = res.data?.fullName ?? res.fullName ?? fullName.trim();
+      if (user) setUser({ ...user, fullName: updatedName });
       setSaveMsg("Nome actualizado.");
     } catch (err: any) { setSaveMsg(mapError(err, "Erro ao actualizar.")); } finally { setSaving(false); }
   };
