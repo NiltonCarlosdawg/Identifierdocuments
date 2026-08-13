@@ -1,7 +1,6 @@
 import { Worker } from "bullmq";
 import { getBullConnection } from "./connection";
-import type { EmailJobData, ThumbnailJobData } from "./queues";
-import { sendInviteEmail, sendResetPasswordEmail } from "../services/mailer.service";
+import type { ThumbnailJobData } from "./queues";
 import { runThumbnailJob } from "../services/attachment.service";
 import { logger } from "../lib/logger";
 
@@ -17,21 +16,7 @@ export async function startWorkers(): Promise<void> {
 
   started = true;
 
-  new Worker<EmailJobData>(
-    "docid-email",
-    async (job) => {
-      const data = job.data;
-      if (data.type === "invite") {
-        await sendInviteEmail(data.to, data.fullName, data.orgName, data.password);
-        return;
-      }
-      await sendResetPasswordEmail(data.to, data.token);
-    },
-    { connection, concurrency: 2 },
-  ).on("failed", (job, err) => {
-    logger.error({ err, jobId: job?.id }, "[BULLMQ] email job falhou");
-  });
-
+  // Emails com secrets não usam fila — apenas thumbnails.
   new Worker<ThumbnailJobData>(
     "docid-thumbnail",
     async (job) => {
@@ -42,5 +27,5 @@ export async function startWorkers(): Promise<void> {
     logger.error({ err, jobId: job?.id }, "[BULLMQ] thumbnail job falhou");
   });
 
-  logger.info("[BULLMQ] Workers email + thumbnail activos");
+  logger.info("[BULLMQ] Worker thumbnail activo");
 }

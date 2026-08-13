@@ -22,11 +22,12 @@ export const approvalsModule = new Elysia({ prefix: "/approvals" })
 
   .get("/", async ({ tenantId, auth, query }) => {
     return withTenant(tenantId, async (tx) => {
+      const roleNames = await getFreshRoles(auth!.userId, auth!.tenantId);
       const conditions = [eq(approvals.tenantId, tenantId)];
       if (query.status) conditions.push(eq(approvals.status, query.status as any));
       if (query.sectorId) conditions.push(eq(approvals.sectorId, query.sectorId));
 
-      if (auth!.roles.includes("SECTOR_SUPERVISOR") && !auth!.roles.includes("ORG_ADMIN")) {
+      if (roleNames.includes("SECTOR_SUPERVISOR") && !roleNames.includes("ORG_ADMIN")) {
         conditions.push(eq(approvals.supervisorId, auth!.userId));
       }
 

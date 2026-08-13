@@ -4,7 +4,8 @@ const connectionString = process.env.DATABASE_URL!;
 
 const TABLES_WITH_TENANT = [
   "sectors", "users", "roles", "identifiers",
-  "documents", "document_versions", "approvals", "audit_logs",
+  "documents", "document_versions", "document_access_requests",
+  "approvals", "audit_logs", "notifications",
   "classifier_feedback",
   "devices", "identifier_leases", "identifier_release_pool",
   "idempotency_records",
@@ -15,6 +16,7 @@ export async function setupRLS() {
 
   for (const table of TABLES_WITH_TENANT) {
     await sql.unsafe(`ALTER TABLE ${table} ENABLE ROW LEVEL SECURITY;`);
+    await sql.unsafe(`ALTER TABLE ${table} FORCE ROW LEVEL SECURITY;`);
     await sql.unsafe(`DROP POLICY IF EXISTS tenant_isolation_${table} ON ${table};`);
     await sql.unsafe(`
       CREATE POLICY tenant_isolation_${table} ON ${table}
@@ -28,6 +30,21 @@ export async function setupRLS() {
     CREATE POLICY roles_allow_system ON roles
       FOR ALL
       USING (tenant_id IS NULL OR tenant_id = current_setting('app.current_tenant')::uuid);
+  `);
+
+  await sql.unsafe(`
+    ALTER TABLE document_shares ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE document_shares FORCE ROW LEVEL SECURITY;
+    DROP POLICY IF EXISTS tenant_isolation_document_shares ON document_shares;
+    CREATE POLICY tenant_isolation_document_shares ON document_shares
+      FOR ALL
+      USING (
+        EXISTS (
+          SELECT 1 FROM documents
+          WHERE documents.id = document_id
+            AND documents.tenant_id = current_setting('app.current_tenant')::uuid
+        )
+      );
   `);
 
   console.log("RLS configurado para todas as tabelas.");

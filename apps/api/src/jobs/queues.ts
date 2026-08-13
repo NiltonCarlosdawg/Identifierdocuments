@@ -3,23 +3,10 @@ import { getBullConnection } from "./connection";
 import { sendInviteEmail, sendResetPasswordEmail } from "../services/mailer.service";
 import { logger } from "../lib/logger";
 
-export type EmailJobData =
-  | { type: "invite"; to: string; fullName: string; orgName: string; password: string }
-  | { type: "reset"; to: string; token: string };
-
+/** Só thumbnails na fila — passwords/tokens de email nunca vão para o Redis. */
 export type ThumbnailJobData = { filePath: string; docId: string };
 
-let emailQueue: Queue<EmailJobData> | null = null;
 let thumbnailQueue: Queue<ThumbnailJobData> | null = null;
-
-function getEmailQueue(): Queue<EmailJobData> | null {
-  const conn = getBullConnection();
-  if (!conn) return null;
-  if (!emailQueue) {
-    emailQueue = new Queue<EmailJobData>("docid-email", { connection: conn });
-  }
-  return emailQueue;
-}
 
 function getThumbnailQueue(): Queue<ThumbnailJobData> | null {
   const conn = getBullConnection();
@@ -37,37 +24,22 @@ const defaultJobOpts = {
   removeOnFail: 50,
 };
 
-/** Enfileira email de convite; fallback síncrono se Redis/BullMQ indisponível. */
+/**
+ * Envio directo (sem fila): a password temporária não deve persistir no Redis.
+ * Devolve true se o email foi enviado via SMTP; false se caiu no fallback de log (dev).
+ */
 export async function enqueueInviteEmail(
   to: string,
   fullName: string,
   orgName: string,
   password: string,
 ): Promise<boolean> {
-  const q = getEmailQueue();
-  if (!q) return sendInviteEmail(to, fullName, orgName, password);
-  try {
-    await q.add("invite", { type: "invite", to, fullName, orgName, password }, defaultJobOpts);
-    return true;
-  } catch (err) {
-    logger.warn({ err }, "[BULLMQ] enqueue invite falhou — envio directo");
-    return sendInviteEmail(to, fullName, orgName, password);
-  }
+  return sendInviteEmail(to, fullName, orgName, password);
 }
 
-/** Enfileira email de reset; fallback síncrono se Redis/BullMQ indisponível. */
+/** Envio directo (sem fila): o token de reset não deve persistir no Redis. */
 export async function enqueueResetPasswordEmail(to: string, token: string): Promise<void> {
-  const q = getEmailQueue();
-  if (!q) {
-    await sendResetPasswordEmail(to, token);
-    return;
-  }
-  try {
-    await q.add("reset", { type: "reset", to, token }, defaultJobOpts);
-  } catch (err) {
-    logger.warn({ err }, "[BULLMQ] enqueue reset falhou — envio directo");
-    await sendResetPasswordEmail(to, token);
-  }
+  await sendResetPasswordEmail(to, token);
 }
 
 /**

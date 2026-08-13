@@ -1,7 +1,7 @@
 import { db } from "../db";
 import { users, organizations, userRoles, roles, passwordResetTokens } from "../db/schema";
 import { eq, and, gt, isNull, sql } from "drizzle-orm";
-import { signToken, verifyTokenWithGrace } from "../middleware/auth";
+import { signToken, verifyTokenWithGrace, getFreshRoles } from "../middleware/auth";
 import type { AuthPayload } from "../middleware/auth";
 import { enqueueResetPasswordEmail } from "../jobs/queues";
 import { randomBytes, createHash } from "node:crypto";
@@ -84,6 +84,7 @@ export async function getMe(auth: AuthPayload) {
     with: { organization: true, sector: true },
   });
   if (!user) return null;
+  const roles = await getFreshRoles(auth.userId, auth.tenantId);
   return {
     id: user.id,
     email: user.email,
@@ -95,7 +96,7 @@ export async function getMe(auth: AuthPayload) {
     organization: user.organization?.name ?? null,
     organizationSlug: user.organization?.slug ?? null,
     notificationPreferences: user.notificationPreferences,
-    roles: auth.roles,
+    roles,
     createdAt: user.createdAt,
   };
 }
@@ -143,8 +144,24 @@ export async function refreshToken(token: string) {
   };
 }
 
-export async function forgotPassword(email: string) {
-  const user = await db.query.users.findFirst({ where: eq(users.email, email) });
+export async function forgotPassword(email: string, organizationSlug?: string) {
+  let user;
+  if (organizationSlug) {
+    const org = await db.query.organizations.findFirst({
+      where: eq(organizations.slug, organizationSlug),
+    });
+    if (!org) return { message: "Se o email existir, irá receber um código de redefinição." };
+    user = await db.query.users.findFirst({
+      where: and(eq(users.email, email), eq(users.tenantId, org.id)),
+    });
+  } else {
+    const matches = await db.query.users.findMany({ where: eq(users.email, email) });
+    if (matches.length > 1) {
+      // Resposta uniforme — não revelar ambiguidade de forma explorável
+      return { message: "Se o email existir, irá receber um código de redefinição." };
+    }
+    user = matches[0] ?? null;
+  }
 
   // Resposta uniforme: não revela se o email existe.
   if (!user || !user.isActive) return { message: "Se o email existir, irá receber um código de redefinição." };

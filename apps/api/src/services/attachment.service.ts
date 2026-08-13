@@ -6,6 +6,7 @@ import { eq, and, or, isNull, desc } from "drizzle-orm";
 import { verifyDocumentContainsIdentifier } from "./document.service";
 import { getSharedDocIds } from "./identifier.service";
 import type { AuthPayload } from "../middleware/auth";
+import { getFreshRoles } from "../middleware/auth";
 import { tryEnqueueThumbnail } from "../jobs/queues";
 
 const APP_ROOT = path.resolve(import.meta.dir, "../..");
@@ -16,6 +17,13 @@ const MAX_FILE_SIZE = Number(process.env.MAX_FILE_SIZE) || 52_428_800;
 
 const RESOLVED_UPLOAD_DIR = path.resolve(UPLOAD_DIR);
 const RESOLVED_THUMBNAIL_DIR = path.resolve(THUMBNAIL_DIR);
+
+/** True se `candidate` está exactamente no dir ou num subcaminho (evita `/uploads` vs `/uploads_evil`). */
+export function isPathInsideDir(candidate: string, dir: string): boolean {
+  const resolved = path.resolve(candidate);
+  const root = path.resolve(dir);
+  return resolved === root || resolved.startsWith(root + path.sep);
+}
 
 if (!fs.existsSync(RESOLVED_UPLOAD_DIR)) fs.mkdirSync(RESOLVED_UPLOAD_DIR, { recursive: true });
 if (!fs.existsSync(RESOLVED_THUMBNAIL_DIR)) fs.mkdirSync(RESOLVED_THUMBNAIL_DIR, { recursive: true });
@@ -33,11 +41,25 @@ export function generateThumbnailAsync(filePath: string, docId: string): void {
 
 /** Gera thumbnail e espera o processo terminar (usado pelo worker BullMQ). */
 export async function runThumbnailJob(filePath: string, docId: string): Promise<void> {
+  if (!isPathInsideDir(filePath, RESOLVED_UPLOAD_DIR)) {
+    console.error(`[THUMBNAIL] filePath fora de UPLOAD_DIR — recusado. docId=${docId}`);
+    return;
+  }
+  // UUID v4-ish: só caracteres seguros no nome do ficheiro de saída
+  if (!/^[0-9a-f-]{36}$/i.test(docId)) {
+    console.error(`[THUMBNAIL] docId inválido — recusado. docId=${docId}`);
+    return;
+  }
+
   const supported = [".pdf", ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".docx"];
   const ext = path.extname(filePath).toLowerCase();
   if (!supported.includes(ext)) return;
 
-  const thumbPath = path.join(THUMBNAIL_DIR, `${docId}.png`);
+  const thumbPath = path.join(RESOLVED_THUMBNAIL_DIR, `${docId}.png`);
+  if (!isPathInsideDir(thumbPath, RESOLVED_THUMBNAIL_DIR)) {
+    console.error(`[THUMBNAIL] thumbPath inválido — recusado. docId=${docId}`);
+    return;
+  }
   const scriptPath = path.resolve(THUMBNAIL_SCRIPT);
 
   if (!fs.existsSync(scriptPath)) {
@@ -45,7 +67,7 @@ export async function runThumbnailJob(filePath: string, docId: string): Promise<
     return;
   }
 
-  const child = Bun.spawn(["python3", scriptPath, filePath, thumbPath], {
+  const child = Bun.spawn(["python3", scriptPath, path.resolve(filePath), thumbPath], {
     stdio: ["ignore", "ignore", "pipe"],
   });
 
@@ -95,9 +117,12 @@ async function writeUploadFile(file: File, identifier: string): Promise<{ finalP
   const safeName = sanitizeFilename(file.name);
   const arrayBuffer = await file.arrayBuffer();
   const buffer = Buffer.from(arrayBuffer);
-  const ext = path.extname(file.name) || "";
-  const finalName = `${identifier.replace(/-/g, "_")}_${Date.now()}${ext}`;
-  const finalPath = path.join(UPLOAD_DIR, finalName);
+  const ext = path.extname(safeName) || "";
+  const finalName = `${identifier.replace(/[^a-zA-Z0-9_-]/g, "_")}_${Date.now()}${ext}`;
+  const finalPath = path.join(RESOLVED_UPLOAD_DIR, finalName);
+  if (!isPathInsideDir(finalPath, RESOLVED_UPLOAD_DIR)) {
+    throw new Error("Caminho de upload inválido.");
+  }
   const fd = fs.openSync(finalPath, "wx");
   fs.writeSync(fd, buffer);
   fs.closeSync(fd);
@@ -115,13 +140,27 @@ function hydrateDocument(
     tags: parseDocumentTags(tagsRaw),
     filename: current?.filename ?? null,
     mimeType: current?.mimeType ?? null,
-    filePath: current?.filePath ?? null,
+    // Nunca expor caminho absoluto do filesystem ao cliente
     fileSize: current?.fileSize ?? null,
     extractedText: current?.extractedText ?? null,
     uploadSource: current?.uploadSource ?? null,
     currentVersion: current?.version ?? null,
     ...extra,
   };
+}
+
+/**
+ * Escrita (attach/version): criador do identificador, mesmo sector, ou ORG_ADMIN.
+ * Partilha só concede leitura — não permite versionar/anexar.
+ */
+export async function canWriteIdentifier(
+  auth: AuthPayload,
+  idRow: { sectorId: string | null; createdBy?: string | null },
+): Promise<boolean> {
+  if (idRow.createdBy && idRow.createdBy === auth.userId) return true;
+  if (idRow.sectorId != null && idRow.sectorId === auth.sectorId) return true;
+  const roles = await getFreshRoles(auth.userId, auth.tenantId);
+  return roles.includes("ORG_ADMIN");
 }
 
 async function getCurrentVersion(tx: DB, documentId: string) {
@@ -145,6 +184,9 @@ export async function attachDocument(
   });
   if (!idRow) throw new Error(`Identificador '${identifier}' não encontrado.`);
   if (idRow.status === "cancelled") throw new Error("Não é possível associar a um identificador cancelado.");
+  if (!(await canWriteIdentifier(auth, idRow))) {
+    throw new Error("Sem permissão para associar documentos a este identificador.");
+  }
 
   const existingPrimary = pickPrimaryDocument(idRow.documents);
   if (existingPrimary || idRow.status === "attached") {
@@ -247,6 +289,9 @@ export async function attachAttachment(
   });
   if (!idRow) throw new Error(`Identificador '${identifier}' não encontrado.`);
   if (idRow.status === "cancelled") throw new Error("Não é possível associar a um identificador cancelado.");
+  if (!(await canWriteIdentifier(auth, idRow))) {
+    throw new Error("Sem permissão para adicionar anexos a este identificador.");
+  }
 
   const primary = pickPrimaryDocument(idRow.documents);
   if (!primary) throw new Error("O identificador ainda não tem documento principal. Associe o documento principal primeiro.");
@@ -311,6 +356,9 @@ export async function createDocumentVersion(
   if (!doc) throw new Error("Documento não encontrado.");
   if (!doc.identifier) throw new Error("Identificador do documento não encontrado.");
   if (doc.identifier.status === "cancelled") throw new Error("Não é possível versionar um documento de identificador cancelado.");
+  if (!(await canWriteIdentifier(auth, doc.identifier))) {
+    throw new Error("Sem permissão para criar versões deste documento.");
+  }
 
   const identifier = doc.identifier.identifier;
   const { finalPath, safeName } = await writeUploadFile(file, identifier);
@@ -516,7 +564,7 @@ export async function downloadDocument(
   if (!allowed) return { error: "NOT_FOUND" };
 
   const resolvedPath = path.resolve(version.filePath);
-  if (!resolvedPath.startsWith(RESOLVED_UPLOAD_DIR)) {
+  if (!isPathInsideDir(resolvedPath, RESOLVED_UPLOAD_DIR)) {
     return { error: "NOT_FOUND" };
   }
 
@@ -535,11 +583,12 @@ export async function updateDocumentTags(
   });
   if (!doc) return { error: "NOT_FOUND" as const };
 
-  const { allowed, restricted } = await canAccessDocument(
-    tx, auth, doc.identifier?.sectorId ?? null, doc.identifier?.visibility ?? null, doc.id, doc.uploadedBy,
-  );
-  if (!allowed && !restricted) return { error: "NOT_FOUND" as const };
-  if (restricted) return { error: "FORBIDDEN" as const };
+  if (!(await canWriteIdentifier(auth, {
+    sectorId: doc.identifier?.sectorId ?? null,
+    createdBy: doc.identifier?.createdBy ?? doc.uploadedBy,
+  }))) {
+    return { error: "FORBIDDEN" as const };
+  }
 
   const serialized = serializeDocumentTags(tags);
   await tx.update(documents).set({ tags: serialized }).where(eq(documents.id, docId));

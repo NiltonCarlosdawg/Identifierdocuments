@@ -59,14 +59,17 @@ export const authModule = new Elysia({ prefix: "/auth" })
       return { error: { code: "RATE_LIMITED", message: "Muitas tentativas. Tente novamente mais tarde." } };
     }
     try {
-      const result = await forgotPassword(body.email);
+      const result = await forgotPassword(body.email, body.organizationSlug);
       return { data: result };
     } catch (err: any) {
       set.status = 500;
       return { error: { code: "INTERNAL_ERROR", message: "Ocorreu um erro ao processar o pedido." } };
     }
   }, {
-    body: t.Object({ email: t.String({ format: "email" }) }),
+    body: t.Object({
+      email: t.String({ format: "email" }),
+      organizationSlug: t.Optional(t.String()),
+    }),
     detail: { summary: "Pedir código de redefinição de password", tags: ["Autenticação"] },
   })
 

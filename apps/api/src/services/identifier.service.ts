@@ -2,6 +2,7 @@ import type { DB } from "../db";
 import { identifiers, categories, documents, documentShares, auditLogs, organizations, sectors, idempotencyRecords, documentVersions } from "../db/schema";
 import { eq, and, or, desc, sql, isNull } from "drizzle-orm";
 import type { AuthPayload } from "../middleware/auth";
+import { getFreshRoles } from "../middleware/auth";
 
 function buildIdentifier(orgPrefix: string, catPrefix: string, year: number, month: number, day: number, seq: number): string {
   const mmdd = `${String(month).padStart(2, "0")}${String(day).padStart(2, "0")}`;
@@ -57,6 +58,7 @@ function checkVisibility(
   },
   auth: AuthPayload,
   sharedDocIds: Set<string>,
+  freshRoles: string[],
 ): VisibilityResult {
   if (row.createdBy && row.createdBy === auth.userId) return { visible: true, restricted: false };
 
@@ -69,7 +71,7 @@ function checkVisibility(
   const docs = row.documents ?? (row.document ? [row.document] : []);
   if (docs.some((d) => sharedDocIds.has(d.id))) return { visible: true, restricted: false };
 
-  if (auth.roles.includes("ORG_ADMIN")) return { visible: true, restricted: true };
+  if (freshRoles.includes("ORG_ADMIN")) return { visible: true, restricted: true };
 
   return { visible: false, restricted: false };
 }
@@ -217,14 +219,15 @@ export async function listIdentifiers(tx: DB, auth: AuthPayload, filters: {
   });
 
   const sharedDocIds = await getSharedDocIds(tx, auth);
+  const freshRoles = await getFreshRoles(auth.userId, auth.tenantId);
 
   const filtered = allRows.filter(row => {
-    const { visible } = checkVisibility(row, auth, sharedDocIds);
+    const { visible } = checkVisibility(row, auth, sharedDocIds, freshRoles);
     return visible;
   });
 
   const data = filtered.map(row => {
-    const { restricted } = checkVisibility(row, auth, sharedDocIds);
+    const { restricted } = checkVisibility(row, auth, sharedDocIds, freshRoles);
     return { ...row, document: hydratePrimaryDocument(row.documents), restricted };
   });
 
@@ -253,7 +256,8 @@ export async function getIdentifier(tx: DB, auth: AuthPayload, identifierStr: st
   if (!row) return null;
 
   const sharedDocIds = await getSharedDocIds(tx, auth);
-  const { visible, restricted } = checkVisibility(row, auth, sharedDocIds);
+  const freshRoles = await getFreshRoles(auth.userId, auth.tenantId);
+  const { visible, restricted } = checkVisibility(row, auth, sharedDocIds, freshRoles);
   if (!visible) return null;
 
   await tx.insert(auditLogs).values({

@@ -22,13 +22,18 @@ import { logger } from "./lib/logger";
 import { startWorkers } from "./jobs/workers";
 
 const requestTimings = new WeakMap<Request, number>();
+const PORT = Number(process.env.PORT) || 3000;
+const enableSwagger = process.env.ENABLE_SWAGGER === "true"
+  || process.env.NODE_ENV !== "production";
 
 const app = new Elysia()
   .use(cors({
     origin: ["http://localhost:1420", "tauri://localhost", "https://tauri.localhost"],
     credentials: true,
-  }))
-  .use(swagger({
+  }));
+
+if (enableSwagger) {
+  app.use(swagger({
     documentation: {
       info: {
         title: "Verano Labs — DocID API",
@@ -52,10 +57,13 @@ const app = new Elysia()
         { name: "Notificações", description: "SSE em tempo real" },
         { name: "Classificador", description: "Classificação por IA (Groq)" },
       ],
-      servers: [{ url: "http://localhost:3000", description: "Desenvolvimento" }],
+      servers: [{ url: `http://localhost:${PORT}`, description: "Desenvolvimento" }],
     },
     path: "/docs",
-  }))
+  }));
+}
+
+app
   .use(authMiddleware)
   .use(tenantMiddleware)
   .onRequest(({ request }) => {
@@ -76,7 +84,7 @@ const app = new Elysia()
     name: "Verano Labs — DocID API",
     version: "2.0.0",
     status: "online",
-    docs: "/docs",
+    docs: enableSwagger ? "/docs" : undefined,
   }), { detail: { summary: "Health check", tags: ["Sistema"] } })
   .get("/health", () => ({
     status: "healthy",
@@ -123,9 +131,9 @@ const app = new Elysia()
     set.status = 500;
     return { error: { code: "INTERNAL_ERROR", message: "Erro interno do servidor." } };
   })
-  .listen(3000);
+  .listen(PORT);
 
-logger.info("DocID API arrancou em http://localhost:3000");
+logger.info(`DocID API arrancou em http://localhost:${PORT}`);
 
 void startWorkers().catch((err) => {
   logger.warn({ err }, "[BULLMQ] Falha ao arrancar workers");
