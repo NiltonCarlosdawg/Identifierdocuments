@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
-import { api, sync } from "../../infrastructure/di/container";
+import { useSearchParams } from "react-router-dom";
+import { api, sync, watcher } from "../../infrastructure/di/container";
 import { PageHeader, Modal, StatusChip, EmptyState, Pagination, OfflineNotice } from "../components/docid-ui";
 import { useOfflineCache } from "../hooks/useOfflineCache";
 import { mapError, isNetworkError } from "../../shared/errors/mapError";
@@ -13,9 +14,12 @@ import { FileText, Upload, Download, Share2, Search } from "lucide-react";
 interface DocRow { id: string; filename: string; fileSize: number; mimeType: string; status: string; createdAt: string; fileUrl: string; thumbnailUrl: string; identifier: { id: string; identifier: string; categoryId: string; categoryName: string } | null; uploadedBy: string | null; }
 
 export default function Documents() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const attachPath = searchParams.get("attachPath");
+  const attachIdentifier = searchParams.get("identifier") || "";
   const [rows, setRows] = useState<DocRow[]>([]);
   const [meta, setMeta] = useState({ total: 0, page: 1, limit: 20 });
-  const [showUpload, setShowUpload] = useState(false);
+  const [showUpload, setShowUpload] = useState(!!attachPath);
   const [selected, setSelected] = useState<DocRow | null>(null);
   const [search, setSearch] = useState("");
   const [downloadError, setDownloadError] = useState("");
@@ -28,6 +32,32 @@ export default function Documents() {
     },
     onData: result => { setRows(result.data); setMeta(result.meta); },
   });
+
+  useEffect(() => {
+    if (attachPath) setShowUpload(true);
+  }, [attachPath]);
+
+  const clearAttachParams = () => {
+    if (!attachPath && !attachIdentifier) return;
+    const next = new URLSearchParams(searchParams);
+    next.delete("attachPath");
+    next.delete("identifier");
+    setSearchParams(next, { replace: true });
+  };
+
+  const closeUpload = () => {
+    setShowUpload(false);
+    clearAttachParams();
+  };
+
+  const finishUpload = async () => {
+    if (attachPath && watcher.isAvailable()) {
+      await watcher.setFileStatus(attachPath, "added").catch(() => {});
+    }
+    setShowUpload(false);
+    clearAttachParams();
+    refresh();
+  };
 
   const handleOpen = async (row: DocRow) => {
     setDownloadError("");
@@ -76,43 +106,55 @@ export default function Documents() {
         <Pagination totalLabel={`${meta.total} documento(s)`} />
       </div>
 
-      {showUpload && <UploadModal onClose={() => setShowUpload(false)} onDone={() => { setShowUpload(false); refresh(); }} />}
+      {showUpload && <UploadModal onClose={closeUpload} onDone={finishUpload} initialPath={attachPath || ""} initialIdentifier={attachIdentifier} />}
       {selected && <DetailModal row={selected} onClose={() => setSelected(null)} onDone={() => refresh()} onDownload={() => handleOpen(selected)} />}
     </div>
   );
 }
 
-function UploadModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+function UploadModal({ onClose, onDone, initialPath = "", initialIdentifier = "" }: { onClose: () => void; onDone: () => void | Promise<void>; initialPath?: string; initialIdentifier?: string }) {
   const isTauri = sync.isAvailable();
-  const [identifier, setIdentifier] = useState("");
+  const [identifier, setIdentifier] = useState(initialIdentifier);
   const [file, setFile] = useState<File | null>(null);
-  const [tauriFilePath, setTauriFilePath] = useState("");
-  const [tauriFilename, setTauriFilename] = useState("");
+  const [tauriFilePath, setTauriFilePath] = useState(initialPath);
+  const [tauriFilename, setTauriFilename] = useState(() => initialPath.split("/").pop() || initialPath.split("\\").pop() || "");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [queued, setQueued] = useState(false);
   const [classifierText, setClassifierText] = useState("");
   const [classifierResult, setClassifierResult] = useState<ClassifierResult | null>(null);
-  const [feedbackSent, setFeedbackSent] = useState(false);
+  const [feedbackSent, setFeedbackSent] = useState(!!initialIdentifier);
   const [extracting, setExtracting] = useState(false);
+
+  const applyTauriPath = async (path: string) => {
+    setTauriFilePath(path);
+    setTauriFilename(path.split("/").pop() || path.split("\\").pop() || "documento");
+    setClassifierText(""); setClassifierResult(null);
+    if (!initialIdentifier) setFeedbackSent(false);
+    setExtracting(true);
+    const { invoke } = await import("@tauri-apps/api/core");
+    const text = await invoke<string>("extract_text_command", { path });
+    setClassifierText(text.slice(0, 4000));
+    setExtracting(false);
+  };
+
+  useEffect(() => {
+    if (!isTauri || !initialPath) return;
+    applyTauriPath(initialPath).catch((err: unknown) => {
+      setExtracting(false);
+      setError(mapError(err, "Erro ao seleccionar ou extrair ficheiro."));
+    });
+  }, []);
 
   const handleTauriSelect = async () => {
     try {
       const { open } = await import("@tauri-apps/plugin-dialog");
       const selected = await open({
         multiple: false,
-        filters: [{ name: "Documentos", extensions: ["pdf", "txt", "md", "csv"] }],
+        filters: [{ name: "Documentos", extensions: ["pdf", "txt", "md", "csv", "docx"] }],
       });
       if (!selected) return;
-      const path = selected as string;
-      setTauriFilePath(path);
-      setTauriFilename(path.split("/").pop() || path.split("\\").pop() || "documento");
-      setClassifierText(""); setClassifierResult(null); setFeedbackSent(false);
-      setExtracting(true);
-      const { invoke } = await import("@tauri-apps/api/core");
-      const text = await invoke<string>("extract_text_command", { path });
-      setClassifierText(text.slice(0, 4000));
-      setExtracting(false);
+      await applyTauriPath(selected as string);
     } catch (err: any) {
       setExtracting(false);
       setError(mapError(err, "Erro ao seleccionar ou extrair ficheiro."));
@@ -157,11 +199,14 @@ function UploadModal({ onClose, onDone }: { onClose: () => void; onDone: () => v
           const item = await sync.enqueueFromPath(tauriFilePath, identifier.trim(), user.tenantId, user.id);
           if (!item) throw err;
           useQueueStore.getState().refresh().catch(() => {});
+          if (initialPath && watcher.isAvailable()) {
+            await watcher.setFileStatus(initialPath, "added").catch(() => {});
+          }
           setQueued(true);
           setLoading(false);
           return;
         }
-        onDone();
+        await onDone();
         return;
       }
       if (file) {
@@ -170,7 +215,7 @@ function UploadModal({ onClose, onDone }: { onClose: () => void; onDone: () => v
         fd.append("file", file);
         await api.post("/documents/attach", fd);
       }
-      onDone();
+      await onDone();
     } catch (err: any) { setError(mapError(err, "Erro ao anexar documento.")); } finally { setLoading(false); }
   };
 

@@ -4,8 +4,9 @@
 > Critério de prioridade: P0 = bloqueante | P1 = essencial | P2 = importante | P3 = nice-to-have
 >
 > **Estado: Fases 1-4 completas e validadas E2E. Fase 5 maioritariamente completa
-> (falta preview de PDF/multi-página no scanner, cache do classificador e a UI
-> detalhada de 3-opções do watcher). Fase 6 — Geração Offline de Identificadores
+> (falta só integração com impressoras). Preview PDF/multi-página no scanner,
+> extracção `.docx` e cache Redis do classificador concluídos.
+> Fase 6 — Geração Offline de Identificadores
 > — completa (backend, motor de sync nativo, renovação de lease, UI e registo de
 > dispositivos). Fase 7 — Cache Offline de Leitura — completa (leitura de
 > listagens offline a partir de cache encriptada). Fase 8 — Seed Offline —
@@ -210,32 +211,34 @@ aplicadas posteriormente a itens aqui marcados como completos)*
   (`walk_files`) no arranque do watcher para cobrir ficheiros já presentes
   na pasta.
 - [x] **P0** Extracção de texto (Rust): **`pdf-extract`** para PDF, leitura
-  directa para TXT/MD/CSV. `.docx` continua pendente (decisão entre
-  `docx-rs` ou `quick-xml`, documentada no código).
+  directa para TXT/MD/CSV, **`zip` + `<w:t>`** para `.docx` (watcher e
+  `extract_text_command`)
 - [x] **P0** Regex de detecção de identificador — formato final:
   `[A-Z]{1,6}-[A-Z]{2,5}-\d{4}-\d{4}-\d{3}` (o limite inferior do prefixo
   da organização foi corrigido de 2 para 1 carácter, para cobrir prefixos
   curtos permitidos pelo schema).
 - [x] **P1** Deduplicação de notificações — `watcher_seen.json` (path + mtime,
   escrita atómica) evita reprocessar o mesmo ficheiro a cada arranque da app.
-- [ ] **P0** UI com as 3 opções por ficheiro detectado (Adicionar agora /
-  mais tarde / Não pertence) — **parcial**: os eventos backend já
-  distinguem `identifier_found` de `file_detected`, e a aba "Pastas
-  Vigiladas" mostra um contador; falta a lista detalhada de ficheiros
-  detectados com as 3 acções específicas.
+- [x] **P0** UI com as 3 opções por ficheiro detectado (Adicionar agora /
+  mais tarde / Não pertence) — lista persistida em `watcher_files`; com
+  identificador anexa já (`attach_document_native` / fila offline); sem
+  identificador abre Documentos com o ficheiro pré-seleccionado
 - [x] **P1** UI de configuração de pastas monitorizadas (`Settings` → "Pastas
   Vigiladas": listar, adicionar via diálogo nativo, remover, iniciar/parar,
   estado sincronizado com o backend via `is_watcher_running`)
-- [ ] **P1** Lista de ficheiros "adicionados mais tarde" (lembretes)
-- [ ] **P1** Relatório de detectados vs ignorados (além do contador simples)
+- [x] **P1** Lista de ficheiros "adicionados mais tarde" (lembretes) —
+  persistidos no SQLite local; sobrevivem a reinícios; acções Adicionar agora / Dispensar
+- [x] **P1** Relatório de detectados vs ignorados (contagens por status/kind
+  no WatcherTab)
 
 ### 5.2 — Integração Scanner
 - [x] **P0** `list_scanners`, `scan_document`, opções de resolução/modo/formato
 - [x] **P1** UI completa (`Scanner.tsx`): selecção de dispositivo, opções,
   digitalizar, download do resultado
-- [x] **P1** Pré-visualização — **só para PNG**; PDF ainda sem preview
-- [ ] **P1** Multi-página — adiado deliberadamente (depende de viabilidade
-  de uma crate de renderização PDF→PNG cross-platform, ainda por confirmar)
+- [x] **P1** Pré-visualização — PNG via `<img>`; PDF via `<object>`/blob URL
+  com fallback para download (WebKit/Linux pode não renderizar PDF inline)
+- [x] **P1** Multi-página — cada digitalização acrescenta uma página; navegação,
+  remover página, descarregar actual ou todas; mudar o formato limpa as páginas
 - [ ] **P2** Integração com impressoras
 
 ### 5.3 — Classificação por IA
@@ -247,9 +250,9 @@ aplicadas posteriormente a itens aqui marcados como completos)*
 - [x] **P1** Registo de feedback (`POST /classifier/feedback`, tabela
   `classifier_feedback`, com validação de categoria e de posse do
   documento pelo tenant)
-- [ ] **P2** Cache Redis de classificações — **adiado**; se implementado,
-  a chave tem de incluir `tenantId` (`classifier:{tenantId}:hash:{sha256}`)
-  para evitar partilha de cache entre organizações diferentes
+- [x] **P2** Cache Redis de classificações — chave
+  `classifier:{tenantId}:hash:{sha256}` (texto+filename, TTL 24h); falha de
+  Redis não bloqueia o pedido; resultados `UNKNOWN` não são cacheados
 
 ### 5.4 — Onboarding de Organizações
 - [x] **P1** Fluxo multi-passo implementado (`Onboarding.tsx`): dados da
@@ -686,7 +689,7 @@ aplicadas posteriormente a itens aqui marcados como completos)*
 | **2** | App Tauri (online) | ✅ Completo |
 | **3** | Offline sync | ✅ Completo (incl. bug crítico de path corrigido, testes) |
 | **4** | Partilha + Aprovações + SSE | ✅ Completo |
-| **5** | Scanner + IA + File Watcher + Settings | 🔄 Quase completo — falta preview PDF/multi-página no scanner, cache do classificador, e a UI detalhada de 3-opções do watcher |
+| **5** | Scanner + IA + File Watcher + Settings | 🔄 Quase completo — falta integração com impressoras |
 | **5.6** | Correcções de segurança (hardening) | ✅ Completo — RLS, advisory lock, roles frescas, tratamento de erro uniforme, suite de testes de carga |
 | **6** | Geração offline de identificadores | ✅ Completo — backend (M0–M2), motor de sync nativo + testes (M3), UI (M4 + M4.5), registo de dispositivos (M5); classificação legal de categorias pendente de confirmação profissional |
 | **7** | Cache offline de leitura | ✅ Completo — `OfflineCache` encriptado (AES-GCM), hook nas 8 páginas, `mapError`, limpeza no logout; resolve o P0 de ecrãs vazios offline |

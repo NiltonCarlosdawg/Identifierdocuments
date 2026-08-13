@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 const MODEL = "llama-3.3-70b-versatile";
 
@@ -83,6 +85,33 @@ const VALID_CATEGORY_IDS = new Set([
   "ATA", "MEM", "CIR", "REQ", "POL", "PRO", "DEL",
   "ESP", "MAN", "REP", "TAS", "PLN",
 ]);
+
+export const CLASSIFIER_CACHE_TTL_SECONDS = 24 * 60 * 60;
+
+export function classifierCacheKey(tenantId: string, text: string, filename?: string): string {
+  const payload = `${filename ?? ""}\n${text.slice(0, 4000)}`;
+  const hash = createHash("sha256").update(payload).digest("hex");
+  return `classifier:${tenantId}:hash:${hash}`;
+}
+
+export function cacheableClassification(result: ClassificationResult): boolean {
+  return result.categoryId !== "UNKNOWN" && result.confidence > 0;
+}
+
+export function parseCachedClassification(raw: string): ClassificationResult | null {
+  try {
+    const parsed = JSON.parse(raw) as ClassificationResult;
+    if (typeof parsed?.categoryId !== "string" || parsed.categoryId === "UNKNOWN") return null;
+    if (typeof parsed.confidence !== "number") return null;
+    return {
+      categoryId: parsed.categoryId,
+      confidence: parsed.confidence,
+      reasoning: typeof parsed.reasoning === "string" ? parsed.reasoning : "",
+    };
+  } catch {
+    return null;
+  }
+}
 
 export async function suggestCategory(text: string, filename?: string): Promise<ClassificationResult> {
   const apiKey = process.env.GROQ_API_KEY;

@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAuthStore } from "../stores/authStore";
 import { useAppConfigStore } from "../stores/configStore";
 import { useWatcherStore } from "../stores/watcherStore";
@@ -8,6 +9,7 @@ import { useOfflineCache } from "../hooks/useOfflineCache";
 import { mapError } from "../../shared/errors/mapError";
 import { sync, api } from "../../infrastructure/di/container";
 import { sendNativeNotification } from "../../shared/helpers/notifications";
+import type { WatcherFileRow } from "../../domain/entities/Watcher";
 import { Server, Sun, Moon, Save, RotateCcw, FolderPlus, Trash2, Play, Square, Eye, RefreshCw, Building2, Bell, Download, Smartphone, AlertTriangle } from "lucide-react";
 
 export default function Settings() {
@@ -576,7 +578,10 @@ function NotificationsTab() {
 }
 
 function WatcherTab() {
-  const { folders, running, loading, error, detectedCount, loadFolders, addFolder, removeFolder, start, stop, bumpDetected, clearDetected } = useWatcherStore();
+  const navigate = useNavigate();
+  const { folders, running, loading, error, detectedCount, files, reminders, report, loadFolders, addFolder, removeFolder, start, stop, refreshFiles, refreshReminders, refreshReport, setFileStatus, attachDetectedFile, bumpDetected } = useWatcherStore();
+  const [busyPath, setBusyPath] = useState<string | null>(null);
+  const [actionInfo, setActionInfo] = useState("");
 
   useEffect(() => { loadFolders(); }, [loadFolders]);
 
@@ -589,16 +594,21 @@ function WatcherTab() {
         bumpDetected();
         const p = e.payload as { path?: string };
         sendNativeNotification("Documento detectado", `Ficheiro novo em ${p?.path ?? "pasta vigiada"}`);
+        refreshFiles(); refreshReport();
       });
       const f2 = await listen("watcher:identifier_found", (e) => {
         bumpDetected();
         const p = e.payload as { path?: string; identifier?: string };
         sendNativeNotification("Identificador encontrado", `O documento ${p?.path ?? ""} contém ${p?.identifier ?? "um identificador"}`);
+        refreshFiles(); refreshReport();
       });
-      unlisteners = [f1, f2];
+      const f3 = await listen("watcher:status_changed", () => {
+        refreshFiles(); refreshReminders(); refreshReport();
+      });
+      unlisteners = [f1, f2, f3];
     })();
     return () => unlisteners.forEach(f => f());
-  }, [bumpDetected]);
+  }, [bumpDetected, refreshFiles, refreshReminders, refreshReport]);
 
   const handleAddFolder = async () => {
     try {
@@ -608,9 +618,41 @@ function WatcherTab() {
     } catch {}
   };
 
+  const reportCards = report ? [
+    { label: "Detectados", value: report.detected, tone: "text-docid-primary-soft" },
+    { label: "Com identificador", value: report.identifier_found, tone: "text-docid-secondary" },
+    { label: "Lembretes", value: report.pending, tone: "text-docid-tertiary" },
+    { label: "Adicionados", value: report.added, tone: "text-docid-success" },
+    { label: "Ignorados", value: report.ignored, tone: "text-docid-muted" },
+    { label: "Sem identificador", value: report.file_detected, tone: "text-docid-muted" },
+  ] : [];
+
+  const detectedFiles = files.filter(f => f.status === "detected");
+  const fileLabel = (p: string) => decodeURIComponent(p.split("/").pop() || p);
+
+  const handleAddNow = async (f: WatcherFileRow) => {
+    setActionInfo("");
+    if (!f.identifier) {
+      navigate(`/documentos?attachPath=${encodeURIComponent(f.path)}`);
+      return;
+    }
+    setBusyPath(f.path);
+    try {
+      const result = await attachDetectedFile(f.path, f.identifier);
+      setActionInfo(result === "queued"
+        ? "Guardado na fila offline — será enviado quando houver ligação."
+        : "Documento anexado.");
+    } catch {
+      // o store já preenche `error`
+    } finally {
+      setBusyPath(null);
+    }
+  };
+
   return (
-    <div className="space-y-6 max-w-xl">
+    <div className="space-y-6 max-w-2xl">
       {error && <div className="rounded-lg border border-docid-error/30 bg-docid-error/10 p-3 text-sm text-docid-error">{error}</div>}
+      {actionInfo && <div className="rounded-lg border border-docid-secondary/30 bg-docid-secondary/10 p-3 text-sm text-docid-secondary">{actionInfo}</div>}
       <div className="flex items-center gap-3">
         {running ? (
           <button onClick={stop} className="docid-button-secondary"><Square className="h-4 w-4" /> Parar</button>
@@ -625,6 +667,18 @@ function WatcherTab() {
           </span>
         )}
       </div>
+
+      {report && (
+        <div className="grid grid-cols-3 gap-2">
+          {reportCards.map(c => (
+            <div key={c.label} className="rounded-lg bg-docid-surface-low p-3 text-center">
+              <p className={`text-xl font-bold ${c.tone}`}>{c.value}</p>
+              <p className="text-xs text-docid-muted">{c.label}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className="docid-panel overflow-hidden">
         {loading ? (
           <div className="flex items-center justify-center py-12 text-sm text-docid-muted">A carregar...</div>
@@ -645,7 +699,49 @@ function WatcherTab() {
           </ul>
         )}
       </div>
-      <p className="text-xs text-docid-muted">Os ficheiros detectados podem ser anexados a identificadores na página Documentos.</p>
+
+      {detectedFiles.length > 0 && (
+        <div>
+          <h3 className="mb-2 text-sm font-semibold text-docid-text">Ficheiros detectados</h3>
+          <div className="docid-panel divide-y divide-docid-border">
+            {detectedFiles.map(f => (
+              <div key={f.path} className="flex items-center justify-between gap-3 px-4 py-3">
+                <div className="min-w-0">
+                  <p className="truncate text-sm text-docid-text" title={f.path}>{fileLabel(f.path)}</p>
+                  <p className="text-xs text-docid-muted">{f.kind === "identifier_found" ? `Identificador: ${f.identifier}` : "Sem identificador encontrado"}</p>
+                </div>
+                <div className="flex shrink-0 flex-wrap justify-end gap-2">
+                  <button onClick={() => handleAddNow(f)} disabled={busyPath === f.path} className="docid-button-primary text-xs py-1.5">{busyPath === f.path ? "A anexar..." : "Adicionar agora"}</button>
+                  <button onClick={() => setFileStatus(f.path, "pending")} disabled={!!busyPath} className="docid-button-secondary text-xs py-1.5">Mais tarde</button>
+                  <button onClick={() => setFileStatus(f.path, "ignored")} disabled={!!busyPath} className="docid-button-secondary text-xs py-1.5 text-docid-error">Não pertence</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {reminders.length > 0 && (
+        <div>
+          <h3 className="mb-2 text-sm font-semibold text-docid-text">Lembretes <span className="font-normal text-docid-muted">({reminders.length})</span></h3>
+          <div className="docid-panel divide-y divide-docid-border">
+            {reminders.map(f => (
+              <div key={f.path} className="flex items-center justify-between gap-3 px-4 py-3">
+                <div className="min-w-0">
+                  <p className="truncate text-sm text-docid-text" title={f.path}>{fileLabel(f.path)}</p>
+                  <p className="text-xs text-docid-muted">{f.identifier ? `Identificador: ${f.identifier}` : "Sem identificador encontrado"}</p>
+                </div>
+                <div className="flex shrink-0 flex-wrap justify-end gap-2">
+                  <button onClick={() => handleAddNow(f)} disabled={busyPath === f.path} className="docid-button-primary text-xs py-1.5">{busyPath === f.path ? "A anexar..." : "Adicionar agora"}</button>
+                  <button onClick={() => setFileStatus(f.path, "ignored")} disabled={!!busyPath} className="docid-button-secondary text-xs py-1.5 text-docid-error">Dispensar</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <p className="text-xs text-docid-muted">Com identificador, «Adicionar agora» anexa já (ou enfileira se estiver offline). Sem identificador, abre Documentos para completar o anexo.</p>
     </div>
   );
 }

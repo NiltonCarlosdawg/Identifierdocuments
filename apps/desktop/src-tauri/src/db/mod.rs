@@ -215,6 +215,26 @@ fn init_schema(conn: &Connection) -> Result<()> {
 
         CREATE INDEX IF NOT EXISTS idx_write_status
             ON local_write_queue(status);
+
+        -- ============================================================
+        -- Tabela 8: Ficheiros detectados pelo watcher
+        -- (registo persistente — lembretes de adicionar mais tarde,
+        --  estado detectado/pedente/adicionado/ignorado)
+        -- ============================================================
+        CREATE TABLE IF NOT EXISTS watcher_files (
+            path         TEXT PRIMARY KEY,
+            mtime        INTEGER NOT NULL,
+            status       TEXT NOT NULL DEFAULT 'detected'
+                         CHECK (status IN ('detected','pending','added','ignored')),
+            kind         TEXT NOT NULL
+                         CHECK (kind IN ('identifier_found','file_detected')),
+            identifier   TEXT,
+            created_at   TEXT NOT NULL,
+            updated_at   TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_watcher_status
+            ON watcher_files(status, updated_at);
         ",
     )?;
     Ok(())

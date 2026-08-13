@@ -1,7 +1,8 @@
 import { Elysia, t } from "elysia";
 import { requireAuth } from "../middleware/auth";
 import { checkRateLimit } from "../middleware/rateLimit";
-import { suggestCategory } from "../services/classifier.service";
+import { suggestCategory, classifierCacheKey, cacheableClassification, parseCachedClassification, CLASSIFIER_CACHE_TTL_SECONDS } from "../services/classifier.service";
+import { cacheGet, cacheSet } from "../lib/redis";
 import { db } from "../db";
 import { categories, classifierFeedback, documents } from "../db/schema";
 import { eq, and } from "drizzle-orm";
@@ -15,12 +16,25 @@ export const classifierModule = new Elysia({ prefix: "/classifier" })
     try {
       return await withTenant(tenantId, async (tx) => {
         try {
-          const allowed = await checkRateLimit(`classifier:${auth!.userId}`, 10, 60_000);
-          if (!allowed) {
-            set.status = 429;
+          const cacheKey = classifierCacheKey(tenantId, body.text, body.filename);
+          const cachedRaw = await cacheGet(cacheKey);
+          const cached = cachedRaw ? parseCachedClassification(cachedRaw) : null;
+          const result = cached ?? await (async () => {
+            const allowed = await checkRateLimit(`classifier:${auth!.userId}`, 10, 60_000);
+            if (!allowed) {
+              set.status = 429;
+              return null;
+            }
+            const fresh = await suggestCategory(body.text, body.filename);
+            if (cacheableClassification(fresh)) {
+              await cacheSet(cacheKey, JSON.stringify(fresh), CLASSIFIER_CACHE_TTL_SECONDS);
+            }
+            return fresh;
+          })();
+
+          if (!result) {
             return { error: { code: "RATE_LIMITED", message: "Muitos pedidos ao classificador. Tente novamente dentro de 1 minuto." } };
           }
-          const result = await suggestCategory(body.text, body.filename);
 
           if (result.categoryId === "UNKNOWN") {
             return { data: { ...result, availableCategories: await tx.query.categories.findMany() } };

@@ -1,30 +1,6 @@
-import { Redis } from "ioredis";
+import { getRedis } from "../lib/redis";
 
 const IS_TEST = process.env.NODE_ENV === "test";
-
-let redis: Redis | null = null;
-let redisUnavailable = false;
-
-function getRedis(): Redis | null {
-  if (!redis && !redisUnavailable) {
-    try {
-      redis = new Redis(process.env.REDIS_URL || "redis://localhost:6379", {
-        maxRetriesPerRequest: null,
-        enableOfflineQueue: false,
-        lazyConnect: true,
-      });
-      redis.connect().catch((err) => {
-        console.warn("[RATELIMIT] Redis connection failed — rate limiting disabled:", (err as Error)?.message ?? err);
-        redis = null;
-        redisUnavailable = true;
-      });
-    } catch (err) {
-      console.warn("[RATELIMIT] Redis connection failed — rate limiting disabled:", (err as Error)?.message ?? err);
-      redisUnavailable = true;
-    }
-  }
-  return redis;
-}
 
 export async function checkRateLimit(
   key: string,

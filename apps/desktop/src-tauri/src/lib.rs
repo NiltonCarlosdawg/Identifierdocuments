@@ -83,6 +83,10 @@ pub fn run() {
             watcher::add_watched_folder,
             watcher::remove_watched_folder,
             watcher::get_watched_folders,
+            watcher::watcher_get_files,
+            watcher::watcher_set_file_status,
+            watcher::watcher_get_reminders,
+            watcher::watcher_get_report,
             scanner::list_scanners,
             scanner::scan_document,
         ])
