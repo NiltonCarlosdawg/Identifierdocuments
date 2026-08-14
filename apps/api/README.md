@@ -54,7 +54,7 @@ REDIS_URL=redis://localhost:6379
 
 # JWT
 JWT_SECRET=your-secret-here
-JWT_EXPIRES_IN=7d
+JWT_EXPIRES_IN=15m
 
 # Storage
 UPLOAD_DIR=./uploads
