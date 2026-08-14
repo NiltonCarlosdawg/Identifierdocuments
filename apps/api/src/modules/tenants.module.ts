@@ -6,6 +6,7 @@ import { requireAuth, requireRole } from "../middleware/auth";
 import { checkRateLimit } from "../middleware/rateLimit";
 import { collectStats } from "./stats.module";
 import { safeError } from "../lib/errors";
+import { getClientIp } from "../lib/ip";
 
 export const tenantsModule = new Elysia({ prefix: "/tenants" })
 
@@ -18,7 +19,7 @@ export const tenantsModule = new Elysia({ prefix: "/tenants" })
       return { error: { code: "ONBOARDING_DISABLED", message: "Onboarding público desactivado. Contacte o administrador." } };
     }
 
-    const ip = request.headers.get("x-forwarded-for") || "unknown"; // TODO(security): validar/sanitizar IP; atualmente confia no header
+    const ip = getClientIp(request);
     if (!(await checkRateLimit(`onboarding:${ip}`, 3, 3600_000))) {
       set.status = 429;
       return { error: { code: "RATE_LIMITED", message: "Muitas tentativas de registo. Tente novamente em 1 hora." } };

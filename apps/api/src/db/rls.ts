@@ -1,3 +1,11 @@
+// rls.ts — configura Row Level Security (RLS) para tabelas controladas pelo código.
+// NOTE: Este script modifica policies e deve ser executado apenas por um
+// administrador de base de dados em manutenção (não em runtime normal). É
+// idempotente (DROP POLICY IF EXISTS) e usa uma lista controlada de tabelas.
+// Não aceitar entradas externas nesta lista; altere o código para adicionar
+// novas tabelas quando for necessário. Mantém-se seguro desde que o arquivo
+// seja executado num ambiente controlado.
+
 import postgres from "postgres";
 
 const connectionString = process.env.DATABASE_URL!;

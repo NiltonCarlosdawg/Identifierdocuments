@@ -7,6 +7,7 @@ import { withTenant } from "../db/withTenant";
 import { eq, and } from "drizzle-orm";
 import { categories, devices } from "../db/schema";
 import { safeError } from "../lib/errors";
+import { getClientIp } from "../lib/ip";
 
 export const identifiersModule = new Elysia({ prefix: "/identifiers" })
   .use(requireAuth())
@@ -15,7 +16,7 @@ export const identifiersModule = new Elysia({ prefix: "/identifiers" })
     try {
       return await withTenant(tenantId, async (tx) => {
         try {
-          const ip = request.headers.get("x-forwarded-for") || "unknown";
+          const ip = getClientIp(request);
           const targetSectorId = body.sectorId ?? auth!.sectorId;
           const result = await leaseIdentifiers(tx, auth!, {
             deviceId: body.deviceId, categoryId: body.categoryId,
@@ -44,7 +45,7 @@ export const identifiersModule = new Elysia({ prefix: "/identifiers" })
     try {
       return await withTenant(tenantId, async (tx) => {
         try {
-          const ip = request.headers.get("x-forwarded-for") || "unknown";
+          const ip = getClientIp(request);
           const result = await releaseLease(tx, auth!, { leaseId: body.leaseId }, ip);
           return { data: result };
         } catch (err: any) {
@@ -70,7 +71,7 @@ export const identifiersModule = new Elysia({ prefix: "/identifiers" })
     try {
       return await withTenant(tenantId, async (tx) => {
         try {
-          const ip = request.headers.get("x-forwarded-for") || "unknown";
+          const ip = getClientIp(request);
           const result = await forceReleaseLease(tx, auth!, { leaseId: body.leaseId }, ip);
           return { data: result };
         } catch (err: any) {
@@ -91,7 +92,7 @@ export const identifiersModule = new Elysia({ prefix: "/identifiers" })
     try {
       return await withTenant(tenantId, async (tx) => {
         try {
-          const ip = request.headers.get("x-forwarded-for") || "unknown";
+          const ip = getClientIp(request);
             const result = await registerOfflineIdentifiers(tx, auth!, {
             deviceId: body.deviceId,
             leaseId: body.leaseId,
@@ -128,7 +129,7 @@ export const identifiersModule = new Elysia({ prefix: "/identifiers" })
     try {
       return await withTenant(tenantId, async (tx) => {
         try {
-          const ip = request.headers.get("x-forwarded-for") || "unknown";
+          const ip = getClientIp(request);
 
           const device = await tx.query.devices.findFirst({
             where: and(eq(devices.id, body.deviceId), eq(devices.tenantId, tenantId)),
@@ -178,7 +179,7 @@ export const identifiersModule = new Elysia({ prefix: "/identifiers" })
     try {
       return await withTenant(tenantId, async (tx) => {
         try {
-          const ip = request.headers.get("x-forwarded-for") || "unknown"; // TODO(security): validar/sanitizar IP; atualmente confia no header
+          const ip = getClientIp(request); // client IP parsed and validated by getClientIp
           if (!(await checkRateLimit(`generate:${ip}:${auth!.userId}`, 20, 60_000))) {
             set.status = 429;
             return { error: { code: "RATE_LIMITED", message: "Muitos pedidos. Tente novamente em 1 minuto." } };

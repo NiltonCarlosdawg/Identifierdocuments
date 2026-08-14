@@ -2,6 +2,7 @@ import { Elysia } from "elysia";
 import { jwtVerify } from "jose";
 import { SignJWT } from "jose";
 import { db } from "../db";
+import { getClientIp } from "../lib/ip";
 import { userRoles, roles, users } from "../db/schema";
 import { eq, and, or, isNull } from "drizzle-orm";
 
@@ -48,9 +49,7 @@ export function verifyTokenWithGrace(token: string, graceSeconds = 60): Promise<
 
 export const authMiddleware = new Elysia()
   .derive({ as: "global" }, async ({ headers, request }): Promise<{ auth: AuthPayload | null; clientIp: string }> => {
-    const clientIp = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() // TODO(security): validar/sanitizar IP; atualmente confia no header
-      || request.headers.get("x-real-ip")
-      || "unknown";
+    const clientIp = getClientIp(request);
 
     const authHeader = headers.authorization;
     if (!authHeader?.startsWith("Bearer ")) {
