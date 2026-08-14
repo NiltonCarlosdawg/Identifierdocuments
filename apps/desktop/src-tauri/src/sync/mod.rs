@@ -1990,10 +1990,29 @@ pub async fn attach_document_native(
         return Err("identifier é obrigatório.".to_string());
     }
 
+    // Security: do not read arbitrary local files directly. Canonicalize and copy into
+    // the app-managed uploads directory, enforcing a maximum size before copying.
+    let source_path = std::path::PathBuf::from(&path);
+    if !source_path.exists() || !source_path.is_file() {
+        return Err("Ficheiro não encontrado ou caminho inválido.".to_string());
+    }
+    let source_canonical = source_path
+        .canonicalize()
+        .map_err(|_| "Caminho inválido.".to_string())?;
+
+    let metadata = std::fs::metadata(&source_canonical).map_err(|e| e.to_string())?;
+    if metadata.len() as usize > MAX_CACHE_BYTES {
+        return Err("Ficheiro demasiado grande. Máximo: 50MB.".to_string());
+    }
+
+    std::fs::create_dir_all(&state.uploads_dir).map_err(|e| e.to_string())?;
+    let dest = safe_dest_path(&state.uploads_dir, &filename)?;
+    std::fs::copy(&source_canonical, &dest).map_err(|e| e.to_string())?;
+
     upload_document_mode(
         &api_base_url,
         &token,
-        &path,
+        &dest.to_string_lossy(),
         filename,
         mode_str,
         identifier.as_deref(),
