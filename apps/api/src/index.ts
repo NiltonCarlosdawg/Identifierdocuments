@@ -1,4 +1,4 @@
-import { Elysia } from "elysia";
+import Elysia from "elysia";
 import { swagger } from "@elysiajs/swagger";
 import { cors } from "@elysiajs/cors";
 import { authMiddleware } from "./middleware/auth";
@@ -26,7 +26,7 @@ const PORT = Number(process.env.PORT) || 3000;
 const enableSwagger = process.env.ENABLE_SWAGGER === "true"
   || process.env.NODE_ENV !== "production";
 
-const app = new Elysia()
+const app = new (Elysia as any)()
   .use(cors({
     origin: ["http://localhost:1420", "tauri://localhost", "https://tauri.localhost"],
     credentials: true,
@@ -66,10 +66,12 @@ if (enableSwagger) {
 app
   .use(authMiddleware)
   .use(tenantMiddleware)
-  .onRequest(({ request }) => {
+  .onRequest((ctx: any) => {
+    const { request } = ctx;
     requestTimings.set(request, performance.now());
   })
-  .onAfterHandle(({ request, set }) => {
+  .onAfterHandle((ctx: any) => {
+    const { request, set } = ctx;
     const start = requestTimings.get(request);
     const url = new URL(request.url);
     logger.info({
@@ -108,7 +110,8 @@ app
   .use(devicesModule)
   .use(classifierModule)
   .use(notificationSSEModule)
-  .onError(({ code, error, set, request }) => {
+  .onError((ctx: any) => {
+    const { code, error, set, request } = ctx;
     if (code === "NOT_FOUND") {
       set.status = 404;
       return { error: { code: "NOT_FOUND", message: "Rota não encontrada." } };

@@ -1,4 +1,5 @@
-import { Elysia, t } from "elysia";
+import Elysia from "elysia";
+import { Type as t } from "@sinclair/typebox";
 import fs from "node:fs";
 import path from "node:path";
 import {
@@ -34,7 +35,7 @@ async function canShareDocument(tx: any, auth: any, docSectorId: string | null, 
   return false;
 }
 
-export const documentsModule = new Elysia({ prefix: "/documents" })
+export const documentsModule = new (Elysia as any)({ prefix: "/documents" })
   .use(requireAuth())
 
   .post("/attach", async ({ auth, body, set, clientIp, tenantId }) => {
@@ -59,7 +60,7 @@ export const documentsModule = new Elysia({ prefix: "/documents" })
   }, {
     body: t.Object({
       identifier: t.String(),
-      file: t.File(),
+      file: t.Any(),
       uploadSource: t.Optional(t.Union([t.Literal("manual"), t.Literal("scanner"), t.Literal("sync")])),
     }),
     detail: { summary: "Associar documento", tags: ["Documentos"] },
@@ -88,7 +89,7 @@ export const documentsModule = new Elysia({ prefix: "/documents" })
   }, {
     body: t.Object({
       identifier: t.String(),
-      file: t.File(),
+      file: t.Any(),
       label: t.Optional(t.String()),
       uploadSource: t.Optional(t.Union([t.Literal("manual"), t.Literal("scanner"), t.Literal("sync")])),
     }),
@@ -316,7 +317,7 @@ export const documentsModule = new Elysia({ prefix: "/documents" })
   }, {
     params: t.Object({ param: t.String() }),
     body: t.Object({
-      file: t.File(),
+      file: t.Any(),
       uploadSource: t.Optional(t.Union([t.Literal("manual"), t.Literal("scanner"), t.Literal("sync")])),
     }),
     detail: { summary: "Criar nova versão de um documento", tags: ["Documentos"] },

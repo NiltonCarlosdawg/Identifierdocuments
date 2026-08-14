@@ -184,7 +184,7 @@ export async function attachDocument(
   });
   if (!idRow) throw new Error(`Identificador '${identifier}' não encontrado.`);
   if (idRow.status === "cancelled") throw new Error("Não é possível associar a um identificador cancelado.");
-  if (!(await canWriteIdentifier(auth, idRow))) {
+  if (!(await canWriteIdentifier(auth, idRow as any))) {
     throw new Error("Sem permissão para associar documentos a este identificador.");
   }
 
@@ -209,7 +209,7 @@ export async function attachDocument(
       tenantId: auth.tenantId, userId: auth.userId, action: "ATTACH_FAILED",
       resource: "documents", resourceId: idRow.id,
       metadata: JSON.stringify({ filename: file.name, reason: "identifier_not_found" }), ip,
-    });
+    } as any);
     return { success: false, message: `O documento não contém o identificador '${identifier}'.`, verification };
   }
 
@@ -249,7 +249,7 @@ export async function attachDocument(
       tenantId: auth.tenantId, userId: auth.userId, action: "ATTACH_FAILED",
       resource: "documents", resourceId: idRow.id,
       metadata: JSON.stringify({ filename: file.name, reason: "concurrent_attach_or_db_error" }), ip,
-    });
+    } as any);
     throw new Error("Este identificador já foi associado a um documento entretanto. Tente novamente.");
   }
 
@@ -259,7 +259,7 @@ export async function attachDocument(
     tenantId: auth.tenantId, userId: auth.userId, action: "ATTACH",
     resource: "documents", resourceId: doc.id,
     metadata: JSON.stringify({ identifier, filename: safeName, method: verification.method }), ip,
-  });
+  } as any);
 
   const fullDoc = await tx.query.documents.findFirst({
     where: eq(documents.id, doc.id),
@@ -289,7 +289,7 @@ export async function attachAttachment(
   });
   if (!idRow) throw new Error(`Identificador '${identifier}' não encontrado.`);
   if (idRow.status === "cancelled") throw new Error("Não é possível associar a um identificador cancelado.");
-  if (!(await canWriteIdentifier(auth, idRow))) {
+  if (!(await canWriteIdentifier(auth, idRow as any))) {
     throw new Error("Sem permissão para adicionar anexos a este identificador.");
   }
 
@@ -356,7 +356,7 @@ export async function createDocumentVersion(
   if (!doc) throw new Error("Documento não encontrado.");
   if (!doc.identifier) throw new Error("Identificador do documento não encontrado.");
   if (doc.identifier.status === "cancelled") throw new Error("Não é possível versionar um documento de identificador cancelado.");
-  if (!(await canWriteIdentifier(auth, doc.identifier))) {
+  if (!(await canWriteIdentifier(auth, doc.identifier as any))) {
     throw new Error("Sem permissão para criar versões deste documento.");
   }
 
@@ -586,7 +586,7 @@ export async function updateDocumentTags(
   if (!(await canWriteIdentifier(auth, {
     sectorId: doc.identifier?.sectorId ?? null,
     createdBy: doc.identifier?.createdBy ?? doc.uploadedBy,
-  }))) {
+  } as any))) {
     return { error: "FORBIDDEN" as const };
   }
 

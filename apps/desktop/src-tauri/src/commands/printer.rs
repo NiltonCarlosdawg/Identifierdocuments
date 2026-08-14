@@ -164,9 +164,9 @@ pub async fn print_file(
     print_path(&printer, &safe).await
 }
 
-#[tauri::command]
 const MAX_PRINT_BYTES: usize = 10_485_760; // 10MB
 
+#[tauri::command]
 pub async fn print_bytes(printer: String, bytes: Vec<u8>, format: String) -> Result<String, String> {
     if bytes.is_empty() {
         return Err("Nada para imprimir.".to_string());

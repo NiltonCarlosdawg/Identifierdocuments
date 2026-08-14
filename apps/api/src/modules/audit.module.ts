@@ -1,4 +1,5 @@
-import { Elysia, t } from "elysia";
+import Elysia from "elysia";
+import { Type as t } from "@sinclair/typebox";
 import { db } from "../db";
 import { auditLogs, users } from "../db/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
@@ -16,10 +17,11 @@ const escCsv = (v: string | null) => {
 
 const CSV_BATCH = 1000;
 
-export const auditModule = new Elysia({ prefix: "/audit" })
+export const auditModule = new (Elysia as any)({ prefix: "/audit" })
   .use(requireAuth())
 
-  .get("/", async ({ query, tenantId, auth }) => {
+  .get("/", async (ctx: any) => {
+    const { query, tenantId, auth } = ctx;
     return withTenant(tenantId, async (tx) => {
       const roleNames = await getFreshRoles(auth!.userId, tenantId);
       const isAdmin = roleNames.includes("ORG_ADMIN");
@@ -80,7 +82,8 @@ export const auditModule = new Elysia({ prefix: "/audit" })
     detail: { summary: "Listar logs de auditoria (filtrados por sector conforme role)", tags: ["Auditoria"] },
   })
 
-  .get("/export", async ({ query, tenantId, set, request, auth }) => {
+  .get("/export", async (ctx: any) => {
+    const { query, tenantId, set, request, auth } = ctx;
     const ip = getClientIp(request);
     if (!(await checkRateLimit(`audit:export:${ip}:${tenantId}`, 5, 3_600_000))) {
       set.status = 429;

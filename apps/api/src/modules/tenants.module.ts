@@ -1,4 +1,5 @@
-import { Elysia, t } from "elysia";
+import Elysia from "elysia";
+import { Type as t } from "@sinclair/typebox";
 import { db } from "../db";
 import { organizations, sectors, users, roles, userRoles } from "../db/schema";
 import { eq, and, isNull } from "drizzle-orm";
@@ -8,7 +9,7 @@ import { collectStats } from "./stats.module";
 import { safeError } from "../lib/errors";
 import { getClientIp } from "../lib/ip";
 
-export const tenantsModule = new Elysia({ prefix: "/tenants" })
+export const tenantsModule = new (Elysia as any)({ prefix: "/tenants" })
 
   .post("/", async ({ body, set, request }) => {
     const allowPublic = process.env.ALLOW_PUBLIC_ONBOARDING === "true";

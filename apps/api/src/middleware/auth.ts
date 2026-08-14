@@ -1,4 +1,4 @@
-import { Elysia } from "elysia";
+import Elysia from "elysia";
 import { jwtVerify } from "jose";
 import { SignJWT } from "jose";
 import { db } from "../db";
@@ -47,11 +47,12 @@ export function verifyTokenWithGrace(token: string, graceSeconds = 60): Promise<
     .then(({ payload }) => validateAuthPayload(payload));
 }
 
-export const authMiddleware = new Elysia()
-  .derive({ as: "global" }, async ({ headers, request }): Promise<{ auth: AuthPayload | null; clientIp: string }> => {
+export const authMiddleware = new (Elysia as any)()
+  .derive({ as: "global" }, async (ctx: any): Promise<{ auth: AuthPayload | null; clientIp: string }> => {
+    const { request, headers } = ctx;
     const clientIp = getClientIp(request);
 
-    const authHeader = headers.authorization;
+    const authHeader = headers?.authorization;
     if (!authHeader?.startsWith("Bearer ")) {
       return { auth: null, clientIp };
     }
@@ -65,7 +66,7 @@ export const authMiddleware = new Elysia()
   });
 
 export function requireAuth() {
-  return (app: Elysia) => app
+  return (app: any) => app
     .guard({
       beforeHandle: (ctx: any) => {
         if (!ctx.auth) {
@@ -92,7 +93,7 @@ export async function getFreshRoles(userId: string, tenantId: string): Promise<s
 }
 
 export function requireRole(...requiredRoles: string[]) {
-  return (app: Elysia) => app
+  return (app: any) => app
     .guard({
       beforeHandle: async (ctx: any) => {
         if (!ctx.auth) {
@@ -120,7 +121,7 @@ export function requireRole(...requiredRoles: string[]) {
  * Opcionalmente aceita `bypassRoles` — array de nomes de role que passam
  * o guard mesmo sem `sectorId` (ex.: `requireSectorScope({ bypassRoles: ["ORG_ADMIN"] })`). */
 export function requireSectorScope(opts?: { bypassRoles?: string[] }) {
-  return (app: Elysia) => app
+  return (app: any) => app
     .derive({ as: "scoped" }, async (ctx: any) => {
       if (!ctx.auth) return {};
       const [user] = await db

@@ -32,7 +32,7 @@ export async function leaseIdentifiers(
     where: and(eq(devices.id, opts.deviceId), eq(devices.tenantId, auth.tenantId)),
   });
   if (!device) throw new Error("Dispositivo não encontrado.");
-  await assertDeviceUsable(tx, auth, device);
+  await assertDeviceUsable(tx, auth, device as any);
 
   const resolvedSectorId = opts.sectorId ?? auth.sectorId ?? device.sectorId;
   if (!resolvedSectorId) throw new Error("Sector não definido. Indique sectorId ou associe o utilizador a um sector.");
@@ -120,7 +120,7 @@ export async function releaseLease(
     where: and(eq(devices.id, lease.deviceId), eq(devices.tenantId, auth.tenantId)),
   });
   if (!device) throw new Error("Dispositivo do lease não encontrado.");
-  await assertDeviceUsable(tx, auth, device);
+  await assertDeviceUsable(tx, auth, device as any);
 
   const unusedStart = (lease.usedUpTo ?? lease.startSeq - 1) + 1;
   if (unusedStart <= lease.endSeq) {
@@ -222,7 +222,7 @@ export async function registerOfflineIdentifiers(
     where: and(eq(devices.id, opts.deviceId), eq(devices.tenantId, auth.tenantId)),
   });
   if (!device) throw new Error("Dispositivo não encontrado.");
-  await assertDeviceUsable(tx, auth, device);
+  await assertDeviceUsable(tx, auth, device as any);
 
   const org = await tx.query.organizations.findFirst({ where: eq(organizations.id, auth.tenantId) });
   const orgPrefix = org?.identifierPrefix ?? "VL";

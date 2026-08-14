@@ -1,4 +1,6 @@
-import { Elysia, t } from "elysia";
+import Elysia from "elysia";
+import { Type as t } from "@sinclair/typebox";
+import { db } from "../db";
 import { generateIdentifier, listIdentifiers, getIdentifier, cancelIdentifier } from "../services/identifier.service";
 import { leaseIdentifiers, releaseLease, forceReleaseLease, registerOfflineIdentifiers, assertDeviceUsable } from "../services/lease.service";
 import { requireAuth, getFreshRoles } from "../middleware/auth";
@@ -9,7 +11,7 @@ import { categories, devices } from "../db/schema";
 import { safeError } from "../lib/errors";
 import { getClientIp } from "../lib/ip";
 
-export const identifiersModule = new Elysia({ prefix: "/identifiers" })
+export const identifiersModule = new (Elysia as any)({ prefix: "/identifiers" })
   .use(requireAuth())
 
   .post("/lease", async ({ auth, body, set, request, tenantId }) => {
@@ -135,13 +137,13 @@ export const identifiersModule = new Elysia({ prefix: "/identifiers" })
             where: and(eq(devices.id, body.deviceId), eq(devices.tenantId, tenantId)),
           });
           if (!device) { set.status = 404; return { error: { code: "NOT_FOUND", message: "Dispositivo não encontrado." } }; }
-          await assertDeviceUsable(tx, auth!, device);
+          await assertDeviceUsable(tx, auth!, device as any);
 
           const cat = await tx.query.categories.findFirst({ where: eq(categories.id, body.categoryId) });
           if (!cat) { set.status = 404; return { error: { code: "NOT_FOUND", message: "Categoria não encontrada." } }; }
           if (cat.requiresSequential) { set.status = 400; return { error: { code: "CATEGORY_SEQUENTIAL", message: "Categoria requer sequenciação. Use /identifiers/register-offline em vez de -loose." } }; }
 
-            const result = await generateIdentifier(tx, auth!, {
+            const result = await generateIdentifier(tx, auth!, ({
             categoryId: body.categoryId,
             issuedTo: body.issuedTo,
             description: body.description,
@@ -149,7 +151,7 @@ export const identifiersModule = new Elysia({ prefix: "/identifiers" })
             visibility: body.visibility,
             sectorId: body.sectorId ?? auth!.sectorId ?? undefined,
             idempotencyKey: body.idempotencyKey,
-          }, ip);
+          } as any), ip);
 
           return { data: result };
         } catch (err: any) {

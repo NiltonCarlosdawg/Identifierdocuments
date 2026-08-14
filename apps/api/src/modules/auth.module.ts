@@ -1,4 +1,5 @@
-import { Elysia, t } from "elysia";
+import Elysia from "elysia";
+import { Type as t } from "@sinclair/typebox";
 import { login, getMe, changePassword, refreshToken, forgotPassword, resetPassword } from "../services/auth.service";
 import { requireAuth } from "../middleware/auth";
 import { checkRateLimit } from "../middleware/rateLimit";
@@ -8,9 +9,10 @@ import { withTenant } from "../db/withTenant";
 import { safeError } from "../lib/errors";
 import { getClientIp } from "../lib/ip";
 
-export const authModule = new Elysia({ prefix: "/auth" })
+export const authModule = new (Elysia as any)({ prefix: "/auth" })
 
-  .post("/login", async ({ body, request, set }) => {
+  .post("/login", async (ctx: any) => {
+    const { body, request, set } = ctx;
     const ip = getClientIp(request);
     const rateLimitKey = `login:${ip}:${body.email}`;
     if (!(await checkRateLimit(rateLimitKey))) {
@@ -33,7 +35,8 @@ export const authModule = new Elysia({ prefix: "/auth" })
     detail: { summary: "Login", tags: ["Autenticação"] },
   })
 
-  .post("/refresh", async ({ body, request, set }) => {
+  .post("/refresh", async (ctx: any) => {
+    const { body, request, set } = ctx;
     const ip = getClientIp(request);
     const rateLimitKey = `refresh:${ip}`;
     if (!(await checkRateLimit(rateLimitKey, 10, 60000))) {
@@ -52,7 +55,8 @@ export const authModule = new Elysia({ prefix: "/auth" })
     detail: { summary: "Renovar token", tags: ["Autenticação"] },
   })
 
-  .post("/forgot-password", async ({ body, request, set }) => {
+  .post("/forgot-password", async (ctx: any) => {
+    const { body, request, set } = ctx;
     const ip = getClientIp(request);
     const rateLimitKey = `forgot-password:${ip}:${body.email}`;
     if (!(await checkRateLimit(rateLimitKey, 5, 15 * 60_000))) {
@@ -74,7 +78,8 @@ export const authModule = new Elysia({ prefix: "/auth" })
     detail: { summary: "Pedir código de redefinição de password", tags: ["Autenticação"] },
   })
 
-  .post("/reset-password", async ({ body, set }) => {
+  .post("/reset-password", async (ctx: any) => {
+    const { body, set } = ctx;
     try {
       const result = await resetPassword(body.token, body.newPassword);
       return { data: result };
@@ -88,12 +93,13 @@ export const authModule = new Elysia({ prefix: "/auth" })
   })
 
   .use(requireAuth())
-  .get("/me", ({ auth }) => getMe(auth!), {
+  .get("/me", (ctx: any) => getMe(ctx.auth!), {
     detail: { summary: "Perfil do utilizador", tags: ["Autenticação"] },
   })
 
   .use(requireAuth())
-  .patch("/me", async ({ auth, body, set, tenantId }) => {
+  .patch("/me", async (ctx: any) => {
+    const { auth, body, set, tenantId } = ctx;
     return withTenant(tenantId, async (tx) => {
       try {
         const [updated] = await tx.update(users)
@@ -112,7 +118,8 @@ export const authModule = new Elysia({ prefix: "/auth" })
   })
 
   .use(requireAuth())
-  .patch("/me/password", async ({ auth, body, set }) => {
+  .patch("/me/password", async (ctx: any) => {
+    const { auth, body, set } = ctx;
     try {
       return await changePassword(auth!, body.currentPassword, body.newPassword);
     } catch (err: any) {
@@ -125,7 +132,8 @@ export const authModule = new Elysia({ prefix: "/auth" })
   })
 
   .use(requireAuth())
-  .patch("/me/notifications-preferences", async ({ auth, body, tenantId, set }) => {
+  .patch("/me/notifications-preferences", async (ctx: any) => {
+    const { auth, body, tenantId, set } = ctx;
     return withTenant(tenantId, async (tx) => {
       try {
         const [updated] = await tx.execute(sql`

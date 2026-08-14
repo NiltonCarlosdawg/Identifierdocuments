@@ -98,7 +98,7 @@ export async function generateIdentifier(tx: DB, auth: AuthPayload, opts: {
     throw new Error("Sector não definido. Indique sectorId no body ou associe o utilizador a um sector.");
   }
 
-    const [id] = await tx.transaction(async (tx2) => {
+  const [id] = (await tx.transaction(async (tx2) => {
     const lockKey = sql`hashtext(CONCAT(${auth.tenantId}::text, '-', ${opts.categoryId}::text))`;
     await tx2.execute(sql`SELECT pg_advisory_xact_lock(${lockKey})`);
 
@@ -175,7 +175,7 @@ export async function generateIdentifier(tx: DB, auth: AuthPayload, opts: {
     }
 
     return inserted;
-  });
+  })) as any;
 
   await tx.insert(auditLogs).values({
     tenantId: auth.tenantId,
@@ -222,12 +222,12 @@ export async function listIdentifiers(tx: DB, auth: AuthPayload, filters: {
   const freshRoles = await getFreshRoles(auth.userId, auth.tenantId);
 
   const filtered = allRows.filter(row => {
-    const { visible } = checkVisibility(row, auth, sharedDocIds, freshRoles);
+    const { visible } = checkVisibility(row as any, auth, sharedDocIds, freshRoles);
     return visible;
   });
 
   const data = filtered.map(row => {
-    const { restricted } = checkVisibility(row, auth, sharedDocIds, freshRoles);
+    const { restricted } = checkVisibility(row as any, auth, sharedDocIds, freshRoles);
     return { ...row, document: hydratePrimaryDocument(row.documents), restricted };
   });
 
@@ -257,7 +257,7 @@ export async function getIdentifier(tx: DB, auth: AuthPayload, identifierStr: st
 
   const sharedDocIds = await getSharedDocIds(tx, auth);
   const freshRoles = await getFreshRoles(auth.userId, auth.tenantId);
-  const { visible, restricted } = checkVisibility(row, auth, sharedDocIds, freshRoles);
+  const { visible, restricted } = checkVisibility(row as any, auth, sharedDocIds, freshRoles);
   if (!visible) return null;
 
   await tx.insert(auditLogs).values({

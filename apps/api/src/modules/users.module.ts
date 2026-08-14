@@ -1,4 +1,5 @@
-import { Elysia, t } from "elysia";
+import Elysia from "elysia";
+import { Type as t } from "@sinclair/typebox";
 import { users, userRoles, sectors, roles, organizations } from "../db/schema";
 import { eq, and, or, isNull } from "drizzle-orm";
 import { requireAuth, getFreshRoles } from "../middleware/auth";
@@ -43,7 +44,7 @@ function randomPassword(): string {
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-export const usersModule = new Elysia({ prefix: "/users" })
+export const usersModule = new (Elysia as any)({ prefix: "/users" })
   .use(requireAuth())
 
   .get("/", async ({ tenantId, auth, query }) => {
