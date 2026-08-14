@@ -4,6 +4,7 @@ import { eq, and, or, isNull } from "drizzle-orm";
 import { requireAuth, getFreshRoles } from "../middleware/auth";
 import { withTenant } from "../db/withTenant";
 import { safeError } from "../lib/errors";
+import { getClientIp } from "../lib/ip";
 import { checkRateLimit } from "../middleware/rateLimit";
 import { randomBytes } from "node:crypto";
 import { enqueueInviteEmail } from "../jobs/queues";
@@ -169,7 +170,7 @@ export const usersModule = new Elysia({ prefix: "/users" })
   })
 
   .post("/invite", async ({ tenantId, auth, body, request, set }) => {
-    const ip = request.headers.get("x-forwarded-for") || "unknown";
+    const ip = getClientIp(request);
     if (!(await checkRateLimit(`users-invite:${tenantId}:${ip}`, 20, 60 * 60_000))) {
       set.status = 429;
       return { error: { code: "RATE_LIMITED", message: "Demasiados convites. Tente novamente mais tarde." } };
@@ -410,7 +411,7 @@ export const usersModule = new Elysia({ prefix: "/users" })
   })
 
     .post("/import", async ({ tenantId, auth, body, request, set }: any) => {
-      const ip = request.headers.get("x-forwarded-for") || "unknown"; // TODO(security): validar/sanitizar IP; atualmente confia no header
+      const ip = getClientIp(request);
       if (!(await checkRateLimit(`users-import:${tenantId}:${ip}`, 5, 60 * 60_000))) {
         set.status = 429;
         return { error: { code: "RATE_LIMITED", message: "Demasiadas importações. Tente novamente mais tarde." } };

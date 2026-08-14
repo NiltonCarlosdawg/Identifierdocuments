@@ -439,7 +439,7 @@ REDIS_URL=redis://localhost:6379
 
 # JWT
 JWT_SECRET=your-secret-here
-JWT_EXPIRES_IN=7d
+JWT_EXPIRES_IN=15m
 
 # Storage
 UPLOAD_DIR=./uploads
@@ -503,7 +503,7 @@ A API base já tem implementado:
 - `GET /audit` — logs
 - `GET /stats` — estatísticas
 
-**O que NÃO existe ainda:** multi-tenancy, auth, sectores, RBAC, partilha, aprovações, offline sync, Tauri app, scanner, file watcher, classificação IA.
+**Estado actual:** Muitas componentes já implementadas no repositório. Implementado: auth (JWT + middleware) — [apps/api/src/middleware/auth.ts](/home/niltoncosta/Documentos/VERANO/Identifierdocuments.worktrees/revise-complete-app-inconsistencies/apps/api/src/middleware/auth.ts), onboarding/tenants — [apps/api/src/modules/tenants.module.ts](/home/niltoncosta/Documentos/VERANO/Identifierdocuments.worktrees/revise-complete-app-inconsistencies/apps/api/src/modules/tenants.module.ts), RLS setup — [apps/api/src/db/rls.ts](/home/niltoncosta/Documentos/VERANO/Identifierdocuments.worktrees/revise-complete-app-inconsistencies/apps/api/src/db/rls.ts), endpoints core (`/identifiers`, `/documents`, `/audit`, `/stats`) e vários módulos de domínio. Ainda pendente/incompleto: integração Tauri runtime completa (scanner/file-watcher ainda exigem testes em runtime), classificação IA em produção, e cobertura total de RBAC/documentação de políticas.
 
 ---
 

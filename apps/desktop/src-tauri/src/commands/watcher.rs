@@ -108,8 +108,21 @@ fn upsert_watcher_file(
     Ok(status == "detected")
 }
 
-fn check_and_emit(path: &Path, app: &AppHandle, seen: &mut HashMap<String, u64>, app_data: &Path) {
+fn check_and_emit(path: &Path, app: &AppHandle, seen: &mut HashMap<String, u64>, app_data: &Path, allowed_roots: &[PathBuf]) {
     let canonical = match path.canonicalize() { Ok(c) => c, Err(_) => return };
+
+    // Ensure the canonical path is within one of the allowed watched folders to avoid
+    // following symlinks outside the monitored tree.
+    let mut allowed = false;
+    for root in allowed_roots {
+        if let Ok(root_can) = root.canonicalize() {
+            if canonical.starts_with(&root_can) { allowed = true; break; }
+        } else if canonical.starts_with(root) {
+            allowed = true; break;
+        }
+    }
+    if !allowed { return; }
+
     let mtime = match file_mtime(&canonical) { Some(m) => m, None => return };
     let key = canonical.to_string_lossy().to_string();
     let is_new = seen.get(&key) != Some(&mtime);
@@ -215,7 +228,7 @@ pub async fn start_watcher(app: AppHandle, state: tauri::State<'_, WatcherState>
 
         for folder in &folders_vec {
             for f in walk_files(folder, 32) {
-                check_and_emit(&f, &app_clone, &mut seen, &app_data);
+                check_and_emit(&f, &app_clone, &mut seen, &app_data, &folders_vec);
             }
         }
 
@@ -224,7 +237,7 @@ pub async fn start_watcher(app: AppHandle, state: tauri::State<'_, WatcherState>
                 Some(event) = rx.recv() => {
                     if let EventKind::Create(_) = event.kind {
                         for path in &event.paths {
-                            check_and_emit(path, &app_clone, &mut seen, &app_data);
+                            check_and_emit(path, &app_clone, &mut seen, &app_data, &folders_vec);
                         }
                     }
                 }
@@ -266,9 +279,10 @@ pub async fn add_watched_folder(path: String, state: tauri::State<'_, WatcherSta
 #[tauri::command]
 pub async fn remove_watched_folder(path: String, state: tauri::State<'_, WatcherState>) -> Result<String, String> {
     let p = PathBuf::from(&path);
+    let canonical = p.canonicalize().unwrap_or(p);
     let mut folders = state.folders.lock().await;
-    folders.retain(|f| f != &p);
-    Ok(format!("Pasta removida: {}", path))
+    folders.retain(|f| f != &canonical);
+    Ok(format!("Pasta removida: {}", canonical.to_string_lossy()))
 }
 
 #[tauri::command]

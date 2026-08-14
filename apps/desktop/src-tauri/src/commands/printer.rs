@@ -165,9 +165,14 @@ pub async fn print_file(
 }
 
 #[tauri::command]
+const MAX_PRINT_BYTES: usize = 10_485_760; // 10MB
+
 pub async fn print_bytes(printer: String, bytes: Vec<u8>, format: String) -> Result<String, String> {
     if bytes.is_empty() {
         return Err("Nada para imprimir.".to_string());
+    }
+    if bytes.len() > MAX_PRINT_BYTES {
+        return Err("Conteúdo para impressão demasiado grande (máx. 10MB).".to_string());
     }
     let ext = match format.as_str() {
         "png" => "png",

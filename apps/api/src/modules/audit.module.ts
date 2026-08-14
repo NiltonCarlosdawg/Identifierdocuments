@@ -6,6 +6,7 @@ import { requireAuth, getFreshRoles } from "../middleware/auth";
 import { checkRateLimit } from "../middleware/rateLimit";
 import { withTenant } from "../db/withTenant";
 import { safeError } from "../lib/errors";
+import { getClientIp } from "../lib/ip";
 
 const escCsv = (v: string | null) => {
   if (v === null || v === undefined) return "";
@@ -80,7 +81,7 @@ export const auditModule = new Elysia({ prefix: "/audit" })
   })
 
   .get("/export", async ({ query, tenantId, set, request, auth }) => {
-    const ip = request.headers.get("x-forwarded-for") || "unknown";
+    const ip = getClientIp(request);
     if (!(await checkRateLimit(`audit:export:${ip}:${tenantId}`, 5, 3_600_000))) {
       set.status = 429;
       return { error: { code: "RATE_LIMITED", message: "Limite de exportações excedido. Tente novamente dentro de 1 hora." } };

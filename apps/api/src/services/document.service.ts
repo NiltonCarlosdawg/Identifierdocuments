@@ -9,7 +9,11 @@ export interface VerificationResult {
   excerpt?: string;
 }
 
+const MAX_EXTRACT_BYTES = Number(process.env.MAX_FILE_SIZE) || 52_428_800; // 50MB
+
 async function extractPdfText(filePath: string): Promise<string> {
+  const stat = fs.statSync(filePath);
+  if (stat.size > MAX_EXTRACT_BYTES) throw new Error("PDF demasiado grande para extracção de texto (máx. 50MB).");
   const pdfParse = (await import("pdf-parse")).default;
   const buffer = fs.readFileSync(filePath);
   const data = await pdfParse(buffer);
@@ -17,12 +21,16 @@ async function extractPdfText(filePath: string): Promise<string> {
 }
 
 async function extractDocxText(filePath: string): Promise<string> {
+  const stat = fs.statSync(filePath);
+  if (stat.size > MAX_EXTRACT_BYTES) throw new Error("DOCX demasiado grande para extracção de texto (máx. 50MB).");
   const mammoth = await import("mammoth");
   const result = await mammoth.extractRawText({ path: filePath });
   return result.value;
 }
 
 function extractPlainText(filePath: string): string {
+  const stat = fs.statSync(filePath);
+  if (stat.size > MAX_EXTRACT_BYTES) throw new Error("Ficheiro de texto demasiado grande para leitura (máx. 50MB).");
   return fs.readFileSync(filePath, "utf-8");
 }
 

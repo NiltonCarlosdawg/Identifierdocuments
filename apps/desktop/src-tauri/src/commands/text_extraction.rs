@@ -2,7 +2,13 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
 
+const MAX_EXTRACT_BYTES: usize = 52_428_800; // 50MB
+
 pub fn extract_text_from_pdf(path: &Path) -> Result<String, String> {
+    let meta = std::fs::metadata(path).map_err(|e| format!("Erro ao obter metadata do ficheiro: {e}"))?;
+    if meta.len() as usize > MAX_EXTRACT_BYTES {
+        return Err("PDF demasiado grande para extração de texto (máx. 50MB).".to_string());
+    }
     let bytes = std::fs::read(path).map_err(|e| format!("Erro ao ler PDF: {e}"))?;
     let text = pdf_extract::extract_text_from_mem(&bytes)
         .map_err(|e| format!("Erro ao extrair texto do PDF: {e}"))?;
@@ -10,10 +16,18 @@ pub fn extract_text_from_pdf(path: &Path) -> Result<String, String> {
 }
 
 pub fn extract_text_from_txt(path: &Path) -> Result<String, String> {
+    let meta = std::fs::metadata(path).map_err(|e| format!("Erro ao obter metadata do ficheiro: {e}"))?;
+    if meta.len() as usize > MAX_EXTRACT_BYTES {
+        return Err("Ficheiro demasiado grande para leitura (máx. 50MB).".to_string());
+    }
     std::fs::read_to_string(path).map_err(|e| format!("Erro ao ler ficheiro: {e}"))
 }
 
 pub fn extract_text_from_docx(path: &Path) -> Result<String, String> {
+    let meta = std::fs::metadata(path).map_err(|e| format!("Erro ao obter metadata do ficheiro: {e}"))?;
+    if meta.len() as usize > MAX_EXTRACT_BYTES {
+        return Err("DOCX demasiado grande para extração (máx. 50MB).".to_string());
+    }
     let file = std::fs::File::open(path).map_err(|e| format!("Erro ao ler DOCX: {e}"))?;
     let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("DOCX inválido: {e}"))?;
     let mut document = archive

@@ -6,7 +6,8 @@
 import { SignJWT } from "jose";
 
 const BASE = process.env.API_URL || "http://localhost:3000";
-const rawSecret = process.env.JWT_SECRET!;
+const rawSecret = process.env.JWT_SECRET;
+if (!rawSecret) throw new Error('JWT_SECRET environment variable is required for load tests');
 const JWT_SECRET = new TextEncoder().encode(rawSecret);
 
 async function createJWT(payload: Record<string, unknown>): Promise<string> {

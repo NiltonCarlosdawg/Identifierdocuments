@@ -5,13 +5,14 @@ import { eq, and } from "drizzle-orm";
 import { requireAuth, requireRole, getFreshRoles } from "../middleware/auth";
 import { withTenant } from "../db/withTenant";
 import { safeError } from "../lib/errors";
+import { getClientIp } from "../lib/ip";
 
 export const devicesModule = new Elysia({ prefix: "/devices" })
   .use(requireAuth())
 
   .post("/", async ({ auth, body, tenantId, set, request }) => {
     try {
-      const ip = request.headers.get("x-forwarded-for") || "unknown";
+      const ip = getClientIp(request);
       const result = await withTenant(tenantId, async (tx) => {
         const u = await tx.query.users.findFirst({
           where: eq(users.id, auth!.userId),
@@ -87,7 +88,7 @@ export const devicesModule = new Elysia({ prefix: "/devices" })
   .use(requireRole("ORG_ADMIN"))
   .patch("/:id/deactivate", async ({ params, tenantId, auth, set, request }) => {
     try {
-      const ip = request.headers.get("x-forwarded-for") || "unknown";
+      const ip = getClientIp(request);
       const result = await withTenant(tenantId, async (tx) => {
         const [device] = await tx.update(devices)
           .set({ status: "inactive", deactivatedAt: new Date(), deactivatedBy: auth!.userId })
@@ -120,7 +121,7 @@ export const devicesModule = new Elysia({ prefix: "/devices" })
 
   .patch("/:id", async ({ params, body, tenantId, auth, set, request }) => {
     try {
-      const ip = request.headers.get("x-forwarded-for") || "unknown";
+      const ip = getClientIp(request);
       if (!("sectorId" in body)) {
         set.status = 400;
         return { error: { code: "VALIDATION_ERROR", message: "Nenhum campo para actualizar." } };

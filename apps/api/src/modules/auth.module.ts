@@ -6,11 +6,12 @@ import { users } from "../db/schema";
 import { eq, sql } from "drizzle-orm";
 import { withTenant } from "../db/withTenant";
 import { safeError } from "../lib/errors";
+import { getClientIp } from "../lib/ip";
 
 export const authModule = new Elysia({ prefix: "/auth" })
 
   .post("/login", async ({ body, request, set }) => {
-    const ip = request.headers.get("x-forwarded-for") || "unknown"; // TODO(security): validar/sanitizar IP; atualmente confia no header
+    const ip = getClientIp(request);
     const rateLimitKey = `login:${ip}:${body.email}`;
     if (!(await checkRateLimit(rateLimitKey))) {
       set.status = 429;
@@ -33,7 +34,7 @@ export const authModule = new Elysia({ prefix: "/auth" })
   })
 
   .post("/refresh", async ({ body, request, set }) => {
-    const ip = request.headers.get("x-forwarded-for") || "unknown"; // TODO(security): validar/sanitizar IP; atualmente confia no header
+    const ip = getClientIp(request);
     const rateLimitKey = `refresh:${ip}`;
     if (!(await checkRateLimit(rateLimitKey, 10, 60000))) {
       set.status = 429;
@@ -52,7 +53,7 @@ export const authModule = new Elysia({ prefix: "/auth" })
   })
 
   .post("/forgot-password", async ({ body, request, set }) => {
-    const ip = request.headers.get("x-forwarded-for") || "unknown"; // TODO(security): validar/sanitizar IP; atualmente confia no header
+    const ip = getClientIp(request);
     const rateLimitKey = `forgot-password:${ip}:${body.email}`;
     if (!(await checkRateLimit(rateLimitKey, 5, 15 * 60_000))) {
       set.status = 429;
