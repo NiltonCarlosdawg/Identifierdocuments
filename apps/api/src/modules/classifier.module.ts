@@ -1,4 +1,5 @@
-import { Elysia, t } from "elysia";
+import Elysia from "elysia";
+import { Type as t } from "@sinclair/typebox";
 import { requireAuth } from "../middleware/auth";
 import { checkRateLimit } from "../middleware/rateLimit";
 import { suggestCategory, classifierCacheKey, cacheableClassification, parseCachedClassification, CLASSIFIER_CACHE_TTL_SECONDS } from "../services/classifier.service";
@@ -9,7 +10,7 @@ import { eq, and } from "drizzle-orm";
 import { withTenant } from "../db/withTenant";
 import { safeError } from "../lib/errors";
 
-export const classifierModule = new Elysia({ prefix: "/classifier" })
+export const classifierModule = new (Elysia as any)({ prefix: "/classifier" })
   .use(requireAuth())
 
   .post("/suggest", async ({ auth, body, set, tenantId }) => {

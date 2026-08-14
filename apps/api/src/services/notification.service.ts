@@ -1,4 +1,5 @@
-import { Elysia, t } from "elysia";
+import Elysia from "elysia";
+import { Type as t } from "@sinclair/typebox";
 import { Redis } from "ioredis";
 import { db, DB } from "../db";
 import { withTenant } from "../db/withTenant";
@@ -54,8 +55,9 @@ export async function notify(tx: DB, event: NotificationEvent & { tenantId: stri
   }
 }
 
-export const notificationSSEModule = new Elysia()
-  .get("/notifications/stream", async ({ auth, query, set }) => {
+export const notificationSSEModule = new (Elysia as any)()
+  .get("/notifications/stream", async (ctx: any) => {
+    const { auth, query, set } = ctx;
     let userId: string | null = auth?.userId ?? null;
 
     if (!userId && query.access_token) {
@@ -134,7 +136,8 @@ export const notificationSSEModule = new Elysia()
   })
 
   .use(requireAuth())
-  .get("/notifications", async ({ tenantId, auth, query }) => {
+  .get("/notifications", async (ctx: any) => {
+    const { tenantId, auth, query } = ctx;
     return withTenant(tenantId, async (tx) => {
       const conditions = [
         eq(notifications.tenantId, tenantId),
@@ -171,7 +174,8 @@ export const notificationSSEModule = new Elysia()
     detail: { summary: "Histórico de notificações", tags: ["Notificações"] },
   })
 
-  .patch("/notifications/:id/read", async ({ tenantId, auth, params, set }) => {
+  .patch("/notifications/:id/read", async (ctx: any) => {
+    const { tenantId, auth, params, set } = ctx;
     return withTenant(tenantId, async (tx) => {
       const [row] = await tx.update(notifications)
         .set({ isRead: true })

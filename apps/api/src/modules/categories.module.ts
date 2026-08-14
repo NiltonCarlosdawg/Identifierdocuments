@@ -1,11 +1,12 @@
-import { Elysia, t } from "elysia";
+import Elysia from "elysia";
+import { Type as t } from "@sinclair/typebox";
 import { db } from "../db";
 import { categories } from "../db/schema";
 import { eq } from "drizzle-orm";
 import { requireAuth } from "../middleware/auth";
 import { withTenant } from "../db/withTenant";
 
-export const categoriesModule = new Elysia({ prefix: "/categories" })
+export const categoriesModule = new (Elysia as any)({ prefix: "/categories" })
   .use(requireAuth())
 
   .get("/", async ({ tenantId }) => {

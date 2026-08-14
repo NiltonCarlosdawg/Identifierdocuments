@@ -1,4 +1,5 @@
-import { Elysia, t } from "elysia";
+import Elysia from "elysia";
+import { Type as t } from "@sinclair/typebox";
 import { db } from "../db";
 import { sectors, users } from "../db/schema";
 import { eq, and, sql } from "drizzle-orm";
@@ -6,7 +7,7 @@ import { requireAuth, requireRole, requireSectorScope, getFreshRoles } from "../
 import { withTenant } from "../db/withTenant";
 import { safeError } from "../lib/errors";
 
-export const sectorsModule = new Elysia({ prefix: "/sectors" })
+export const sectorsModule = new (Elysia as any)({ prefix: "/sectors" })
   .use(requireAuth())
 
   .get("/", async ({ tenantId }) => {

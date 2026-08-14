@@ -1,4 +1,5 @@
-import { Elysia, t } from "elysia";
+import Elysia from "elysia";
+import { Type as t } from "@sinclair/typebox";
 import { db } from "../db";
 import { identifiers, documents, auditLogs, categories, users } from "../db/schema";
 import { eq, and, sql, isNotNull, gte } from "drizzle-orm";
@@ -109,7 +110,7 @@ export async function collectStats(tenantId: string, sectorId?: string) {
   });
 }
 
-export const statsModule = new Elysia({ prefix: "/stats" })
+export const statsModule = new (Elysia as any)({ prefix: "/stats" })
   .use(requireAuth())
 
   .get("/", async ({ tenantId, auth }) => {

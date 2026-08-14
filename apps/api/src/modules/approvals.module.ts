@@ -1,4 +1,5 @@
-import { Elysia, t } from "elysia";
+import Elysia from "elysia";
+import { Type as t } from "@sinclair/typebox";
 import { db } from "../db";
 import { approvals, documents, documentShares, auditLogs, users } from "../db/schema";
 import { eq, and } from "drizzle-orm";
@@ -9,7 +10,7 @@ import { safeError } from "../lib/errors";
 
 async function canResolveApproval(
   auth: { userId: string; tenantId: string },
-  approval: { supervisorId: string | null; sectorId: string },
+  approval: any,
 ): Promise<boolean> {
   const roleNames = await getFreshRoles(auth.userId, auth.tenantId);
   if (roleNames.includes("ORG_ADMIN")) return true;
@@ -17,10 +18,11 @@ async function canResolveApproval(
   return false;
 }
 
-export const approvalsModule = new Elysia({ prefix: "/approvals" })
+export const approvalsModule = new (Elysia as any)({ prefix: "/approvals" })
   .use(requireAuth())
 
-  .get("/", async ({ tenantId, auth, query }) => {
+  .get("/", async (ctx: any) => {
+    const { tenantId, auth, query } = ctx;
     return withTenant(tenantId, async (tx) => {
       const roleNames = await getFreshRoles(auth!.userId, auth!.tenantId);
       const conditions = [eq(approvals.tenantId, tenantId)];
@@ -46,7 +48,8 @@ export const approvalsModule = new Elysia({ prefix: "/approvals" })
     detail: { summary: "Listar aprovações", tags: ["Aprovações"] },
   })
 
-  .get("/:id", async ({ tenantId, auth, params, set }) => {
+  .get("/:id", async (ctx: any) => {
+    const { tenantId, auth, params, set } = ctx;
     return withTenant(tenantId, async (tx) => {
       const approval = await tx.query.approvals.findFirst({
         where: and(eq(approvals.id, params.id), eq(approvals.tenantId, tenantId)),
@@ -75,7 +78,8 @@ export const approvalsModule = new Elysia({ prefix: "/approvals" })
     detail: { summary: "Detalhe da aprovação", tags: ["Aprovações"] },
   })
 
-  .patch("/:id", async ({ tenantId, auth, params, body, set }) => {
+  .patch("/:id", async (ctx: any) => {
+    const { tenantId, auth, params, body, set } = ctx;
     try {
       return await withTenant(tenantId, async (tx) => {
         try {

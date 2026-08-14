@@ -1,4 +1,5 @@
-import { Elysia, t } from "elysia";
+import Elysia from "elysia";
+import { Type as t } from "@sinclair/typebox";
 import { db } from "../db";
 import { devices, auditLogs, sectors, users } from "../db/schema";
 import { eq, and } from "drizzle-orm";
@@ -7,7 +8,7 @@ import { withTenant } from "../db/withTenant";
 import { safeError } from "../lib/errors";
 import { getClientIp } from "../lib/ip";
 
-export const devicesModule = new Elysia({ prefix: "/devices" })
+export const devicesModule = new (Elysia as any)({ prefix: "/devices" })
   .use(requireAuth())
 
   .post("/", async ({ auth, body, tenantId, set, request }) => {
