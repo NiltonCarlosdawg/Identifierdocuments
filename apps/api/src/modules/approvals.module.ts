@@ -7,6 +7,7 @@ import { withTenant } from "../db/withTenant";
 import { requireAuth, getFreshRoles } from "../middleware/auth";
 import { notify } from "../services/notification.service";
 import { safeError } from "../lib/errors";
+import { withIdempotency } from "../lib/idempotency";
 
 async function canResolveApproval(
   auth: { userId: string; tenantId: string },
@@ -78,11 +79,10 @@ export const approvalsModule = new (Elysia as any)({ prefix: "/approvals" })
     detail: { summary: "Detalhe da aprovação", tags: ["Aprovações"] },
   })
 
-  .patch("/:id", async (ctx: any) => {
-    const { tenantId, auth, params, body, set } = ctx;
+  .patch("/:id", async ({ tenantId, auth, params, body, set, headers }) => {
     try {
       return await withTenant(tenantId, async (tx) => {
-        try {
+        return await withIdempotency(tx, tenantId, headers["idempotency-key"], async () => {
           const existing = await tx.query.approvals.findFirst({
             where: and(eq(approvals.id, params.id), eq(approvals.tenantId, tenantId)),
             with: { document: { with: { identifier: true } } },
@@ -181,10 +181,7 @@ export const approvalsModule = new (Elysia as any)({ prefix: "/approvals" })
           }
 
           return { data: approval };
-        } catch (err: any) {
-          console.error("[APPROVAL_ERROR]", err);
-          throw err;
-        }
+        });
       });
     } catch (err: any) {
       set.status = 400;

@@ -1,6 +1,8 @@
 use rusqlite::{Connection, Result};
-use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
+
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 
 pub const IDENTIFIER_FORMAT_VERSION: u32 = 1;
 
@@ -25,7 +27,8 @@ pub(crate) fn open(db_path: &Path) -> Result<Connection> {
     let conn = Connection::open(db_path)?;
     // Activar foreign keys — sem isto as FK do schema são ignoradas
     conn.execute_batch("PRAGMA foreign_keys = ON;")?;
-    // Restrict file permissions to owner-only (0o600)
+    // Restrict file permissions to owner-only (0o600) — Unix only
+    #[cfg(unix)]
     if db_path.parent().is_some() {
         std::fs::set_permissions(db_path, std::fs::Permissions::from_mode(0o600)).ok();
     }

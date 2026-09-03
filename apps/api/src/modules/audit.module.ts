@@ -82,10 +82,8 @@ export const auditModule = new (Elysia as any)({ prefix: "/audit" })
     detail: { summary: "Listar logs de auditoria (filtrados por sector conforme role)", tags: ["Auditoria"] },
   })
 
-  .get("/export", async (ctx: any) => {
-    const { query, tenantId, set, request, auth } = ctx;
-    const ip = getClientIp(request);
-    if (!(await checkRateLimit(`audit:export:${ip}:${tenantId}`, 5, 3_600_000))) {
+  .get("/export", async ({ query, tenantId, set, clientIp, auth }) => {
+    if (!(await checkRateLimit(`audit:export:${clientIp}:${tenantId}`, 5, 3_600_000))) {
       set.status = 429;
       return { error: { code: "RATE_LIMITED", message: "Limite de exportações excedido. Tente novamente dentro de 1 hora." } };
     }

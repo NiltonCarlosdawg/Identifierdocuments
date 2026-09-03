@@ -46,8 +46,8 @@ export async function leaseIdentifiers(
   const batchSize = org?.identifierLeaseBatchSize ?? 50;
 
   const [lease] = await tx.transaction(async (tx2) => {
-    const lockKey = sql`hashtext(CONCAT(${auth.tenantId}::text, '-', ${opts.categoryId}::text))`;
-    await tx2.execute(sql`SELECT pg_advisory_xact_lock(${lockKey})`);
+    // CORREÇÃO (Fix 4): Usar dois inteiros de 32 bits para reduzir colisões de hash
+    await tx2.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${auth.tenantId}), hashtext(${opts.categoryId}))`);
 
     const existingActive = await tx2.query.identifierLeases.findFirst({
       where: and(

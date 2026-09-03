@@ -90,17 +90,16 @@ export const identifiersModule = new (Elysia as any)({ prefix: "/identifiers" })
     detail: { summary: "Forçar libertação de lease (admin)", tags: ["Identificadores"] },
   })
 
-  .post("/register-offline", async ({ auth, body, set, request, tenantId }) => {
+  .post("/register-offline", async ({ auth, body, set, clientIp, tenantId }) => {
     try {
       return await withTenant(tenantId, async (tx) => {
         try {
-          const ip = getClientIp(request);
             const result = await registerOfflineIdentifiers(tx, auth!, {
             deviceId: body.deviceId,
             leaseId: body.leaseId,
             identifiers: body.identifiers,
             idempotencyKey: body.idempotencyKey,
-          }, ip);
+          }, clientIp);
           return { data: result };
         } catch (err: any) {
           console.error("[REGISTER_OFFLINE_ERROR]", err);
@@ -254,11 +253,11 @@ export const identifiersModule = new (Elysia as any)({ prefix: "/identifiers" })
     detail: { summary: "Consultar identificador", tags: ["Identificadores"] },
   })
 
-  .patch("/:identifier/cancel", async ({ auth, params, body, set, tenantId }) => {
+  .patch("/:identifier/cancel", async ({ auth, params, body, set, clientIp, tenantId }) => {
     try {
       return await withTenant(tenantId, async (tx) => {
         try {
-          const result = await cancelIdentifier(tx, auth!, params.identifier, body.reason);
+          const result = await cancelIdentifier(tx, auth!, params.identifier, body.reason, clientIp);
           return { data: result };
         } catch (err: any) {
           console.error("[CANCEL_ERROR]", err);
@@ -273,4 +272,8 @@ export const identifiersModule = new (Elysia as any)({ prefix: "/identifiers" })
     params: t.Object({ identifier: t.String() }),
     body: t.Object({ reason: t.String() }),
     detail: { summary: "Cancelar identificador", tags: ["Identificadores"] },
+  });
+  });
+"Identificadores"] },
+  });
   });

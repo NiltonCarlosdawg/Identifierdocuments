@@ -98,9 +98,8 @@ export async function generateIdentifier(tx: DB, auth: AuthPayload, opts: {
     throw new Error("Sector não definido. Indique sectorId no body ou associe o utilizador a um sector.");
   }
 
-  const [id] = (await tx.transaction(async (tx2) => {
-    const lockKey = sql`hashtext(CONCAT(${auth.tenantId}::text, '-', ${opts.categoryId}::text))`;
-    await tx2.execute(sql`SELECT pg_advisory_xact_lock(${lockKey})`);
+    const [id] = await tx.transaction(async (tx2) => {
+    await tx2.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${auth.tenantId}), hashtext(${opts.categoryId}))`);
 
     if (opts.idempotencyKey) {
       const record = await tx2.query.idempotencyRecords.findFirst({
@@ -109,24 +108,22 @@ export async function generateIdentifier(tx: DB, auth: AuthPayload, opts: {
           eq(idempotencyRecords.idempotencyKey, opts.idempotencyKey),
         ),
       });
-      if (record) return [record.result as typeof id];
+      if (record) return [record.result as any];
     }
 
     const [row] = await tx2
-      .select({ next: sql<number>`COALESCE(MAX(sequence), 0) + 1` })
-      .from(identifiers)
-      .where(
-        and(
-          eq(identifiers.tenantId, auth.tenantId),
-          eq(identifiers.categoryId, opts.categoryId)
-        )
-      );
+      .select({
+        next: sql<number>`GREATEST(
+          (SELECT COALESCE(MAX(sequence), 0) FROM ${identifiers} WHERE tenant_id = ${auth.tenantId} AND category_id = ${opts.categoryId}),
+          (SELECT COALESCE(MAX(end_seq), 0) FROM identifier_leases WHERE tenant_id = ${auth.tenantId} AND category_id = ${opts.categoryId})
+        ) + 1`
+      });
     const seqResult = Number(row.next);
 
     const identifierStr = buildIdentifier(orgPrefix, cat.prefix, year, month, day, seqResult);
     const visibility = opts.visibility ?? cat.defaultVisibility ?? "public";
 
-    const inserted = await tx2.insert(identifiers).values({
+    const [inserted] = await tx2.insert(identifiers).values({
       tenantId: auth.tenantId,
       sectorId: resolvedSectorId,
       categoryId: opts.categoryId,
@@ -141,53 +138,29 @@ export async function generateIdentifier(tx: DB, auth: AuthPayload, opts: {
     }).returning();
 
     if (opts.idempotencyKey) {
-      const [rec] = await tx2.insert(idempotencyRecords).values({
+      await tx2.insert(idempotencyRecords).values({
         tenantId: auth.tenantId,
         idempotencyKey: opts.idempotencyKey,
-        result: inserted[0] as any,
-      }).onConflictDoNothing().returning();
-
-      if (!rec) {
-        const existing = await tx2.query.idempotencyRecords.findFirst({
-          where: and(
-            eq(idempotencyRecords.tenantId, auth.tenantId),
-            eq(idempotencyRecords.idempotencyKey, opts.idempotencyKey),
-          ),
-        });
-        const winner = existing!.result as typeof id;
-
-        await tx2.insert(auditLogs).values({
-          tenantId: auth.tenantId,
-          userId: auth.userId,
-          action: "IDEMPOTENCY_DISCARDED",
-          resource: "identifiers",
-          resourceId: inserted[0].id,
-          metadata: JSON.stringify({
-            idempotencyKey: opts.idempotencyKey,
-            orphanIdentifier: inserted[0].identifier,
-            winnerIdentifier: winner.identifier,
-            reason: "Concurrent call with same idempotencyKey won the race",
-          }),
-        });
-
-        return [winner];
-      }
+        result: inserted as any,
+      });
     }
 
-    return inserted;
-  })) as any;
+    return [inserted];
+  });
+
+  const identifier = Array.isArray(id) ? id[0] : id;
 
   await tx.insert(auditLogs).values({
     tenantId: auth.tenantId,
     userId: auth.userId,
     action: "GENERATE",
     resource: "identifiers",
-    resourceId: id.id,
-    metadata: JSON.stringify({ identifier: id.identifier, category: cat.name, visibility: id.visibility }),
+    resourceId: identifier.id,
+    metadata: JSON.stringify({ identifier: identifier.identifier, category: cat.name, visibility: identifier.visibility }),
     ip,
   });
 
-  return id;
+  return identifier;
 }
 
 export async function listIdentifiers(tx: DB, auth: AuthPayload, filters: {

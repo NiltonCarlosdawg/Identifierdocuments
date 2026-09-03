@@ -57,18 +57,15 @@ export const rolesModule = new (Elysia as any)({ prefix: "/roles" })
   })
 
   .use(requireRole("ORG_ADMIN"))
-  .post("/", async ({ body, set, tenantId }) => {
+  .post("/", async ({ body, set, tenantId, headers }) => {
     try {
       return await withTenant(tenantId, async (tx) => {
-        try {
+        return await withIdempotency(tx, tenantId, headers["idempotency-key"], async () => {
           const [role] = await tx.insert(roles).values({
             tenantId, name: body.name, isSystem: false,
           }).returning();
           return { data: role };
-        } catch (err: any) {
-          console.error("[CREATE_ROLE_ERROR]", err);
-          throw err;
-        }
+        });
       });
     } catch (err: any) {
       set.status = 400;
@@ -127,4 +124,6 @@ export const rolesModule = new (Elysia as any)({ prefix: "/roles" })
   }, {
     params: t.Object({ id: t.String() }),
     detail: { summary: "Remover role custom", tags: ["Roles"] },
+  });
+detail: { summary: "Remover role custom", tags: ["Roles"] },
   });

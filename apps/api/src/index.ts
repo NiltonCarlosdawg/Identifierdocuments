@@ -66,8 +66,12 @@ if (enableSwagger) {
 app
   .use(authMiddleware)
   .use(tenantMiddleware)
-  .onRequest((ctx: any) => {
-    const { request } = ctx;
+  .derive(({ request }) => {
+    const xff = request.headers.get("x-forwarded-for");
+    const clientIp = xff ? xff.split(",")[0].trim() : "unknown";
+    return { clientIp };
+  })
+  .onRequest(({ request }) => {
     requestTimings.set(request, performance.now());
   })
   .onAfterHandle((ctx: any) => {
