@@ -11,6 +11,31 @@ use std::sync::Mutex;
 use std::time::{Duration, SystemTime};
 use tauri::{AppHandle, Emitter, Manager, State};
 use uuid::Uuid;
+use zeroize::Zeroize;
+
+/// Wrapper que garante que o conteúdo da String é zerado em memória ao ser descartado.
+/// Previne que tokens de autenticação persistam em memória após logout.
+pub struct ZeroizeString(String);
+
+impl ZeroizeString {
+    fn new(s: String) -> Self {
+        Self(s)
+    }
+
+    fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    fn clone_inner(&self) -> String {
+        self.0.clone()
+    }
+}
+
+impl Drop for ZeroizeString {
+    fn drop(&mut self) {
+        self.0.zeroize();
+    }
+}
 
 const MAX_ATTEMPTS: i32 = 3;
 const MAX_WRITE_ATTEMPTS: i32 = 5;
@@ -686,7 +711,7 @@ async fn renew_exhausted_leases(state: &SyncState) -> Result<usize, String> {
         .auth_token
         .lock()
         .map_err(|e| e.to_string())?
-        .clone()
+        .clone_inner()
         .ok_or_else(|| "Sessão não autenticada.".to_string())?;
 
     if !check_online(&api_base_url).await {
@@ -1027,7 +1052,7 @@ pub struct SyncState {
     pub uploads_dir: PathBuf,
     pub downloads_dir: PathBuf,
     pub api_base_url: Mutex<String>,
-    pub auth_token: Mutex<Option<String>>,
+    pub auth_token: Mutex<Option<ZeroizeString>>,
     pub syncing: Mutex<bool>,
 }
 
@@ -1439,7 +1464,7 @@ async fn run_sync_cycle_inner(app: &AppHandle, state: &SyncState) -> Result<usiz
         .auth_token
         .lock()
         .map_err(|e| e.to_string())?
-        .clone();
+        .clone_inner();
 
     let token = match token {
         Some(t) if !t.is_empty() => t,
@@ -1664,7 +1689,7 @@ pub fn set_sync_credentials(
         *base = clean;
     }
     let mut auth = state.auth_token.lock().map_err(|e| e.to_string())?;
-    *auth = Some(token);
+    *auth = Some(ZeroizeString::new(token));
     Ok(())
 }
 
@@ -1981,7 +2006,7 @@ pub async fn attach_document_native(
         .auth_token
         .lock()
         .map_err(|e| e.to_string())?
-        .clone()
+        .clone_inner()
         .ok_or_else(|| "Sessão não autenticada.".to_string())?;
 
     let p = std::path::Path::new(&path);
@@ -2117,7 +2142,7 @@ pub async fn download_document_offline(
         .auth_token
         .lock()
         .map_err(|e| e.to_string())?
-        .clone()
+        .clone_inner()
         .ok_or_else(|| "Sessão não autenticada.".to_string())?;
 
     if !check_online(&api_base_url).await {

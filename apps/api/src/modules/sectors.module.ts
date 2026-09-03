@@ -5,6 +5,7 @@ import { sectors, users } from "../db/schema";
 import { eq, and, sql } from "drizzle-orm";
 import { requireAuth, requireRole, requireSectorScope, getFreshRoles } from "../middleware/auth";
 import { withTenant } from "../db/withTenant";
+import { withIdempotency } from "../lib/idempotency";
 import { safeError } from "../lib/errors";
 
 export const sectorsModule = new (Elysia as any)({ prefix: "/sectors" })

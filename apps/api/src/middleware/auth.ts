@@ -57,7 +57,7 @@ export const authMiddleware = new (Elysia as any)()
       return { auth: null, clientIp };
     }
     try {
-      const payload = await verifyToken(authHeader.slice(7));
+      const payload = await verifyTokenWithGrace(authHeader.slice(7));
       return { auth: payload, clientIp };
     } catch (err) {
       console.warn("[AUTH] Token verification failed:", err instanceof Error ? err.message : err);

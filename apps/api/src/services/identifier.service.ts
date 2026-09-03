@@ -111,7 +111,7 @@ export async function generateIdentifier(tx: DB, auth: AuthPayload, opts: {
       if (record) return [record.result as any];
     }
 
-    const [row] = await tx2
+    const [row] = await (tx2 as any)
       .select({
         next: sql<number>`GREATEST(
           (SELECT COALESCE(MAX(sequence), 0) FROM ${identifiers} WHERE tenant_id = ${auth.tenantId} AND category_id = ${opts.categoryId}),

@@ -281,94 +281,29 @@ export async function attachDocument(
   });
 }
 
-/** Attachment: creates document kind=attachment + version 1. Identifier must already have a primary. */
-export async function attachAttachment(
-  tx: DB,
-  auth: AuthPayload,
-  opts: { identifier: string; file: File; label?: string; uploadSource?: "manual" | "scanner" | "sync" },
-  ip: string = "unknown",
-) {
-  const { identifier, file, label, uploadSource = "manual" } = opts;
-
-  const idRow = await tx.query.identifiers.findFirst({
-    where: and(eq(identifiers.identifier, identifier), eq(identifiers.tenantId, auth.tenantId)),
-    with: { documents: true },
-  });
-  if (!idRow) throw new Error(`Identificador '${identifier}' não encontrado.`);
-  if (idRow.status === "cancelled") throw new Error("Não é possível associar a um identificador cancelado.");
-  if (!(await canWriteIdentifier(auth, idRow as any))) {
-    throw new Error("Sem permissão para adicionar anexos a este identificador.");
-  }
-
-  const primary = pickPrimaryDocument(idRow.documents);
-  if (!primary) throw new Error("O identificador ainda não tem documento principal. Associe o documento principal primeiro.");
-
-  const { finalPath, safeName } = await writeUploadFile(file, identifier);
-
-  const [doc] = await tx.insert(documents).values({
-    tenantId: auth.tenantId,
-    identifierId: idRow.id,
-    kind: "attachment",
-    label: label?.trim() || null,
-    uploadedBy: auth.userId,
-  }).returning();
-
-  const [version] = await tx.insert(documentVersions).values({
-    tenantId: auth.tenantId,
-    documentId: doc.id,
-    version: 1,
-    filename: safeName,
-    mimeType: file.type || "application/octet-stream",
-    filePath: finalPath,
-    fileSize: file.size,
-    extractedText: null,
-    uploadedBy: auth.userId,
-    uploadSource,
-    isCurrent: true,
-  }).returning();
-
-  scheduleThumbnail(finalPath, doc.id);
-
-  await tx.insert(auditLogs).values({
-    tenantId: auth.tenantId, userId: auth.userId, action: "ATTACH_ATTACHMENT",
-    resource: "documents", resourceId: doc.id,
-    metadata: JSON.stringify({ identifier, filename: safeName, label: label ?? null }), ip,
-  });
-
-  const fullDoc = await tx.query.documents.findFirst({
-    where: eq(documents.id, doc.id),
-    with: { identifier: true },
-  });
-
-  return {
-    success: true,
-    message: "Anexo associado com sucesso.",
-    document: hydrateDocument(fullDoc!, version),
-  };
-}
-
 /** New version of an existing document (primary or attachment). */
 export async function createDocumentVersion(
   tx: DB,
   auth: AuthPayload,
-  opts: { documentId: string; file: File; uploadSource?: "manual" | "scanner" | "sync" },
+  opts: { documentId: string; file: File; uploadSource?: "manual" | "scanner" | "sync"; idempotencyKey?: string },
   ip: string = "unknown",
 ) {
-  const { documentId, file, uploadSource = "manual" } = opts;
+  const { documentId, file, uploadSource = "manual", idempotencyKey } = opts;
 
-  const doc = await tx.query.documents.findFirst({
-    where: and(eq(documents.id, documentId), eq(documents.tenantId, auth.tenantId)),
-    with: { identifier: true },
-  });
-  if (!doc) throw new Error("Documento não encontrado.");
-  if (!doc.identifier) throw new Error("Identificador do documento não encontrado.");
-  if (doc.identifier.status === "cancelled") throw new Error("Não é possível versionar um documento de identificador cancelado.");
-  if (!(await canWriteIdentifier(auth, doc.identifier as any))) {
-    throw new Error("Sem permissão para criar versões deste documento.");
-  }
+  return await withIdempotency(tx, auth.tenantId, idempotencyKey, async () => {
+    const doc = await tx.query.documents.findFirst({
+      where: and(eq(documents.id, documentId), eq(documents.tenantId, auth.tenantId)),
+      with: { identifier: true },
+    });
+    if (!doc) throw new Error("Documento não encontrado.");
+    if (!doc.identifier) throw new Error("Identificador do documento não encontrado.");
+    if (doc.identifier.status === "cancelled") throw new Error("Não é possível versionar um documento de identificador cancelado.");
+    if (!(await canWriteIdentifier(auth, doc.identifier as any))) {
+      throw new Error("Sem permissão para criar versões deste documento.");
+    }
 
-  const identifier = doc.identifier.identifier;
-  const { finalPath, safeName } = await writeUploadFile(file, identifier);
+    const identifier = doc.identifier.identifier;
+    const { finalPath, safeName } = await writeUploadFile(file, identifier);
 
   let verification: Awaited<ReturnType<typeof verifyDocumentContainsIdentifier>> | null = null;
   if (doc.kind === "primary") {
@@ -378,76 +313,71 @@ export async function createDocumentVersion(
       fs.unlinkSync(finalPath);
       throw new Error(`Erro na verificação: ${err.message}`);
     }
-
     if (!verification.found) {
       fs.unlinkSync(finalPath);
       await tx.insert(auditLogs).values({
-        tenantId: auth.tenantId, userId: auth.userId, action: "ATTACH_FAILED",
-        resource: "documents", resourceId: idRow.id,
+        tenantId: auth.tenantId, userId: auth.userId, action: "VERSION_FAILED",
+        resource: "documents", resourceId: doc.id,
         metadata: JSON.stringify({ filename: file.name, reason: "identifier_not_found" }), ip,
       });
       return { success: false, message: `O documento não contém o identificador '${identifier}'.`, verification };
     }
+  }
 
-    let doc: typeof documents.$inferSelect;
-    let version: typeof documentVersions.$inferSelect;
-    try {
-      const inserted = await tx.transaction(async (tx2) => {
-        const [newDoc] = await tx2.insert(documents).values({
-          tenantId: auth.tenantId,
-          identifierId: idRow.id,
-          kind: "primary",
-          uploadedBy: auth.userId,
-        }).returning();
-
-        const [newVersion] = await tx2.insert(documentVersions).values({
-          tenantId: auth.tenantId,
-          documentId: newDoc.id,
-          version: 1,
-          filename: safeName,
-          mimeType: file.type || "application/octet-stream",
-          filePath: finalPath,
-          fileSize: file.size,
-          extractedText: verification.excerpt ?? null,
-          uploadedBy: auth.userId,
-          uploadSource,
-          isCurrent: true,
-        }).returning();
-
-        await tx2.update(identifiers).set({ status: "attached" }).where(eq(identifiers.id, idRow.id));
-        return { newDoc, newVersion };
+  let version: typeof documentVersions.$inferSelect;
+  try {
+    version = await tx.transaction(async (tx2) => {
+      const latest = await tx2.query.documentVersions.findFirst({
+        where: eq(documentVersions.documentId, doc.id),
+        orderBy: [desc(documentVersions.version)],
       });
-      doc = inserted.newDoc;
-      version = inserted.newVersion;
-    } catch (err: any) {
-      fs.unlinkSync(finalPath);
-      await tx.insert(auditLogs).values({
-        tenantId: auth.tenantId, userId: auth.userId, action: "ATTACH_FAILED",
-        resource: "documents", resourceId: idRow.id,
-        metadata: JSON.stringify({ filename: file.name, reason: "concurrent_attach_or_db_error" }), ip,
-      });
-      throw new Error("Este identificador já foi associado a um documento entretanto. Tente novamente.");
-    }
+      const nextVersion = (latest?.version ?? 0) + 1;
 
-    scheduleThumbnail(finalPath, doc.id);
+      await tx2.update(documentVersions)
+        .set({ isCurrent: false })
+        .where(and(eq(documentVersions.documentId, doc.id), eq(documentVersions.isCurrent, true)));
 
-    await tx.insert(auditLogs).values({
-      tenantId: auth.tenantId, userId: auth.userId, action: "ATTACH",
-      resource: "documents", resourceId: doc.id,
-      metadata: JSON.stringify({ identifier, filename: safeName, method: verification.method }), ip,
+      const [newVersion] = await tx2.insert(documentVersions).values({
+        tenantId: auth.tenantId,
+        documentId: doc.id,
+        version: nextVersion,
+        filename: safeName,
+        mimeType: file.type || "application/octet-stream",
+        filePath: finalPath,
+        fileSize: file.size,
+        extractedText: verification?.excerpt ?? null,
+        uploadedBy: auth.userId,
+        uploadSource,
+        isCurrent: true,
+      }).returning();
+      return newVersion;
     });
+  } catch (err: any) {
+    fs.unlinkSync(finalPath);
+    throw new Error(`Erro ao criar versão: ${err.message}`);
+  }
 
-    const fullDoc = await tx.query.documents.findFirst({
-      where: eq(documents.id, doc.id),
-      with: { identifier: true },
-    });
+  scheduleThumbnail(finalPath, doc.id);
 
-    return {
-      success: true,
-      message: "Documento associado com sucesso.",
-      document: hydrateDocument(fullDoc!, version),
-      verification,
-    };
+  await tx.insert(auditLogs).values({
+    tenantId: auth.tenantId, userId: auth.userId, action: "VERSION",
+    resource: "documents", resourceId: doc.id,
+    metadata: JSON.stringify({
+      identifier,
+      filename: safeName,
+      version: version.version,
+      kind: doc.kind,
+      method: verification?.method ?? null,
+    }), ip,
+  });
+
+  return {
+    success: true,
+    message: `Versão ${version.version} criada com sucesso.`,
+    document: hydrateDocument(doc, version),
+    version,
+    verification,
+  };
   });
 }
 
@@ -467,7 +397,7 @@ export async function attachAttachment(
     });
     if (!idRow) throw new Error(`Identificador '${identifier}' não encontrado.`);
     if (idRow.status === "cancelled") throw new Error("Não é possível associar a um identificador cancelado.");
-    if (!(await canWriteIdentifier(auth, idRow))) {
+    if (!(await canWriteIdentifier(auth, idRow as any))) {
       throw new Error("Sem permissão para adicionar anexos a este identificador.");
     }
 
@@ -515,106 +445,6 @@ export async function attachAttachment(
       success: true,
       message: "Anexo associado com sucesso.",
       document: hydrateDocument(fullDoc!, version),
-    };
-  });
-}
-
-/** New version of an existing document (primary or attachment). */
-export async function createDocumentVersion(
-  tx: DB,
-  auth: AuthPayload,
-  opts: { documentId: string; file: File; uploadSource?: "manual" | "scanner" | "sync"; idempotencyKey?: string },
-  ip: string = "unknown",
-) {
-  const { documentId, file, uploadSource = "manual", idempotencyKey } = opts;
-
-  return await withIdempotency(tx, auth.tenantId, idempotencyKey, async () => {
-    const doc = await tx.query.documents.findFirst({
-      where: and(eq(documents.id, documentId), eq(documents.tenantId, auth.tenantId)),
-      with: { identifier: true },
-    });
-    if (!doc) throw new Error("Documento não encontrado.");
-    if (!doc.identifier) throw new Error("Identificador do documento não encontrado.");
-    if (doc.identifier.status === "cancelled") throw new Error("Não é possível versionar um documento de identificador cancelado.");
-    if (!(await canWriteIdentifier(auth, doc.identifier))) {
-      throw new Error("Sem permissão para criar versões deste documento.");
-    }
-
-    const identifier = doc.identifier.identifier;
-    const { finalPath, safeName } = await writeUploadFile(file, identifier);
-
-    let verification: Awaited<ReturnType<typeof verifyDocumentContainsIdentifier>> | null = null;
-    if (doc.kind === "primary") {
-      try {
-        verification = await verifyDocumentContainsIdentifier(finalPath, file.type || "application/octet-stream", identifier);
-      } catch (err: any) {
-        fs.unlinkSync(finalPath);
-        throw new Error(`Erro na verificação: ${err.message}`);
-      }
-      if (!verification.found) {
-        fs.unlinkSync(finalPath);
-        await tx.insert(auditLogs).values({
-          tenantId: auth.tenantId, userId: auth.userId, action: "VERSION_FAILED",
-          resource: "documents", resourceId: doc.id,
-          metadata: JSON.stringify({ filename: file.name, reason: "identifier_not_found" }), ip,
-        });
-        return { success: false, message: `O documento não contém o identificador '${identifier}'.`, verification };
-      }
-    }
-
-    let version: typeof documentVersions.$inferSelect;
-    try {
-      version = await tx.transaction(async (tx2) => {
-        const latest = await tx2.query.documentVersions.findFirst({
-          where: eq(documentVersions.documentId, doc.id),
-          orderBy: [desc(documentVersions.version)],
-        });
-        const nextVersion = (latest?.version ?? 0) + 1;
-
-        await tx2.update(documentVersions)
-          .set({ isCurrent: false })
-          .where(and(eq(documentVersions.documentId, doc.id), eq(documentVersions.isCurrent, true)));
-
-        const [newVersion] = await tx2.insert(documentVersions).values({
-          tenantId: auth.tenantId,
-          documentId: doc.id,
-          version: nextVersion,
-          filename: safeName,
-          mimeType: file.type || "application/octet-stream",
-          filePath: finalPath,
-          fileSize: file.size,
-          extractedText: verification?.excerpt ?? null,
-          uploadedBy: auth.userId,
-          uploadSource,
-          isCurrent: true,
-        }).returning();
-        return newVersion;
-      });
-    } catch (err: any) {
-      fs.unlinkSync(finalPath);
-      throw new Error(`Erro ao criar versão: ${err.message}`);
-    }
-
-    scheduleThumbnail(finalPath, doc.id);
-
-    await tx.insert(auditLogs).values({
-      tenantId: auth.tenantId, userId: auth.userId, action: "VERSION",
-      resource: "documents", resourceId: doc.id,
-      metadata: JSON.stringify({
-        identifier,
-        filename: safeName,
-        version: version.version,
-        kind: doc.kind,
-        method: verification?.method ?? null,
-      }), ip,
-    });
-
-    return {
-      success: true,
-      message: `Versão ${version.version} criada com sucesso.`,
-      document: hydrateDocument(doc, version),
-      version,
-      verification,
     };
   });
 }

@@ -31,4 +31,5 @@ notify = { version = "7", features = [] }
 notify-debouncer-mini = { version = "0.4", features = [] }
 pdf-extract = "0.7"
 regex = "1"
+zeroize = { version = "1", features = ["derive"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }

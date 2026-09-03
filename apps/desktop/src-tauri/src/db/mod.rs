@@ -28,6 +28,10 @@ pub(crate) fn open(db_path: &Path) -> Result<Connection> {
     // Activar foreign keys — sem isto as FK do schema são ignoradas
     conn.execute_batch("PRAGMA foreign_keys = ON;")?;
     // Restrict file permissions to owner-only (0o600) — Unix only
+    // No Windows, o ficheiro é criado no AppData do utilizador actual,
+    // que já é inacessível a outros utilizadores do sistema (proteção por
+    // directório). Não é necessário ACL explícito porque o Windows aplica
+    // permissões herdadas do directório pai (%APPDATA%).
     #[cfg(unix)]
     if db_path.parent().is_some() {
         std::fs::set_permissions(db_path, std::fs::Permissions::from_mode(0o600)).ok();

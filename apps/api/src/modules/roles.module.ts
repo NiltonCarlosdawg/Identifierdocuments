@@ -5,6 +5,7 @@ import { roles, rolePermissions, users } from "../db/schema";
 import { eq, and, or, isNull } from "drizzle-orm";
 import { requireAuth, requireRole } from "../middleware/auth";
 import { withTenant } from "../db/withTenant";
+import { withIdempotency } from "../lib/idempotency";
 import { safeError } from "../lib/errors";
 
 export const rolesModule = new (Elysia as any)({ prefix: "/roles" })
