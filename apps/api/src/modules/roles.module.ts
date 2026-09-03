@@ -125,5 +125,3 @@ export const rolesModule = new (Elysia as any)({ prefix: "/roles" })
     params: t.Object({ id: t.String() }),
     detail: { summary: "Remover role custom", tags: ["Roles"] },
   });
-detail: { summary: "Remover role custom", tags: ["Roles"] },
-  });

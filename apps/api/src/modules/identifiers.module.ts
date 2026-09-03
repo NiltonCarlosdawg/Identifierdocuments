@@ -273,7 +273,3 @@ export const identifiersModule = new (Elysia as any)({ prefix: "/identifiers" })
     body: t.Object({ reason: t.String() }),
     detail: { summary: "Cancelar identificador", tags: ["Identificadores"] },
   });
-  });
-"Identificadores"] },
-  });
-  });

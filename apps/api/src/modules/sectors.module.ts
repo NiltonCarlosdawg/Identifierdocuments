@@ -162,5 +162,3 @@ export const sectorsModule = new (Elysia as any)({ prefix: "/sectors" })
     params: t.Object({ id: t.String() }),
     detail: { summary: "Remover sector", tags: ["Sectores"] },
   });
-    detail: { summary: "Remover sector", tags: ["Sectores"] },
-  });

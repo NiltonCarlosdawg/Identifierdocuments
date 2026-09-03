@@ -516,5 +516,3 @@ export const usersModule = new (Elysia as any)({ prefix: "/users" })
       body: t.Object({ csv: t.String() }),
       detail: { summary: "Importar utilizadores via CSV", tags: ["Utilizadores"] },
     }));
-y: "Importar utilizadores via CSV", tags: ["Utilizadores"] },
-    }));
