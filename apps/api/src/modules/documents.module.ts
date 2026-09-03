@@ -293,7 +293,7 @@ export const documentsModule = new Elysia({ prefix: "/documents" })
     detail: { summary: "Thumbnail do documento (UUID ou identifier code)", tags: ["Documentos"] },
   })
 
-  .post("/:param/versions", async ({ auth, body, set, clientIp, tenantId, params }) => {
+  .post("/:param/versions", async ({ auth, body, set, clientIp, tenantId, params, headers }) => {
     try {
       return await withTenant(tenantId, async (tx) => {
         try {
@@ -301,6 +301,7 @@ export const documentsModule = new Elysia({ prefix: "/documents" })
             documentId: params.param,
             file: body.file,
             uploadSource: body.uploadSource,
+            idempotencyKey: headers["idempotency-key"],
           }, clientIp);
           if (!result.success) { set.status = 422; return result; }
           return result;

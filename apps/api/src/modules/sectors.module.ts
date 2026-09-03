@@ -62,18 +62,15 @@ export const sectorsModule = new Elysia({ prefix: "/sectors" })
   })
 
   .use(requireRole("ORG_ADMIN"))
-  .post("/", async ({ body, set, tenantId }) => {
+  .post("/", async ({ body, set, tenantId, headers }) => {
     try {
       return await withTenant(tenantId, async (tx) => {
-        try {
+        return await withIdempotency(tx, tenantId, headers["idempotency-key"], async () => {
           const [sector] = await tx.insert(sectors).values({
             tenantId, name: body.name, code: body.code,
           }).returning();
           return { data: sector };
-        } catch (err: any) {
-          console.error("[CREATE_SECTOR_ERROR]", err);
-          throw err;
-        }
+        });
       });
     } catch (err: any) {
       set.status = 400;
@@ -162,5 +159,7 @@ export const sectorsModule = new Elysia({ prefix: "/sectors" })
     }
   }, {
     params: t.Object({ id: t.String() }),
+    detail: { summary: "Remover sector", tags: ["Sectores"] },
+  });
     detail: { summary: "Remover sector", tags: ["Sectores"] },
   });

@@ -635,17 +635,26 @@ fn apply_lease_renewal(
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(|e| e.to_string())?;
 
-    let updated = tx
-        .execute(
-            "UPDATE local_identifier_lease SET status = 'exhausted' WHERE id = ?1 AND status = 'active'",
+    // CORREÇÃO (Fix 7): Verificar novamente se o lease antigo ainda está activo
+    // dentro da transacção para evitar duplicações em caso de race condition.
+    let status: String = tx
+        .query_row(
+            "SELECT status FROM local_identifier_lease WHERE id = ?1",
             params![old_lease_id],
+            |row| row.get(0),
         )
-        .map_err(|e| e.to_string())?;
+        .unwrap_or_else(|_| "not_found".to_string());
 
-    if updated == 0 {
-        tx.commit().map_err(|e| e.to_string())?;
+    if status != "active" {
+        tx.rollback().ok();
         return Ok(false);
     }
+
+    tx.execute(
+        "UPDATE local_identifier_lease SET status = 'exhausted' WHERE id = ?1",
+        params![old_lease_id],
+    )
+    .map_err(|e| e.to_string())?;
 
     tx.execute(
         "INSERT INTO local_identifier_lease (id, category_id, device_id, sector_id, start_seq, end_seq, next_to_use, status, created_at)
@@ -941,7 +950,7 @@ async fn seed_missing_leases(state: &SyncState) -> Result<usize, String> {
 
     let mut seeded = 0usize;
     for (category_id, sector_id) in combos {
-        let mut conn = state.conn()?;
+        let conn = state.conn()?;
         let requires_sequential: i32 = conn
             .query_row(
                 "SELECT requires_sequential FROM local_category_cache WHERE category_id = ?1",

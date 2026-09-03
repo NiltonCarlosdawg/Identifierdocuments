@@ -66,6 +66,14 @@ if (enableSwagger) {
 app
   .use(authMiddleware)
   .use(tenantMiddleware)
+  .derive(({ request }) => {
+    // CORREÇÃO (Fix 2): Obter IP de forma mais robusta. 
+    // Em produção, deve-se confiar em headers específicos (ex: CF-Connecting-IP para Cloudflare)
+    // ou validar a lista de proxies confiáveis. Por agora, sanita o acesso ao header.
+    const xff = request.headers.get("x-forwarded-for");
+    const clientIp = xff ? xff.split(",")[0].trim() : "unknown";
+    return { clientIp };
+  })
   .onRequest(({ request }) => {
     requestTimings.set(request, performance.now());
   })

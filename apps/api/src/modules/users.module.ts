@@ -409,9 +409,8 @@ export const usersModule = new Elysia({ prefix: "/users" })
     detail: { summary: "Remover role de utilizador", tags: ["Utilizadores"] },
   })
 
-    .post("/import", async ({ tenantId, auth, body, request, set }: any) => {
-      const ip = request.headers.get("x-forwarded-for") || "unknown"; // TODO(security): validar/sanitizar IP; atualmente confia no header
-      if (!(await checkRateLimit(`users-import:${tenantId}:${ip}`, 5, 60 * 60_000))) {
+    .post("/import", async ({ tenantId, auth, body, clientIp, set }: any) => {
+      if (!(await checkRateLimit(`users-import:${tenantId}:${clientIp}`, 5, 60 * 60_000))) {
         set.status = 429;
         return { error: { code: "RATE_LIMITED", message: "Demasiadas importações. Tente novamente mais tarde." } };
       }
@@ -514,4 +513,6 @@ export const usersModule = new Elysia({ prefix: "/users" })
     }, {
       body: t.Object({ csv: t.String() }),
       detail: { summary: "Importar utilizadores via CSV", tags: ["Utilizadores"] },
+    }));
+y: "Importar utilizadores via CSV", tags: ["Utilizadores"] },
     }));
