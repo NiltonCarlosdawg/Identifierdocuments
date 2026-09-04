@@ -69,6 +69,7 @@ interface DocDetail extends DocRow {
   attachments?: DocAttachmentMeta[];
   primaryDocumentId?: string | null;
   tags?: string[];
+  restricted?: boolean;
 }
 
 export default function Documents() {
@@ -496,7 +497,7 @@ function DetailModal({ row, onClose, onDone, onDownload, profileMode = false }: 
   const isSectorOnly = row.identifier?.visibility === "sector_only";
   const isOtherSector = isSectorOnly && row.identifier?.sectorId != null && row.identifier.sectorId !== user?.sectorId;
   const isOwner = row.uploadedBy === user?.fullName || false;
-  const showRequestAccessBtn = isOtherSector && !isOwner;
+  const showRequestAccessBtn = !isOwner && (isOtherSector || !!detail?.restricted);
 
   const loadDetail = async () => {
     try {
