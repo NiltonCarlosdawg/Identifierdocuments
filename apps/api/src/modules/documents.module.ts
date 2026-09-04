@@ -129,10 +129,10 @@ export const documentsModule = new (Elysia as any)({ prefix: "/documents" })
     detail: { summary: "Listar documentos", tags: ["Documentos"] },
   })
 
-  .patch("/:id/tags", async ({ tenantId, auth, params, body, set }) => {
+  .patch("/:param/tags", async ({ tenantId, auth, params, body, set }) => {
     try {
       return await withTenant(tenantId, async (tx) => {
-        const result = await updateDocumentTags(tx, auth!, params.id, body.tags);
+        const result = await updateDocumentTags(tx, auth!, params.param, body.tags);
         if ("error" in result) {
           if (result.error === "FORBIDDEN") {
             set.status = 403;
