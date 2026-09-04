@@ -17,7 +17,7 @@ const navItems = [
   { to: "/utilizadores", label: "Utilizadores", icon: UserPlus, roles: ["ORG_ADMIN", "SECTOR_SUPERVISOR"] },
   { to: "/auditoria", label: "Auditoria", icon: History, roles: ["ORG_ADMIN"] },
   { to: "/digitalizar", label: "Digitalizar", icon: Scan },
-  { to: "/configuracoes", label: "Configurações", icon: Cog, roles: ["ORG_ADMIN"] },
+  { to: "/configuracoes", label: "Configurações", icon: Cog },
 ];
 
 export default function Layout() {

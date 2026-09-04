@@ -108,7 +108,7 @@ export default function App() {
           <Route path="utilizadores/:id" element={<RoleProtectedRoute roles={["ORG_ADMIN", "SECTOR_SUPERVISOR"]}><UserProfile /></RoleProtectedRoute>} />
           <Route path="auditoria" element={<RoleProtectedRoute roles={["ORG_ADMIN"]}><Audit /></RoleProtectedRoute>} />
           <Route path="digitalizar" element={<Scanner />} />
-          <Route path="configuracoes" element={<RoleProtectedRoute roles={["ORG_ADMIN"]}><Settings /></RoleProtectedRoute>} />
+          <Route path="configuracoes" element={<Settings />} />
           <Route path="perfil" element={<Profile />} />
         </Route>
       </Routes>

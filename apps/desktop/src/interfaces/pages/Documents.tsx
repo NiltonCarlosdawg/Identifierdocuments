@@ -9,7 +9,7 @@ import { useQueueStore } from "../stores/queueStore";
 import ShareDocumentModal from "../components/ShareDocumentModal";
 import ClassifierSuggestion from "../components/ClassifierSuggestion";
 import type { ClassifierResult } from "../hooks/useClassifier";
-import { Upload, Download, Share2, Search, Printer, Plus, History, LayoutGrid, List, Tag } from "lucide-react";
+import { Upload, Download, Share2, Search, Printer, Plus, History, LayoutGrid, List, Tag, Lock } from "lucide-react";
 import { usePrinterStore } from "../stores/printerStore";
 
 const PROFILE_CATEGORY_IDS = new Set(["CPS", "CPF", "CTR", "CLA"]);
@@ -27,7 +27,7 @@ interface DocRow {
   kind?: "primary" | "attachment";
   label?: string | null;
   tags?: string[];
-  identifier: { id: string; identifier: string; categoryId: string; categoryName: string } | null;
+  identifier: { id: string; identifier: string; categoryId: string; categoryName: string; visibility?: string; sectorId?: string } | null;
   uploadedBy: string | null;
 }
 
@@ -473,6 +473,7 @@ function UploadModal({ onClose, onDone, initialPath = "", initialIdentifier = ""
 
 function DetailModal({ row, onClose, onDone, onDownload, profileMode = false }: { row: DocRow; onClose: () => void; onDone: () => void; onDownload: () => Promise<void>; profileMode?: boolean }) {
   const [showShare, setShowShare] = useState(false);
+  const [showRequestAccess, setShowRequestAccess] = useState(false);
   const [offlineAvailable, setOfflineAvailable] = useState<boolean | null>(null);
   const [printing, setPrinting] = useState(false);
   const [printError, setPrintError] = useState("");
@@ -490,6 +491,12 @@ function DetailModal({ row, onClose, onDone, onDownload, profileMode = false }: 
   const loadPrinters = usePrinterStore(s => s.loadPrinters);
   const printFile = usePrinterStore(s => s.printFile);
   const isTauri = sync.isAvailable();
+  const user = useAuthStore(s => s.user);
+
+  const isSectorOnly = row.identifier?.visibility === "sector_only";
+  const isOtherSector = isSectorOnly && row.identifier?.sectorId != null && row.identifier.sectorId !== user?.sectorId;
+  const isOwner = row.uploadedBy === user?.fullName || false;
+  const showRequestAccessBtn = isOtherSector && !isOwner;
 
   const loadDetail = async () => {
     try {
@@ -671,6 +678,7 @@ function DetailModal({ row, onClose, onDone, onDownload, profileMode = false }: 
     <>
       <Modal title={isProfile ? `Perfil · ${row.identifier?.categoryId || "Contrato"}` : "Detalhe do Documento"} onClose={onClose} footer={
         <div className="flex flex-wrap gap-2">
+          {showRequestAccessBtn && <button onClick={() => setShowRequestAccess(true)} className="docid-button-primary"><Lock className="h-4 w-4" /> Pedir Acesso</button>}
           <button onClick={onDownload} className="docid-button-secondary"><Download className="h-4 w-4" /> Descarregar</button>
           {sync.isAvailable() && (
             <button onClick={handlePrint} disabled={printing || !selectedPrinter} className="docid-button-secondary"><Printer className="h-4 w-4" /> {printing ? "A imprimir..." : "Imprimir"}</button>
@@ -811,6 +819,47 @@ function DetailModal({ row, onClose, onDone, onDownload, profileMode = false }: 
         </div>
       </Modal>
       {showShare && <ShareDocumentModal identifier={identCode} onClose={() => setShowShare(false)} onShared={() => { setShowShare(false); onDone(); }} />}
+      {showRequestAccess && <RequestAccessModal identifier={identCode} onClose={() => setShowRequestAccess(false)} onDone={() => { setShowRequestAccess(false); onDone(); }} />}
     </>
+  );
+}
+
+function RequestAccessModal({ identifier, onClose, onDone }: { identifier: string; onClose: () => void; onDone: () => void }) {
+  const [reason, setReason] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState(false);
+
+  const handleSubmit = async () => {
+    setError(""); setLoading(true);
+    try {
+      await api.post(`/documents/${identifier}/request-access`, { reason: reason.trim() || undefined });
+      setSuccess(true);
+    } catch (err: any) {
+      setError(err?.error?.message || err.message || "Erro ao solicitar acesso.");
+    } finally { setLoading(false); }
+  };
+
+  return (
+    <Modal title="Pedir Acesso ao Documento" onClose={onClose} footer={
+      success
+        ? <button onClick={onDone} className="docid-button-primary">Fechar</button>
+        : <><button onClick={onClose} className="docid-button-secondary">Cancelar</button><button onClick={handleSubmit} disabled={loading} className="docid-button-primary">{loading ? "A enviar..." : "Enviar Pedido"}</button></>
+    }>
+      <div className="space-y-4">
+        <p className="font-mono text-xs text-docid-muted">{identifier}</p>
+        {error && <div className="rounded-lg border border-docid-error/30 bg-docid-error/10 p-3 text-sm text-docid-error">{error}</div>}
+        {success ? (
+          <div className="rounded-lg border border-docid-secondary/30 bg-docid-secondary/10 p-3 text-sm text-docid-secondary">
+            Pedido de acesso enviado. O supervisor do sector emitente será notificado.
+          </div>
+        ) : (
+          <>
+            <p className="text-sm text-docid-muted">Solicite acesso ao supervisor do sector que emitiu este documento. Pode indicar o motivo do pedido.</p>
+            <textarea value={reason} onChange={e => setReason(e.target.value)} rows={3} className="docid-input w-full" placeholder="Motivo do pedido (opcional)..." />
+          </>
+        )}
+      </div>
+    </Modal>
   );
 }

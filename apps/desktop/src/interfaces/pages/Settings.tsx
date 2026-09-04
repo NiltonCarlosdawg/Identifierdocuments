@@ -13,18 +13,22 @@ import type { WatcherFileRow } from "../../domain/entities/Watcher";
 import { Server, Sun, Moon, Save, RotateCcw, FolderPlus, Trash2, Play, Square, Eye, RefreshCw, Building2, Bell, Download, Smartphone, AlertTriangle, Printer } from "lucide-react";
 
 export default function Settings() {
-  const [tab, setTab] = useState<"server" | "appearance" | "watcher" | "organizacao" | "notificacoes" | "dispositivos">("server");
+  const user = useAuthStore(s => s.user);
+  const isAdmin = user?.roles?.includes("ORG_ADMIN") ?? false;
+  const [tab, setTab] = useState<"server" | "appearance" | "watcher" | "organizacao" | "notificacoes" | "dispositivos">(
+    isAdmin ? "server" : "watcher"
+  );
 
   return (
     <div>
       <PageHeader title="Configurações" description="Gerir definições do servidor e preferências da aplicação" />
       <div className="mb-4 flex gap-2 flex-wrap">
-        <TabBtn active={tab === "server"} onClick={() => setTab("server")}>Servidor</TabBtn>
-        <TabBtn active={tab === "appearance"} onClick={() => setTab("appearance")}>Aparência</TabBtn>
+        {isAdmin && <TabBtn active={tab === "server"} onClick={() => setTab("server")}>Servidor</TabBtn>}
+        {isAdmin && <TabBtn active={tab === "appearance"} onClick={() => setTab("appearance")}>Aparência</TabBtn>}
         <TabBtn active={tab === "watcher"} onClick={() => setTab("watcher")}>Pastas Vigiladas</TabBtn>
-        <TabBtn active={tab === "organizacao"} onClick={() => setTab("organizacao")}><Building2 className="h-4 w-4" /> Organização</TabBtn>
+        {isAdmin && <TabBtn active={tab === "organizacao"} onClick={() => setTab("organizacao")}><Building2 className="h-4 w-4" /> Organização</TabBtn>}
         <TabBtn active={tab === "dispositivos"} onClick={() => setTab("dispositivos")}><Smartphone className="h-4 w-4" /> Dispositivos</TabBtn>
-        <TabBtn active={tab === "notificacoes"} onClick={() => setTab("notificacoes")}><Bell className="h-4 w-4" /> Notificações</TabBtn>
+        {isAdmin && <TabBtn active={tab === "notificacoes"} onClick={() => setTab("notificacoes")}><Bell className="h-4 w-4" /> Notificações</TabBtn>}
       </div>
       {tab === "server" ? <ServerTab /> : tab === "appearance" ? <AppearanceTab /> : tab === "watcher" ? <WatcherTab /> : tab === "organizacao" ? <OrganizationTab /> : tab === "dispositivos" ? <DevicesTab /> : <NotificationsTab />}
     </div>

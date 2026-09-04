@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS "idempotency_records" (
 	CONSTRAINT "idempotency_records_tenant_id_idempotency_key_pk" PRIMARY KEY("tenant_id","idempotency_key")
 );
 --> statement-breakpoint
-ALTER TABLE "document_shares" ADD COLUMN "source_request_id" uuid;--> statement-breakpoint
+ALTER TABLE "document_shares" ADD COLUMN IF NOT EXISTS "source_request_id" uuid;--> statement-breakpoint
 DO $$ BEGIN
  ALTER TABLE "document_access_requests" ADD CONSTRAINT "document_access_requests_tenant_id_organizations_id_fk" FOREIGN KEY ("tenant_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;
 EXCEPTION

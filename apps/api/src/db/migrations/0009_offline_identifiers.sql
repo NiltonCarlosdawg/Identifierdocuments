@@ -13,7 +13,11 @@ CREATE TABLE IF NOT EXISTS "devices" (
   "created_at" timestamp NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS devices_tenant_idx ON devices(tenant_id);
-CREATE INDEX IF NOT EXISTS devices_user_idx ON devices(user_id);
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'devices' AND column_name = 'user_id') THEN
+    CREATE INDEX IF NOT EXISTS devices_user_idx ON devices(user_id);
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS "identifier_leases" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),

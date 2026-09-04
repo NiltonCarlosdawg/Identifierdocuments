@@ -1,2 +1,2 @@
-ALTER TABLE "identifiers" DROP CONSTRAINT "identifiers_identifier_unique";--> statement-breakpoint
+ALTER TABLE "identifiers" DROP CONSTRAINT IF EXISTS "identifiers_identifier_unique";--> statement-breakpoint
 CREATE UNIQUE INDEX IF NOT EXISTS "identifiers_tenant_identifier_idx" ON "identifiers" USING btree ("tenant_id","identifier");

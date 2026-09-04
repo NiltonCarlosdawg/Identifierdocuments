@@ -1,5 +1,5 @@
-ALTER TABLE "approvals" ADD COLUMN "share_id" uuid;--> statement-breakpoint
-ALTER TABLE "document_shares" ADD COLUMN "status" text DEFAULT 'active' NOT NULL;--> statement-breakpoint
+ALTER TABLE "approvals" ADD COLUMN IF NOT EXISTS "share_id" uuid;--> statement-breakpoint
+ALTER TABLE "document_shares" ADD COLUMN IF NOT EXISTS "status" text DEFAULT 'active' NOT NULL;--> statement-breakpoint
 DO $$ BEGIN
  ALTER TABLE "approvals" ADD CONSTRAINT "approvals_share_id_document_shares_id_fk" FOREIGN KEY ("share_id") REFERENCES "public"."document_shares"("id") ON DELETE no action ON UPDATE no action;
 EXCEPTION

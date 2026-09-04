@@ -16,7 +16,11 @@ ALTER TABLE devices ADD COLUMN IF NOT EXISTS "deactivated_by" uuid;
 --> statement-breakpoint
 
 -- 2. Rename user_id -> registered_by_user_id (preserva dados existentes)
-ALTER TABLE devices RENAME COLUMN "user_id" TO "registered_by_user_id";
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'devices' AND column_name = 'user_id') THEN
+    ALTER TABLE devices RENAME COLUMN "user_id" TO "registered_by_user_id";
+  END IF;
+END $$;
 
 --> statement-breakpoint
 
@@ -31,7 +35,11 @@ UPDATE devices SET status = 'inactive' WHERE status = 'force_released';
 --> statement-breakpoint
 
 -- 5. Add novo CHECK constraint (seguro porque todas as linhas são active ou inactive)
-ALTER TABLE devices ADD CONSTRAINT devices_status_check CHECK (status IN ('active', 'inactive'));
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'devices_status_check') THEN
+    ALTER TABLE devices ADD CONSTRAINT devices_status_check CHECK (status IN ('active', 'inactive'));
+  END IF;
+END $$;
 
 --> statement-breakpoint
 

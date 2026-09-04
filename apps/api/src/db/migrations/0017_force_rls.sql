@@ -37,42 +37,54 @@ BEGIN
       FOR ALL USING (tenant_id = current_setting('app.current_tenant')::uuid);
   END IF;
 
-  IF NOT EXISTS (
+  IF EXISTS (
+    SELECT 1 FROM information_schema.tables WHERE table_name = 'document_access_requests'
+  ) AND NOT EXISTS (
     SELECT 1 FROM pg_policies WHERE tablename = 'document_access_requests' AND policyname LIKE 'tenant_isolation%'
   ) THEN
     CREATE POLICY tenant_isolation_document_access_requests ON document_access_requests
       FOR ALL USING (tenant_id = current_setting('app.current_tenant')::uuid);
   END IF;
 
-  IF NOT EXISTS (
+  IF EXISTS (
+    SELECT 1 FROM information_schema.tables WHERE table_name = 'classifier_feedback'
+  ) AND NOT EXISTS (
     SELECT 1 FROM pg_policies WHERE tablename = 'classifier_feedback' AND policyname LIKE 'tenant_isolation%'
   ) THEN
     CREATE POLICY tenant_isolation_classifier_feedback ON classifier_feedback
       FOR ALL USING (tenant_id = current_setting('app.current_tenant')::uuid);
   END IF;
 
-  IF NOT EXISTS (
+  IF EXISTS (
+    SELECT 1 FROM information_schema.tables WHERE table_name = 'devices'
+  ) AND NOT EXISTS (
     SELECT 1 FROM pg_policies WHERE tablename = 'devices' AND policyname LIKE 'tenant_isolation%'
   ) THEN
     CREATE POLICY tenant_isolation_devices ON devices
       FOR ALL USING (tenant_id = current_setting('app.current_tenant')::uuid);
   END IF;
 
-  IF NOT EXISTS (
+  IF EXISTS (
+    SELECT 1 FROM information_schema.tables WHERE table_name = 'identifier_leases'
+  ) AND NOT EXISTS (
     SELECT 1 FROM pg_policies WHERE tablename = 'identifier_leases' AND policyname LIKE 'tenant_isolation%'
   ) THEN
     CREATE POLICY tenant_isolation_identifier_leases ON identifier_leases
       FOR ALL USING (tenant_id = current_setting('app.current_tenant')::uuid);
   END IF;
 
-  IF NOT EXISTS (
+  IF EXISTS (
+    SELECT 1 FROM information_schema.tables WHERE table_name = 'identifier_release_pool'
+  ) AND NOT EXISTS (
     SELECT 1 FROM pg_policies WHERE tablename = 'identifier_release_pool' AND policyname LIKE 'tenant_isolation%'
   ) THEN
     CREATE POLICY tenant_isolation_identifier_release_pool ON identifier_release_pool
       FOR ALL USING (tenant_id = current_setting('app.current_tenant')::uuid);
   END IF;
 
-  IF NOT EXISTS (
+  IF EXISTS (
+    SELECT 1 FROM information_schema.tables WHERE table_name = 'idempotency_records'
+  ) AND NOT EXISTS (
     SELECT 1 FROM pg_policies WHERE tablename = 'idempotency_records' AND policyname LIKE 'tenant_isolation%'
   ) THEN
     CREATE POLICY tenant_isolation_idempotency_records ON idempotency_records

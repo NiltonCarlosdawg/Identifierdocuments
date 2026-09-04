@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS "notifications" (
 	"created_at" timestamp DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-ALTER TABLE "document_shares" ADD COLUMN "revoked_at" timestamp;--> statement-breakpoint
+ALTER TABLE "document_shares" ADD COLUMN IF NOT EXISTS "revoked_at" timestamp;--> statement-breakpoint
 DO $$ BEGIN
  ALTER TABLE "notifications" ADD CONSTRAINT "notifications_tenant_id_organizations_id_fk" FOREIGN KEY ("tenant_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;
 EXCEPTION

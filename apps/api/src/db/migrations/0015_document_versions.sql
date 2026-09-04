@@ -36,17 +36,23 @@ ALTER TABLE "documents" ADD COLUMN IF NOT EXISTS "kind" text DEFAULT 'primary' N
 --> statement-breakpoint
 ALTER TABLE "documents" ADD COLUMN IF NOT EXISTS "label" text;
 --> statement-breakpoint
-INSERT INTO "document_versions" (
-	"tenant_id", "document_id", "version", "filename", "mime_type", "file_path",
-	"file_size", "extracted_text", "uploaded_by", "upload_source", "is_current", "created_at"
-)
-SELECT
-	d."tenant_id", d."id", 1, d."filename", d."mime_type", d."file_path",
-	d."file_size", d."extracted_text", d."uploaded_by", COALESCE(d."upload_source", 'manual'), true, d."created_at"
-FROM "documents" d
-WHERE NOT EXISTS (
-	SELECT 1 FROM "document_versions" v WHERE v."document_id" = d."id"
-);
+DO $$ BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns WHERE table_name = 'documents' AND column_name = 'filename'
+  ) THEN
+    INSERT INTO "document_versions" (
+      "tenant_id", "document_id", "version", "filename", "mime_type", "file_path",
+      "file_size", "extracted_text", "uploaded_by", "upload_source", "is_current", "created_at"
+    )
+    SELECT
+      d."tenant_id", d."id", 1, d."filename", d."mime_type", d."file_path",
+      d."file_size", d."extracted_text", d."uploaded_by", COALESCE(d."upload_source", 'manual'), true, d."created_at"
+    FROM "documents" d
+    WHERE NOT EXISTS (
+      SELECT 1 FROM "document_versions" v WHERE v."document_id" = d."id"
+    );
+  END IF;
+END $$;
 --> statement-breakpoint
 ALTER TABLE "documents" DROP CONSTRAINT IF EXISTS "documents_identifier_id_unique";
 --> statement-breakpoint
@@ -78,6 +84,10 @@ ALTER TABLE "document_versions" ENABLE ROW LEVEL SECURITY;
 --> statement-breakpoint
 DROP POLICY IF EXISTS tenant_isolation_document_versions ON document_versions;
 --> statement-breakpoint
-CREATE POLICY tenant_isolation_document_versions ON document_versions
-  FOR ALL
-  USING (tenant_id = current_setting('app.current_tenant')::uuid);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'document_versions' AND policyname = 'tenant_isolation_document_versions') THEN
+    CREATE POLICY tenant_isolation_document_versions ON document_versions
+      FOR ALL
+      USING (tenant_id = current_setting('app.current_tenant')::uuid);
+  END IF;
+END $$;

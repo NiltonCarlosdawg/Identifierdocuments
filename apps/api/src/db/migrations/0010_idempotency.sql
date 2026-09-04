@@ -4,4 +4,4 @@
 
 ALTER TABLE identifiers ADD COLUMN IF NOT EXISTS "idempotency_key" text;
 DROP INDEX IF EXISTS identifiers_tenant_idempotency_idx;
-CREATE INDEX identifiers_tenant_idempotency_idx ON identifiers(tenant_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
+CREATE INDEX IF NOT EXISTS identifiers_tenant_idempotency_idx ON identifiers(tenant_id, idempotency_key) WHERE idempotency_key IS NOT NULL;

@@ -666,6 +666,8 @@ export async function listDocumentsForApi(
         identifier: d.identifier.identifier,
         categoryId: d.identifier.category?.id,
         categoryName: d.identifier.category?.name,
+        visibility: d.identifier.visibility,
+        sectorId: d.identifier.sectorId,
       } : null,
       uploadedBy: d.uploader?.fullName || null,
     };
