@@ -557,9 +557,6 @@ export const documentsModule = new (Elysia as any)({ prefix: "/documents" })
           if (!idRow?.document) {
             set.status = 404; return { error: { code: "NOT_FOUND", message: "Documento não encontrado." } };
           }
-          if (idRow.visibility !== "sector_only") {
-            set.status = 422; return { error: { code: "NOT_RESTRICTED", message: "Apenas documentos sector_only necessitam de pedido de acesso." } };
-          }
 
           if (idRow.document.uploadedBy === auth!.userId) {
             set.status = 422; return { error: { code: "OWN_DOCUMENT", message: "É dono do documento — não precisa de pedir acesso." } };

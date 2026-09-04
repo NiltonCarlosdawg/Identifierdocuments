@@ -494,8 +494,7 @@ function DetailModal({ row, onClose, onDone, onDownload, profileMode = false }: 
   const isTauri = sync.isAvailable();
   const user = useAuthStore(s => s.user);
 
-  const isSectorOnly = row.identifier?.visibility === "sector_only";
-  const isOtherSector = isSectorOnly && row.identifier?.sectorId != null && row.identifier.sectorId !== user?.sectorId;
+  const isOtherSector = row.identifier?.sectorId != null && row.identifier.sectorId !== user?.sectorId;
   const isOwner = row.uploadedBy === user?.fullName || false;
   const showRequestAccessBtn = !isOwner && (isOtherSector || !!detail?.restricted);
 
