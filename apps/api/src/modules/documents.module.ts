@@ -600,6 +600,15 @@ export const documentsModule = new (Elysia as any)({ prefix: "/documents" })
             requesterId: auth!.userId,
           }).returning();
 
+          await tx.insert(approvals).values({
+            tenantId, documentId: idRow.document.id,
+            sectorId: idRow.sector?.id ?? null,
+            supervisorId,
+            requesterId: auth!.userId,
+            type: "access_request",
+            status: "pending",
+          });
+
           await notify(tx, {
             type: "access:requested",
             userId: supervisorId,

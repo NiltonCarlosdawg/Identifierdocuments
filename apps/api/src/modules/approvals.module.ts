@@ -119,11 +119,6 @@ export const approvalsModule = new (Elysia as any)({ prefix: "/approvals" })
                 .where(eq(documentShares.id, existing.shareId))
                 .returning();
 
-              // CORREÇÃO: ao aprovar uma partilha cross-sector, ninguém era
-              // notificado de que o acesso ficou activo — só o uploader do
-              // documento recebia notificação genérica "approval:approved" (mais
-              // abaixo). O destinatário real da partilha (sector ou utilizador)
-              // ficava sem saber que já podia aceder ao documento.
               if (updatedShare?.sharedWithUserId) {
                 await notify(tx, {
                   type: "document:shared",
@@ -142,6 +137,22 @@ export const approvalsModule = new (Elysia as any)({ prefix: "/approvals" })
                   });
                 }
               }
+            }
+
+            if (existing.type === "access_request" && existing.requesterId) {
+              await tx.insert(documentShares).values({
+                tenantId,
+                documentId: approval.documentId,
+                sharedWithUserId: existing.requesterId,
+                sharedByUserId: auth!.userId,
+                status: "active",
+              });
+              await notify(tx, {
+                type: "document:shared",
+                userId: existing.requesterId,
+                tenantId,
+                payload: { documentId: approval.documentId, identifier: identifierStr },
+              });
             }
           }
 
