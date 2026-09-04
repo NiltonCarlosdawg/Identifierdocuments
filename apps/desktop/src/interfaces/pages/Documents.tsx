@@ -122,11 +122,28 @@ export default function Documents() {
 
   const handleOpen = async (row: DocRow) => {
     setDownloadError("");
-    if (!sync.isAvailable()) { window.open(row.fileUrl, "_blank"); return; }
+    if (!sync.isAvailable()) {
+      try {
+        const blob = await api.getBlob(`/documents/${row.id}/download`);
+        if (!blob) throw new Error("Ficheiro vazio.");
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url; a.download = row.filename || "documento"; a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+      } catch (err: any) {
+        setDownloadError(mapError(err, "Erro ao descarregar."));
+      }
+      return;
+    }
     try {
       const path = await sync.downloadOffline(row.id, row.filename);
       if (path) { await sync.openLocalFile(path); return; }
-      window.open(row.fileUrl, "_blank");
+      const blob = await api.getBlob(`/documents/${row.id}/download`);
+      if (!blob) throw new Error("Ficheiro vazio.");
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = row.filename || "documento"; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
     } catch (err: any) {
       setDownloadError(err?.message || "Documento não disponível offline.");
     }
