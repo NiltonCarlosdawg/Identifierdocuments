@@ -52,7 +52,6 @@ jobs:
         uses: tauri-apps/tauri-action@v2
         with:
           projectPath: apps/desktop
-          bundleIdentifier: com.veranolabs.docid
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
