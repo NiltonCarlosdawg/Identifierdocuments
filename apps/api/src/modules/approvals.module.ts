@@ -141,7 +141,6 @@ export const approvalsModule = new (Elysia as any)({ prefix: "/approvals" })
 
             if (existing.type === "access_request" && existing.requesterId) {
               await tx.insert(documentShares).values({
-                tenantId,
                 documentId: approval.documentId,
                 sharedWithUserId: existing.requesterId,
                 sharedBy: auth!.userId,

@@ -19,12 +19,16 @@ export const sectors = pgTable("sectors", {
   tenantId: uuid("tenant_id").notNull().references(() => organizations.id),
   name: text("name").notNull(),
   code: text("code").notNull(),
-  supervisorId: uuid("supervisor_id").references(() => users.id),
+  // Nota: o FK sectors.supervisor_id -> users.id existe na BD, mas o .references()
+  // foi removido aqui porque a dependência circular de tipos (sectors <-> users)
+  // fazia o TypeScript degradar todas as relações para Record<string, any>.
+  // Se voltares a adicionar .references(), os tipos das relações deixam de funcionar.
+  supervisorId: uuid("supervisor_id"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => ({ indexes: [
   uniqueIndex("sectors_tenant_code_idx").on(t.tenantId, t.code),
   index("sectors_tenant_idx").on(t.tenantId),
-] }) ) as any;
+] }) );
 
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -38,7 +42,7 @@ export const users = pgTable("users", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => ({ indexes: [
   uniqueIndex("users_tenant_email_idx").on(t.tenantId, t.email),
-] }) ) as any;
+] }) );
 
 export const passwordResetTokens = pgTable("password_reset_tokens", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -49,7 +53,7 @@ export const passwordResetTokens = pgTable("password_reset_tokens", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => ({ indexes: [
   uniqueIndex("password_reset_token_hash_idx").on(t.tokenHash),
-] }) ) as any;
+] }) );
 
 export const roles = pgTable("roles", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -59,7 +63,7 @@ export const roles = pgTable("roles", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => ({ indexes: [
   uniqueIndex("roles_tenant_name_idx").on(t.tenantId, t.name),
-] }) ) as any;
+] }) );
 
 export const rolePermissions = pgTable("role_permissions", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -68,7 +72,7 @@ export const rolePermissions = pgTable("role_permissions", {
   action: text("action").notNull(),
 }, (t) => ({ indexes: [
   uniqueIndex("role_perm_unique_idx").on(t.roleId, t.resource, t.action),
-] }) ) as any;
+] }) );
 
 export const userRoles = pgTable("user_roles", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -79,7 +83,7 @@ export const userRoles = pgTable("user_roles", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => ({ indexes: [
   uniqueIndex("user_role_unique_idx").on(t.userId, t.roleId),
-] }) ) as any;
+] }) );
 
 export const categories = pgTable("categories", {
   id: text("id").primaryKey(),
@@ -110,7 +114,7 @@ export const identifiers = pgTable("identifiers", {
   index("identifiers_status_idx").on(t.status),
   index("identifiers_created_idx").on(t.createdAt),
   uniqueIndex("identifiers_tenant_identifier_idx").on(t.tenantId, t.identifier),
-] }) ) as any;
+] }) );
 
 export const idempotencyRecords = pgTable("idempotency_records", {
   tenantId: uuid("tenant_id").notNull().references(() => organizations.id),
@@ -135,7 +139,7 @@ export const documents = pgTable("documents", {
   index("documents_tenant_idx").on(t.tenantId),
   index("documents_identifier_idx").on(t.identifierId),
   uniqueIndex("documents_one_primary_per_identifier_idx").on(t.identifierId).where(sql`kind = 'primary'`),
-] }) ) as any;
+] }) );
 
 export const documentVersions = pgTable("document_versions", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -156,7 +160,7 @@ export const documentVersions = pgTable("document_versions", {
   index("document_versions_document_idx").on(t.documentId),
   uniqueIndex("document_versions_doc_version_uidx").on(t.documentId, t.version),
   uniqueIndex("document_versions_one_current_idx").on(t.documentId).where(sql`is_current = true`),
-] }) ) as any;
+] }) );
 
 export const documentAccessRequests = pgTable("document_access_requests", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -172,7 +176,7 @@ export const documentAccessRequests = pgTable("document_access_requests", {
   index("dar_document_idx").on(t.documentId),
   index("dar_requester_idx").on(t.requesterId),
   index("dar_status_idx").on(t.status),
-] }) ) as any;
+] }) );
 
 export const documentShares = pgTable("document_shares", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -192,7 +196,7 @@ export const documentShares = pgTable("document_shares", {
   index("document_shares_sector_idx").on(t.sharedWithSectorId),
   index("document_shares_status_idx").on(t.status),
   index("document_shares_source_request_idx").on(t.sourceRequestId),
-] }) ) as any;
+] }) );
 
 export const approvals = pgTable("approvals", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -213,7 +217,7 @@ export const approvals = pgTable("approvals", {
   index("approvals_tenant_idx").on(t.tenantId),
   index("approvals_status_idx").on(t.status),
   index("approvals_document_idx").on(t.documentId),
-] }) ) as any;
+] }) );
 
 export const auditLogs = pgTable("audit_logs", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -228,7 +232,7 @@ export const auditLogs = pgTable("audit_logs", {
 }, (t) => ({ indexes: [
   index("audit_tenant_idx").on(t.tenantId),
   index("audit_created_idx").on(t.createdAt),
-] }) ) as any;
+] }) );
 
 export const classifierFeedback = pgTable("classifier_feedback", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -241,7 +245,7 @@ export const classifierFeedback = pgTable("classifier_feedback", {
 }, (t) => ({ indexes: [
   index("classifier_feedback_tenant_idx").on(t.tenantId),
   index("classifier_feedback_document_idx").on(t.documentId),
-] }) ) as any;
+] }) );
 
 export const devices = pgTable("devices", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -258,7 +262,7 @@ export const devices = pgTable("devices", {
   index("devices_tenant_idx").on(t.tenantId),
   index("devices_sector_idx").on(t.sectorId),
   index("devices_status_idx").on(t.status),
-] }) ) as any;
+] }) );
 
 export const identifierLeases = pgTable("identifier_leases", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -278,7 +282,7 @@ export const identifierLeases = pgTable("identifier_leases", {
   index("leases_device_idx").on(t.deviceId),
   index("leases_status_idx").on(t.status),
   uniqueIndex("leases_device_cat_active_idx").on(t.tenantId, t.categoryId, t.deviceId).where(sql`status = 'active'`),
-] }) ) as any;
+] }) );
 
 export const identifierReleasePool = pgTable("identifier_release_pool", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -291,7 +295,7 @@ export const identifierReleasePool = pgTable("identifier_release_pool", {
 }, (t) => ({ indexes: [
   index("pool_tenant_idx").on(t.tenantId),
   index("pool_tenant_category_idx").on(t.tenantId, t.categoryId),
-] }) ) as any;
+] }) );
 
 export const notifications = pgTable("notifications", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -304,7 +308,7 @@ export const notifications = pgTable("notifications", {
 }, (t) => ({ indexes: [
   index("notifications_user_idx").on(t.userId),
   index("notifications_read_idx").on(t.isRead),
-] }) ) as any;
+] }) );
 
 export const organizationRelations = relations(organizations, ({ many }) => ({
   sectors: many(sectors),
