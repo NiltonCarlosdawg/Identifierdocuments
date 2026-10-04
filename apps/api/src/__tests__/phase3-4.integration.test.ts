@@ -87,6 +87,7 @@ describe("Health & Auth", () => {
         adminEmail: email,
         adminPassword: "testpass123",
         identifierPrefix: "TST",
+        termsAccepted: true,
       }),
     });
     expect(status).toBe(200);

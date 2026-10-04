@@ -69,6 +69,7 @@ beforeAll(async () => {
       adminEmail: email,
       adminPassword: "testpass123",
       identifierPrefix: "VER",
+      termsAccepted: true,
     }),
   });
   const login = await api<any>("/auth/login", {

@@ -58,7 +58,7 @@ export default function Login() {
   );
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-docid-background p-6 text-docid-text">
+    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-docid-background p-6 text-docid-text">
       <div className="pointer-events-none absolute left-[-20%] top-1/4 h-96 w-96 rounded-full bg-docid-primary/10 blur-3xl" />
       <div className="pointer-events-none absolute bottom-1/4 right-[-20%] h-96 w-96 rounded-full bg-docid-secondary/10 blur-3xl" />
       <div className="docid-panel relative z-10 w-full max-w-[400px] p-8 shadow-2xl shadow-black/20">
@@ -70,7 +70,7 @@ export default function Login() {
         {view === "login" && (
           <form onSubmit={handleSubmit} className="space-y-4">
             {emailField}
-            <div><label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-docid-muted">Palavra-passe</label><div className="relative"><Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-docid-outline" /><input data-testid="login-password" type={showPassword ? "text" : "password"} value={password} onChange={e => setPassword(e.target.value)} className="docid-input w-full pl-10 pr-10" placeholder="••••••••" required /><button type="button" onClick={() => setShowPassword(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-docid-outline transition hover:text-docid-text">{showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button></div></div>
+            <div><label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-docid-muted">Palavra-passe</label><div className="relative"><Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-docid-outline" /><input data-testid="login-password" type={showPassword ? "text" : "password"} value={password} onChange={e => setPassword(e.target.value)} className="docid-input w-full pl-10 pr-10" placeholder="••••••••" required /><button type="button" onClick={() => setShowPassword(v => !v)} aria-label={showPassword ? "Ocultar palavra-passe" : "Mostrar palavra-passe"} className="absolute right-3 top-1/2 -translate-y-1/2 text-docid-outline transition hover:text-docid-text">{showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button></div></div>
             <div className="flex items-center justify-between text-sm"><label className="flex items-center gap-2 text-docid-muted"><input type="checkbox" className="rounded border-docid-border bg-docid-surface-low text-docid-primary focus:ring-docid-primary" /> Lembrar-me</label><button type="button" onClick={() => goTo("forgot")} className="text-docid-primary-soft hover:underline">Esqueceu a senha?</button></div>
             {created && <p className="rounded-lg border border-docid-secondary/30 bg-docid-secondary/10 p-3 text-sm text-docid-secondary">Organização criada com sucesso! Faça login para continuar.</p>}
             {info && <p className="flex items-start gap-2 rounded-lg border border-docid-secondary/30 bg-docid-secondary/10 p-3 text-sm text-docid-secondary"><CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />{info}</p>}
@@ -92,7 +92,7 @@ export default function Login() {
         {view === "reset" && (
           <form onSubmit={handleReset} className="space-y-4">
             <div><label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-docid-muted">Código de redefinição</label><div className="relative"><KeyRound className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-docid-outline" /><input type="text" value={token} onChange={e => setToken(e.target.value)} className="docid-input w-full pl-10" placeholder="Código recebido por email" required /></div></div>
-            <div><label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-docid-muted">Nova palavra-passe</label><div className="relative"><Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-docid-outline" /><input type={showPassword ? "text" : "password"} value={newPassword} onChange={e => setNewPassword(e.target.value)} className="docid-input w-full pl-10 pr-10" placeholder="••••••••" minLength={6} required /><button type="button" onClick={() => setShowPassword(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-docid-outline transition hover:text-docid-text">{showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button></div></div>
+            <div><label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-docid-muted">Nova palavra-passe</label><div className="relative"><Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-docid-outline" /><input type={showPassword ? "text" : "password"} value={newPassword} onChange={e => setNewPassword(e.target.value)} className="docid-input w-full pl-10 pr-10" placeholder="••••••••" minLength={6} required /><button type="button" onClick={() => setShowPassword(v => !v)} aria-label={showPassword ? "Ocultar palavra-passe" : "Mostrar palavra-passe"} className="absolute right-3 top-1/2 -translate-y-1/2 text-docid-outline transition hover:text-docid-text">{showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button></div></div>
             {error && <p className="rounded-lg border border-docid-error/30 bg-docid-error/10 p-3 text-sm text-docid-error">{error}</p>}
             <button type="submit" disabled={loading} className="docid-button-primary w-full py-3">{loading ? "A repor..." : "Repor palavra-passe"}</button>
             <button type="button" onClick={() => goTo("login")} className="flex w-full items-center justify-center gap-2 text-sm text-docid-muted hover:text-docid-text"><ArrowLeft className="h-4 w-4" /> Voltar ao login</button>
@@ -103,8 +103,8 @@ export default function Login() {
           <p className="mb-3 text-sm text-docid-muted">Problemas no acesso?</p>
           <button type="button" className="docid-button-secondary" onClick={() => navigate("/onboarding")}>Criar organização</button>
         </div>
-        <p className="mt-8 text-center text-xs uppercase tracking-wider text-docid-outline">© 2026 <span className="font-semibold text-docid-muted">VERANO Labs</span> · Luanda, Angola</p>
+        <p className="mt-8 text-center text-xs uppercase tracking-wider text-docid-outline">© 2026 <span className="font-semibold text-docid-muted">VeranoLabs</span> · Luanda, Angola</p>
       </div>
-    </div>
+    </main>
   );
 }

@@ -20,6 +20,11 @@ export const tenantsModule = new (Elysia as any)({ prefix: "/tenants" })
       return { error: { code: "ONBOARDING_DISABLED", message: "Onboarding público desactivado. Contacte o administrador." } };
     }
 
+    if (!body.termsAccepted) {
+      set.status = 400;
+      return { error: { code: "TERMS_NOT_ACCEPTED", message: "Deve aceitar os Termos e Condições para criar a organização." } };
+    }
+
     const ip = getClientIp(request);
     if (!(await checkRateLimit(`onboarding:${ip}`, 3, 3600_000))) {
       set.status = 429;
@@ -43,6 +48,8 @@ export const tenantsModule = new (Elysia as any)({ prefix: "/tenants" })
             name: body.name,
             slug,
             identifierPrefix: body.identifierPrefix ?? slug.toUpperCase().slice(0, 4),
+            termsAccepted: true,
+            termsAcceptedAt: new Date(),
           })
           .returning();
 
@@ -108,6 +115,7 @@ export const tenantsModule = new (Elysia as any)({ prefix: "/tenants" })
       adminPassword: t.String({ minLength: 6 }),
       adminName: t.Optional(t.String()),
       identifierPrefix: t.Optional(t.String({ maxLength: 6 })),
+      termsAccepted: t.Boolean(),
     }),
     detail: { summary: "Criar organização (onboarding público)", tags: ["Organizações"] },
   })

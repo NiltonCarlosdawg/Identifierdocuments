@@ -9,6 +9,8 @@ export const organizations = pgTable("organizations", {
   identifierLeaseBatchSize: integer("identifier_lease_batch_size").notNull().default(50),
   plan: text("plan").notNull().default("starter"),
   isActive: boolean("is_active").notNull().default(true),
+  termsAccepted: boolean("terms_accepted").notNull().default(false),
+  termsAcceptedAt: timestamp("terms_accepted_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

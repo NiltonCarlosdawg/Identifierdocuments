@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../../infrastructure/di/container";
 import { mapError } from "../../shared/errors/mapError";
-import { Building2, UserCheck, CheckCircle2, ArrowRight, ArrowLeft, FileText, Eye, EyeOff, Lock, Mail, User } from "lucide-react";
+import { Building2, UserCheck, CheckCircle2, ArrowRight, ArrowLeft, FileText, Eye, EyeOff, Lock, Mail, User, ScrollText } from "lucide-react";
+import TermsContent from "../components/TermsContent";
 
-type Step = "org" | "admin" | "confirm";
+type Step = "org" | "admin" | "confirm" | "terms";
 
 export default function Onboarding() {
   const navigate = useNavigate();
@@ -21,6 +22,9 @@ export default function Onboarding() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [hasScrolledToBottom, setHasScrolledToBottom] = useState(false);
+  const termsRef = useRef<HTMLDivElement>(null);
 
   const handleOrgNameChange = (val: string) => {
     setOrgName(val);
@@ -28,8 +32,20 @@ export default function Onboarding() {
     if (autoPrefix) setPrefix(val.replace(/[^a-zA-Z]/g, "").toUpperCase().slice(0, 4) || "ORG");
   };
 
+  useEffect(() => {
+    if (step !== "terms" || !termsRef.current) return;
+    const el = termsRef.current;
+    const handleScroll = () => {
+      const atBottom = el.scrollHeight - el.scrollTop <= el.clientHeight + 10;
+      if (atBottom) setHasScrolledToBottom(true);
+    };
+    el.addEventListener("scroll", handleScroll);
+    return () => el.removeEventListener("scroll", handleScroll);
+  }, [step]);
+
   const canAdvanceToAdmin = orgName.trim().length >= 2 && slug.trim().length >= 2 && prefix.trim().length > 0;
   const canAdvanceToConfirm = adminEmail.includes("@") && adminPassword.length >= 6 && adminPassword === confirmPassword;
+  const canSubmit = termsAccepted && hasScrolledToBottom;
 
   const handleSubmit = async () => {
     setError(""); setLoading(true);
@@ -41,6 +57,7 @@ export default function Onboarding() {
         adminEmail,
         adminPassword,
         adminName: adminName || undefined,
+        termsAccepted: true,
       });
 
       navigate("/login?created=1", { replace: true });
@@ -48,7 +65,7 @@ export default function Onboarding() {
   };
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-docid-background p-6 text-docid-text">
+    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-docid-background p-6 text-docid-text">
       <div className="pointer-events-none absolute left-[-20%] top-1/4 h-96 w-96 rounded-full bg-docid-primary/10 blur-3xl" />
       <div className="pointer-events-none absolute bottom-1/4 right-[-20%] h-96 w-96 rounded-full bg-docid-secondary/10 blur-3xl" />
       <div className="docid-panel relative z-10 w-full max-w-lg p-8 shadow-2xl shadow-black/20">
@@ -60,9 +77,11 @@ export default function Onboarding() {
         <div className="mb-8 flex items-center justify-center gap-2 text-xs">
           <StepDot active={step === "org"} done={step !== "org"} label="Organização" />
           <div className="h-px w-8 bg-docid-border" />
-          <StepDot active={step === "admin"} done={step === "confirm"} label="Administrador" />
+          <StepDot active={step === "admin"} done={step === "confirm" || step === "terms"} label="Administrador" />
           <div className="h-px w-8 bg-docid-border" />
-          <StepDot active={step === "confirm"} done={false} label="Confirmar" />
+          <StepDot active={step === "confirm"} done={step === "terms"} label="Confirmar" />
+          <div className="h-px w-8 bg-docid-border" />
+          <StepDot active={step === "terms"} done={false} label="Termos" />
         </div>
 
         {error && <div className="mb-4 rounded-lg border border-docid-error/30 bg-docid-error/10 p-3 text-sm text-docid-error">{error}</div>}
@@ -71,11 +90,11 @@ export default function Onboarding() {
           <div className="space-y-4">
             <div>
               <label className="mb-1.5 block text-xs font-semibold text-docid-muted">Nome da organização</label>
-              <div className="relative"><Building2 className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-docid-outline" /><input value={orgName} onChange={e => handleOrgNameChange(e.target.value)} className="docid-input w-full pl-10" placeholder="Ex: Verano Labs" autoFocus /></div>
+              <div className="relative"><Building2 className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-docid-outline" /><input value={orgName} onChange={e => handleOrgNameChange(e.target.value)} className="docid-input w-full pl-10" placeholder="Ex: Minha Empresa" autoFocus /></div>
             </div>
             <div>
               <label className="mb-1.5 block text-xs font-semibold text-docid-muted">Slug <span className="font-normal text-docid-outline">(URL da organização)</span></label>
-              <input value={slug} onChange={e => { setSlug(e.target.value); setAutoSlug(false); }} className="docid-input w-full font-mono text-xs" placeholder="verano-labs" />
+              <input value={slug} onChange={e => { setSlug(e.target.value); setAutoSlug(false); }} className="docid-input w-full font-mono text-xs" placeholder="minha-empresa" />
               {autoSlug && <p className="mt-1 text-xs text-docid-muted">Gerado automaticamente.</p>}
             </div>
             <div>
@@ -101,7 +120,7 @@ export default function Onboarding() {
             </div>
             <div>
               <label className="mb-1.5 block text-xs font-semibold text-docid-muted">Palavra-passe <span className="font-normal text-docid-outline">(mín. 6 caracteres)</span></label>
-              <div className="relative"><Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-docid-outline" /><input type={showPassword ? "text" : "password"} value={adminPassword} onChange={e => setAdminPassword(e.target.value)} className="docid-input w-full pl-10 pr-10" placeholder="••••••••" /><button type="button" onClick={() => setShowPassword(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-docid-outline transition hover:text-docid-text">{showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button></div>
+              <div className="relative"><Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-docid-outline" /><input type={showPassword ? "text" : "password"} value={adminPassword} onChange={e => setAdminPassword(e.target.value)} className="docid-input w-full pl-10 pr-10" placeholder="••••••••" /><button type="button" onClick={() => setShowPassword(v => !v)} aria-label={showPassword ? "Ocultar palavra-passe" : "Mostrar palavra-passe"} className="absolute right-3 top-1/2 -translate-y-1/2 text-docid-outline transition hover:text-docid-text">{showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button></div>
             </div>
             <div>
               <label className="mb-1.5 block text-xs font-semibold text-docid-muted">Confirmar palavra-passe</label>
@@ -109,7 +128,7 @@ export default function Onboarding() {
               {confirmPassword && confirmPassword !== adminPassword && <p className="mt-1 text-xs text-docid-error">As palavras-passe não coincidem.</p>}
             </div>
             <div className="flex justify-between pt-4">
-              <button onClick={() => setStep("org")} className="docid-button-secondary"><ArrowLeft className="h-4 w-4" /> Voltar</button>
+              <button onClick={() => setStep("admin")} className="docid-button-secondary"><ArrowLeft className="h-4 w-4" /> Voltar</button>
               <button onClick={() => setStep("confirm")} disabled={!canAdvanceToConfirm} className="docid-button-primary">Rever <ArrowRight className="h-4 w-4" /></button>
             </div>
           </div>
@@ -134,17 +153,45 @@ export default function Onboarding() {
             </div>
             <div className="flex justify-between pt-4">
               <button onClick={() => setStep("admin")} className="docid-button-secondary"><ArrowLeft className="h-4 w-4" /> Voltar</button>
-              <button onClick={handleSubmit} disabled={loading} className="docid-button-primary">{loading ? "A criar..." : "Criar organização"} <CheckCircle2 className="h-4 w-4" /></button>
+              <button onClick={() => setStep("terms")} className="docid-button-primary">Aceitar Termos <ArrowRight className="h-4 w-4" /></button>
+            </div>
+          </div>
+        )}
+
+        {step === "terms" && (
+          <div className="space-y-4">
+            <div ref={termsRef} role="region" aria-label="Termos e Condições de Uso" tabIndex={0} className="h-[400px] overflow-y-auto rounded-lg border border-docid-border bg-docid-surface-low p-4">
+              <TermsContent />
+            </div>
+            <div className="flex items-center gap-3">
+              <input
+                type="checkbox"
+                id="terms-checkbox"
+                checked={termsAccepted}
+                onChange={e => setTermsAccepted(e.target.checked)}
+                disabled={!hasScrolledToBottom}
+                className="h-4 w-4 rounded border-docid-border bg-docid-surface-low text-docid-primary focus:ring-docid-primary"
+              />
+              <label htmlFor="terms-checkbox" className={`text-sm ${!hasScrolledToBottom ? "text-docid-muted" : "text-docid-text"}`}>
+                Li e aceito os Termos e Condições de Uso do DocID
+              </label>
+            </div>
+            {!hasScrolledToBottom && (
+              <p className="text-xs text-docid-muted">Role até ao final dos termos para poder aceitar.</p>
+            )}
+            <div className="flex justify-between pt-4">
+              <button onClick={() => setStep("confirm")} className="docid-button-secondary"><ArrowLeft className="h-4 w-4" /> Voltar</button>
+              <button onClick={handleSubmit} disabled={loading || !canSubmit} className="docid-button-primary">{loading ? "A criar..." : "Criar organização"} <CheckCircle2 className="h-4 w-4" /></button>
             </div>
           </div>
         )}
 
         <div className="mt-8 border-t border-docid-border pt-6 text-center">
           <p className="text-xs text-docid-muted">Já tem conta? <button onClick={() => navigate("/login")} className="font-semibold text-docid-primary-soft hover:underline">Entrar</button></p>
-          <p className="mt-4 text-xs uppercase tracking-wider text-docid-outline">© 2026 <span className="font-semibold text-docid-muted">VERANO Labs</span> · Luanda, Angola</p>
+          <p className="mt-4 text-xs uppercase tracking-wider text-docid-outline">© 2026 <span className="font-semibold text-docid-muted">VeranoLabs</span> · Luanda, Angola</p>
         </div>
       </div>
-    </div>
+    </main>
   );
 }
 
