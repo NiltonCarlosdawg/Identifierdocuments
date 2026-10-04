@@ -9,7 +9,9 @@ import { spawn, type Subprocess } from "bun";
 import { join } from "node:path";
 
 const API_ROOT = join(import.meta.dir, "..", "..");
-const BASE = process.env.API_TEST_URL || "http://localhost:3000";
+// Porta dedicada por ficheiro: os testes nunca se agarrem a um servidor dev órfão.
+const TEST_PORT = process.env.API_TEST_PORT || "3101";
+const BASE = process.env.API_TEST_URL || `http://localhost:${TEST_PORT}`;
 const RUN_ID = Date.now().toString(36);
 
 let serverProc: Subprocess | null = null;
@@ -53,22 +55,23 @@ async function api<T>(
 }
 
 beforeAll(async () => {
-  let ready = await waitForApi(5000);
+  let ready = await waitForApi(1000);
   if (!ready) {
     serverProc = spawn({
       cmd: ["bun", "src/index.ts"],
       cwd: API_ROOT,
       stdout: "pipe",
       stderr: "pipe",
-      env: { ...process.env },
+      env: { ...process.env, PORT: TEST_PORT, ALLOW_PUBLIC_ONBOARDING: "true" },
     });
-    ready = await waitForApi(20000);
+    ready = await waitForApi(30000);
   }
   if (!ready) throw new Error("API não está disponível em " + BASE);
-});
+}, 45000);
 
 afterAll(() => {
-  serverProc?.kill();
+  // SIGTERM por vezes deixa o servidor de testes vivo; garante o fim.
+  serverProc?.kill(9);
 });
 
 describe("Health & Auth", () => {

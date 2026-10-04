@@ -19,11 +19,23 @@ const MAX_FILE_SIZE = Number(process.env.MAX_FILE_SIZE) || 52_428_800;
 const RESOLVED_UPLOAD_DIR = path.resolve(UPLOAD_DIR);
 const RESOLVED_THUMBNAIL_DIR = path.resolve(THUMBNAIL_DIR);
 
-/** True se `candidate` está exactamente no dir ou num subcaminho (evita `/uploads` vs `/uploads_evil`). */
+/** True se `candidate` está exactamente no dir ou num subcaminho (evita `/uploads` vs `/uploads_evil`).
+ *
+ * `candidate` pode ainda não existir (ficheiro por criar) — nesse caso o
+ * `realpathSync` lançaria ENOENT e a verificação falharia sempre, pelo que se
+ * resolve o ancestral existente mais próximo e se recompõe o caminho a partir
+ * dele (mantém a detecção de symlinks que escapam do dir). */
 export function isPathInsideDir(candidate: string, dir: string): boolean {
   try {
-    const resolved = fs.realpathSync(path.resolve(candidate));
     const root = fs.realpathSync(path.resolve(dir));
+    const target = path.resolve(candidate);
+    let anchor = target;
+    while (!fs.existsSync(anchor)) {
+      const parent = path.dirname(anchor);
+      if (parent === anchor) break;
+      anchor = parent;
+    }
+    const resolved = path.resolve(fs.realpathSync(anchor), path.relative(anchor, target));
     return resolved === root || resolved.startsWith(root + path.sep);
   } catch {
     return false;
@@ -159,12 +171,13 @@ function hydrateDocument(
  * Partilha só concede leitura — não permite versionar/anexar.
  */
 export async function canWriteIdentifier(
+  tx: DB,
   auth: AuthPayload,
   idRow: { sectorId: string | null; createdBy?: string | null },
 ): Promise<boolean> {
   if (idRow.createdBy && idRow.createdBy === auth.userId) return true;
   if (idRow.sectorId != null && idRow.sectorId === auth.sectorId) return true;
-  const roles = await getFreshRoles(auth.userId, auth.tenantId);
+  const roles = await getFreshRoles(auth.userId, auth.tenantId, tx);
   return roles.includes("ORG_ADMIN");
 }
 
@@ -190,7 +203,7 @@ export async function attachDocument(
     });
     if (!idRow) throw new Error(`Identificador '${identifier}' não encontrado.`);
     if (idRow.status === "cancelled") throw new Error("Não é possível associar a um identificador cancelado.");
-    if (!(await canWriteIdentifier(auth, idRow as any))) {
+    if (!(await canWriteIdentifier(tx, auth, idRow as any))) {
       throw new Error("Sem permissão para associar documentos a este identificador.");
     }
 
@@ -298,7 +311,7 @@ export async function createDocumentVersion(
     if (!doc) throw new Error("Documento não encontrado.");
     if (!doc.identifier) throw new Error("Identificador do documento não encontrado.");
     if (doc.identifier.status === "cancelled") throw new Error("Não é possível versionar um documento de identificador cancelado.");
-    if (!(await canWriteIdentifier(auth, doc.identifier as any))) {
+    if (!(await canWriteIdentifier(tx, auth, doc.identifier as any))) {
       throw new Error("Sem permissão para criar versões deste documento.");
     }
 
@@ -397,7 +410,7 @@ export async function attachAttachment(
     });
     if (!idRow) throw new Error(`Identificador '${identifier}' não encontrado.`);
     if (idRow.status === "cancelled") throw new Error("Não é possível associar a um identificador cancelado.");
-    if (!(await canWriteIdentifier(auth, idRow as any))) {
+    if (!(await canWriteIdentifier(tx, auth, idRow as any))) {
       throw new Error("Sem permissão para adicionar anexos a este identificador.");
     }
 
@@ -452,9 +465,15 @@ export async function attachAttachment(
 export async function canAccessDocument(tx: DB, auth: AuthPayload, sectorId: string | null, visibility: string | null, docId: string | null, uploadedBy: string | null = null): Promise<{ allowed: boolean; restricted: boolean }> {
   const v = visibility ?? "public";
 
-  if (uploadedBy && auth.userId === uploadedBy) return { allowed: true, restricted: false };
-
   if (v === "public") return { allowed: true, restricted: false };
+
+  // sector_only: o autor do upload mantém acesso de cortesia apenas quando o
+  // documento pertence ao seu sector (ou não tem sector atribuído). Um documento
+  // sector_only noutro sector continua a exigir share/pedido de acesso — tal
+  // como qualquer outro utilizador, incluindo ORG_ADMIN.
+  if (uploadedBy && auth.userId === uploadedBy && (sectorId == null || sectorId === auth.sectorId)) {
+    return { allowed: true, restricted: false };
+  }
 
   if (sectorId != null && sectorId === auth.sectorId) {
     return { allowed: true, restricted: false };
@@ -594,7 +613,7 @@ export async function updateDocumentTags(
   });
   if (!doc) return { error: "NOT_FOUND" as const };
 
-  if (!(await canWriteIdentifier(auth, {
+  if (!(await canWriteIdentifier(tx, auth, {
     sectorId: doc.identifier?.sectorId ?? null,
     createdBy: doc.identifier?.createdBy ?? doc.uploadedBy,
   } as any))) {

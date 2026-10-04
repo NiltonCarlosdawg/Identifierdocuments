@@ -558,7 +558,11 @@ export const documentsModule = new (Elysia as any)({ prefix: "/documents" })
             set.status = 404; return { error: { code: "NOT_FOUND", message: "Documento não encontrado." } };
           }
 
-          if (idRow.document.uploadedBy === auth!.userId) {
+          // O autor do upload só "já tem acesso" quando o documento é do seu
+          // sector — um sector_only de outro sector exige pedido de acesso.
+          const uploaderHasAccess = idRow.document.uploadedBy === auth!.userId
+            && (idRow.sectorId == null || idRow.sectorId === auth!.sectorId);
+          if (uploaderHasAccess) {
             set.status = 422; return { error: { code: "OWN_DOCUMENT", message: "É dono do documento — não precisa de pedir acesso." } };
           }
 
@@ -600,14 +604,14 @@ export const documentsModule = new (Elysia as any)({ prefix: "/documents" })
             requesterId: auth!.userId,
           }).returning();
 
-          await tx.insert(approvals).values({
+          const [approval] = await tx.insert(approvals).values({
             tenantId, documentId: idRow.document.id,
             sectorId: idRow.sector?.id ?? null,
             supervisorId,
             requesterId: auth!.userId,
             type: "access_request",
             status: "pending",
-          });
+          }).returning();
 
           await notify(tx, {
             type: "access:requested",
@@ -623,7 +627,9 @@ export const documentsModule = new (Elysia as any)({ prefix: "/documents" })
             ip: clientIp,
           });
 
-          return { data: request };
+          // Devolve o pedido + o approval pendente criado (o cliente pode
+          // necessitar do tipo/id do approval; o pedido continua em `data.id`).
+          return { data: { ...request, type: approval.type, approvalId: approval.id } };
         } catch (err: any) {
           console.error("[REQUEST_ACCESS_ERROR]", err);
           throw err;

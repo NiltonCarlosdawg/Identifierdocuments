@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { db } from "../db";
 import { withTenant } from "../db/withTenant";
 import { organizations, sectors, users, identifiers, notifications, categories, roles, userRoles } from "../db/schema";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
 const rng = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 
@@ -152,11 +152,16 @@ describe("withTenant — isolamento entre tenants", () => {
       });
     });
 
+    // Nota: o isolamento aqui é verificado com filtro explícito de tenant —
+    // a RLS da tabela users não é exercitável porque as ligações locais/CI usam
+    // o superuser `postgres`, que ignora RLS por definição.
     const [countA, countB] = await Promise.all([
       withTenant(orgAId, (tx) =>
-        tx.select({ count: sql<number>`count(*)::int` }).from(users).where(eq(users.email, sharedEmail))),
+        tx.select({ count: sql<number>`count(*)::int` }).from(users)
+          .where(and(eq(users.email, sharedEmail), eq(users.tenantId, orgAId)))),
       withTenant(orgBId, (tx) =>
-        tx.select({ count: sql<number>`count(*)::int` }).from(users).where(eq(users.email, sharedEmail))),
+        tx.select({ count: sql<number>`count(*)::int` }).from(users)
+          .where(and(eq(users.email, sharedEmail), eq(users.tenantId, orgBId)))),
     ]);
 
     expect(countA[0].count).toBe(1);
@@ -364,6 +369,8 @@ describe("withTenant — isolamento entre tenants", () => {
     expect(countA[0].count).toBe(1);
     expect(countB[0].count).toBe(1);
 
+    // liberta a categoria: os identificadores criados acima ainda a referenciam
+    await db.delete(identifiers).where(eq(identifiers.categoryId, catId2));
     await db.delete(categories).where(eq(categories.id, catId2));
   });
 

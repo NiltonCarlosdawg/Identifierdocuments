@@ -1,7 +1,7 @@
 import Elysia from "elysia";
 import { jwtVerify } from "jose";
 import { SignJWT } from "jose";
-import { db } from "../db";
+import { db, type DB } from "../db";
 import { getClientIp } from "../lib/ip";
 import { userRoles, roles, users } from "../db/schema";
 import { eq, and, or, isNull } from "drizzle-orm";
@@ -77,8 +77,13 @@ export function requireAuth() {
     });
 }
 
-export async function getFreshRoles(userId: string, tenantId: string): Promise<string[]> {
-  const rows = await db
+/** Papéis frescos do utilizador.
+ *
+ * `executor` permite correr dentro de uma transacção aberta passando o `tx`:
+ * usar o `db` de raiz aqui roubaria uma segunda conexão ao pool e, com
+ * transacções concorrentes iguais ao `max` do pool, bloqueava em deadlock. */
+export async function getFreshRoles(userId: string, tenantId: string, executor: DB = db): Promise<string[]> {
+  const rows = await executor
     .select({ roleName: roles.name })
     .from(userRoles)
     .innerJoin(roles, eq(userRoles.roleId, roles.id))

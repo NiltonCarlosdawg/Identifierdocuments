@@ -6,7 +6,9 @@ import { spawn, type Subprocess } from "bun";
 import { join } from "node:path";
 
 const API_ROOT = join(import.meta.dir, "..", "..");
-const BASE = process.env.API_TEST_URL || "http://localhost:3000";
+// Porta dedicada por ficheiro: os testes nunca se agarrem a um servidor dev órfão.
+const TEST_PORT = process.env.API_TEST_PORT || "3102";
+const BASE = process.env.API_TEST_URL || `http://localhost:${TEST_PORT}`;
 const RUN_ID = Date.now().toString(36);
 
 let serverProc: Subprocess | null = null;
@@ -55,7 +57,7 @@ beforeAll(async () => {
       cwd: API_ROOT,
       stdout: "pipe",
       stderr: "pipe",
-      env: { ...process.env },
+      env: { ...process.env, PORT: TEST_PORT, ALLOW_PUBLIC_ONBOARDING: "true" },
     });
     ready = await waitForApi(20000);
   }
@@ -87,7 +89,8 @@ beforeAll(async () => {
 }, 60000);
 
 afterAll(() => {
-  serverProc?.kill();
+  // SIGTERM por vezes deixa o servidor de testes vivo; garante o fim.
+  serverProc?.kill(9);
 });
 
 describe("Anexos e versionamento", () => {

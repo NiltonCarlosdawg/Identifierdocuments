@@ -144,7 +144,7 @@ export const approvalsModule = new (Elysia as any)({ prefix: "/approvals" })
                 tenantId,
                 documentId: approval.documentId,
                 sharedWithUserId: existing.requesterId,
-                sharedByUserId: auth!.userId,
+                sharedBy: auth!.userId,
                 status: "active",
               });
               await notify(tx, {

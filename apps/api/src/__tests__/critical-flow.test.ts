@@ -38,7 +38,7 @@ describe("Fluxos Críticos — Auth, Identificadores, RBAC, Sync", () => {
     ]);
 
     const [org] = await db.insert(organizations).values({
-      name: `CF Test ${tag}`, slug: `cf-test-${tag}`,
+      name: `CF Test ${tag}`, slug: `cf-test-${tag}`, identifierPrefix: "CF",
     }).returning({ id: organizations.id });
     orgId = org.id;
 
@@ -73,9 +73,14 @@ describe("Fluxos Críticos — Auth, Identificadores, RBAC, Sync", () => {
   });
 
   afterAll(async () => {
+    // Ordem importada: libertar primeiro as tabelas que referenciam as seguintes.
     await db.delete(userRoles).where(sql`${userRoles.roleId} IN (SELECT id FROM ${roles} WHERE ${roles.tenantId} = ${orgId})`);
     await db.delete(roles).where(eq(roles.tenantId, orgId));
     await db.delete(notifications).where(eq(notifications.tenantId, orgId));
+    await db.execute(sql`DELETE FROM audit_logs WHERE tenant_id = ${orgId}`);
+    await db.execute(sql`DELETE FROM idempotency_records WHERE tenant_id = ${orgId}`);
+    await db.execute(sql`DELETE FROM identifier_release_pool WHERE tenant_id = ${orgId}`);
+    await db.execute(sql`DELETE FROM identifier_leases WHERE tenant_id = ${orgId}`);
     await db.delete(identifiers).where(eq(identifiers.tenantId, orgId));
     await db.delete(devices).where(eq(devices.tenantId, orgId));
     await db.delete(users).where(eq(users.tenantId, orgId));
@@ -116,10 +121,10 @@ describe("Fluxos Críticos — Auth, Identificadores, RBAC, Sync", () => {
       }).returning({ id: roles.id });
       await tx.insert(userRoles).values({ userId: u.id, roleId: r.id });
 
-      const rolesList = await getFreshRoles(u.id, otherOrg.id);
+      const rolesList = await getFreshRoles(u.id, otherOrg.id, tx);
       expect(rolesList).toContain("SUPER_ADMIN");
 
-      const adminRoles = await getFreshRoles(adminUserId, orgId);
+      const adminRoles = await getFreshRoles(adminUserId, orgId, tx);
       expect(adminRoles).not.toContain("SUPER_ADMIN");
     });
 
@@ -169,18 +174,23 @@ describe("Fluxos Críticos — Auth, Identificadores, RBAC, Sync", () => {
     );
 
     expect(result.identifier).toBeTruthy();
-    expect(result.leaseId).toBeNull();
+    // não-fiscal usa contador local — não pode gerar nenhum lease
+    const leases = await db.select().from(identifierLeases)
+      .where(and(eq(identifierLeases.tenantId, orgId), eq(identifierLeases.categoryId, catNoSeqId)));
+    expect(leases).toHaveLength(0);
   });
 
   // ============================================================
   // 3. Lease Management
   // ============================================================
+  let firstLeaseId = "";
   test("3.1 leaseIdentifiers reserva lote e devolve lease", async () => {
     const lease = await withTenant(orgId, (tx) =>
       leaseIdentifiers(tx, authAdmin(), {
         categoryId: catSeqId, deviceId,
       })
     );
+    firstLeaseId = lease.id;
 
     expect(lease.id).toBeTruthy();
     expect(lease.startSeq).toBeGreaterThan(0);
@@ -189,6 +199,11 @@ describe("Fluxos Críticos — Auth, Identificadores, RBAC, Sync", () => {
   });
 
   test("3.2 releaseLease marca lease como released", async () => {
+    // o lease activo do 3.1 ocupa o par device+categoria — liberta-o primeiro
+    if (firstLeaseId) {
+      await withTenant(orgId, (tx) => releaseLease(tx, authAdmin(), { leaseId: firstLeaseId }));
+    }
+
     const lease = await withTenant(orgId, (tx) =>
       leaseIdentifiers(tx, authAdmin(), {
         categoryId: catSeqId, deviceId,
@@ -217,7 +232,7 @@ describe("Fluxos Críticos — Auth, Identificadores, RBAC, Sync", () => {
       .from(auditLogs)
       .where(and(
         eq(auditLogs.tenantId, orgId),
-        eq(auditLogs.entityType, "identifier"),
+        eq(auditLogs.resource, "identifiers"),
       ));
 
     expect(logs.length).toBeGreaterThan(0);

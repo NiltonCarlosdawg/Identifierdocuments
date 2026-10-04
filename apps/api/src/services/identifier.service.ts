@@ -111,13 +111,14 @@ export async function generateIdentifier(tx: DB, auth: AuthPayload, opts: {
       if (record) return [record.result as any];
     }
 
-    const [row] = await (tx2 as any)
-      .select({
-        next: sql<number>`GREATEST(
-          (SELECT COALESCE(MAX(sequence), 0) FROM ${identifiers} WHERE tenant_id = ${auth.tenantId} AND category_id = ${opts.categoryId}),
-          (SELECT COALESCE(MAX(end_seq), 0) FROM identifier_leases WHERE tenant_id = ${auth.tenantId} AND category_id = ${opts.categoryId})
-        ) + 1`
-      });
+    // NOTA: `select()` do Drizzle exige `.from()`; para um scalar puro usa-se execute().
+    const rows = (await tx2.execute(sql`
+      SELECT GREATEST(
+        (SELECT COALESCE(MAX(sequence), 0) FROM ${identifiers} WHERE tenant_id = ${auth.tenantId} AND category_id = ${opts.categoryId}),
+        (SELECT COALESCE(MAX(end_seq), 0) FROM identifier_leases WHERE tenant_id = ${auth.tenantId} AND category_id = ${opts.categoryId})
+      ) + 1 AS next
+    `)) as unknown as Array<{ next: string | number }>;
+    const row = rows[0];
     const seqResult = Number(row.next);
 
     const identifierStr = buildIdentifier(orgPrefix, cat.prefix, year, month, day, seqResult);
@@ -138,11 +139,39 @@ export async function generateIdentifier(tx: DB, auth: AuthPayload, opts: {
     }).returning();
 
     if (opts.idempotencyKey) {
-      await tx2.insert(idempotencyRecords).values({
+      const [rec] = await tx2.insert(idempotencyRecords).values({
         tenantId: auth.tenantId,
         idempotencyKey: opts.idempotencyKey,
         result: inserted as any,
-      });
+      }).onConflictDoNothing().returning();
+
+      if (!rec) {
+        // Pedido concorrente com a mesma key ganhou a corrida: este identificador
+        // fica órfão — devolve-se o resultado do vencedor e regista-se a
+        // discórdia na auditoria (mesmo padrão usado em registerOfflineIdentifiers).
+        const existing = await tx2.query.idempotencyRecords.findFirst({
+          where: and(
+            eq(idempotencyRecords.tenantId, auth.tenantId),
+            eq(idempotencyRecords.idempotencyKey, opts.idempotencyKey),
+          ),
+        });
+        const winner = (existing?.result ?? inserted) as any;
+        await tx2.insert(auditLogs).values({
+          tenantId: auth.tenantId,
+          userId: auth.userId,
+          action: "IDEMPOTENCY_DISCARDED",
+          resource: "identifiers",
+          resourceId: inserted.id,
+          metadata: JSON.stringify({
+            idempotencyKey: opts.idempotencyKey,
+            winnerIdentifier: winner.identifier,
+            orphanIdentifier: inserted.identifier,
+            reason: "Concurrent call with same idempotencyKey won the race",
+          }),
+          ip,
+        });
+        return [winner];
+      }
     }
 
     return [inserted];
@@ -192,7 +221,7 @@ export async function listIdentifiers(tx: DB, auth: AuthPayload, filters: {
   });
 
   const sharedDocIds = await getSharedDocIds(tx, auth);
-  const freshRoles = await getFreshRoles(auth.userId, auth.tenantId);
+  const freshRoles = await getFreshRoles(auth.userId, auth.tenantId, tx);
 
   const filtered = allRows.filter(row => {
     const { visible } = checkVisibility(row as any, auth, sharedDocIds, freshRoles);
@@ -229,7 +258,7 @@ export async function getIdentifier(tx: DB, auth: AuthPayload, identifierStr: st
   if (!row) return null;
 
   const sharedDocIds = await getSharedDocIds(tx, auth);
-  const freshRoles = await getFreshRoles(auth.userId, auth.tenantId);
+  const freshRoles = await getFreshRoles(auth.userId, auth.tenantId, tx);
   const { visible, restricted } = checkVisibility(row as any, auth, sharedDocIds, freshRoles);
   if (!visible) return null;
 

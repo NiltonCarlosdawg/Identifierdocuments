@@ -4,16 +4,21 @@ import { eq, and, sql } from "drizzle-orm";
 import type { AuthPayload } from "../middleware/auth";
 import { getFreshRoles } from "../middleware/auth";
 
-/** Dispositivo utilizável: registado pelo user, mesmo sector, ou ORG_ADMIN. */
+/** Dispositivo utilizável: registado pelo user, mesmo sector, ou ORG_ADMIN.
+ *
+ * `requireActive: false` dispensa o check de estado — usado na libertação de
+ * leases, que tem de funcionar também para dispositivos já desactivados
+ * (senão o lease fica órfão para sempre). */
 export async function assertDeviceUsable(
   tx: DB,
   auth: AuthPayload,
   device: { id: string; status: string; sectorId: string | null; registeredByUserId: string | null },
+  opts: { requireActive?: boolean } = {},
 ): Promise<void> {
-  if (device.status !== "active") throw new Error("Dispositivo não está activo.");
+  if (opts.requireActive !== false && device.status !== "active") throw new Error("Dispositivo não está activo.");
   if (device.registeredByUserId === auth.userId) return;
   if (device.sectorId != null && device.sectorId === auth.sectorId) return;
-  const roles = await getFreshRoles(auth.userId, auth.tenantId);
+  const roles = await getFreshRoles(auth.userId, auth.tenantId, tx);
   if (roles.includes("ORG_ADMIN")) return;
   throw new Error("Sem permissão para usar este dispositivo.");
 }
@@ -37,7 +42,7 @@ export async function leaseIdentifiers(
   const resolvedSectorId = opts.sectorId ?? auth.sectorId ?? device.sectorId;
   if (!resolvedSectorId) throw new Error("Sector não definido. Indique sectorId ou associe o utilizador a um sector.");
 
-  const roles = await getFreshRoles(auth.userId, auth.tenantId);
+  const roles = await getFreshRoles(auth.userId, auth.tenantId, tx);
   if (opts.sectorId && opts.sectorId !== auth.sectorId && !roles.includes("ORG_ADMIN")) {
     throw new Error("Sem permissão para reservar sequências noutro sector.");
   }
@@ -120,7 +125,8 @@ export async function releaseLease(
     where: and(eq(devices.id, lease.deviceId), eq(devices.tenantId, auth.tenantId)),
   });
   if (!device) throw new Error("Dispositivo do lease não encontrado.");
-  await assertDeviceUsable(tx, auth, device as any);
+  // Libertação tem de funcionar mesmo com o dispositivo já desactivado.
+  await assertDeviceUsable(tx, auth, device as any, { requireActive: false });
 
   const unusedStart = (lease.usedUpTo ?? lease.startSeq - 1) + 1;
   if (unusedStart <= lease.endSeq) {
