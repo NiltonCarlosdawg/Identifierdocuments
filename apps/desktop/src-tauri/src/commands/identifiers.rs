@@ -677,7 +677,8 @@ pub async fn request_lease_inner(
         .auth_token
         .lock()
         .map_err(|e| e.to_string())?
-        .clone_inner()
+        .as_ref()
+        .map(|zs| zs.clone_inner())
         .ok_or_else(|| "Sessão não autenticada.".to_string())?;
 
     // Verificar se categoria existe na cache
@@ -964,7 +965,8 @@ pub async fn get_or_register_device_id(state: State<'_, SyncState>) -> Result<De
         .auth_token
         .lock()
         .map_err(|e| e.to_string())?
-        .clone_inner()
+        .as_ref()
+        .map(|zs| zs.clone_inner())
         .ok_or_else(|| {
             "Sessao nao autenticada. Faca login primeiro.".to_string()
         })?;

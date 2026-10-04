@@ -26,7 +26,7 @@ impl ZeroizeString {
         &self.0
     }
 
-    fn clone_inner(&self) -> String {
+    pub fn clone_inner(&self) -> String {
         self.0.clone()
     }
 }
@@ -711,7 +711,8 @@ async fn renew_exhausted_leases(state: &SyncState) -> Result<usize, String> {
         .auth_token
         .lock()
         .map_err(|e| e.to_string())?
-        .clone_inner()
+        .as_ref()
+        .map(|zs| zs.clone_inner())
         .ok_or_else(|| "Sessão não autenticada.".to_string())?;
 
     if !check_online(&api_base_url).await {
@@ -1464,7 +1465,8 @@ async fn run_sync_cycle_inner(app: &AppHandle, state: &SyncState) -> Result<usiz
         .auth_token
         .lock()
         .map_err(|e| e.to_string())?
-        .clone_inner();
+        .as_ref()
+        .map(|zs| zs.clone_inner());
 
     let token = match token {
         Some(t) if !t.is_empty() => t,
@@ -2006,7 +2008,8 @@ pub async fn attach_document_native(
         .auth_token
         .lock()
         .map_err(|e| e.to_string())?
-        .clone_inner()
+        .as_ref()
+        .map(|zs| zs.clone_inner())
         .ok_or_else(|| "Sessão não autenticada.".to_string())?;
 
     let p = std::path::Path::new(&path);
@@ -2142,7 +2145,8 @@ pub async fn download_document_offline(
         .auth_token
         .lock()
         .map_err(|e| e.to_string())?
-        .clone_inner()
+        .as_ref()
+        .map(|zs| zs.clone_inner())
         .ok_or_else(|| "Sessão não autenticada.".to_string())?;
 
     if !check_online(&api_base_url).await {
