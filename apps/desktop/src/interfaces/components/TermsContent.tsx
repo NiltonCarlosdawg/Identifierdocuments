@@ -3,7 +3,7 @@ export default function TermsContent() {
     <div className="space-y-6 text-sm text-docid-text">
       <div>
         <h2 className="mb-2 text-lg font-bold">Termos e Condições de Uso — DocID</h2>
-        <p className="text-xs text-docid-muted">Última actualização: [inserir data]</p>
+        <p className="text-xs text-docid-muted">Última actualização: 4 de Outubro de 2026</p>
       </div>
 
       <section>
@@ -181,7 +181,7 @@ export default function TermsContent() {
       <section>
         <h3 className="mb-2 font-semibold text-docid-text">16. Contactos</h3>
         <p className="text-docid-muted">
-          Para questões relacionadas com estes Termos, contacte-nos através de: [inserir e-mail de contacto da VeranoLabs].
+          Para questões relacionadas com estes Termos, contacte-nos através de: nzilalabs@gmail.com.
         </p>
       </section>
 
