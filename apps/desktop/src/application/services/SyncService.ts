@@ -6,7 +6,7 @@ export class SyncService implements ISyncService {
   private isTauri = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
   isAvailable(): boolean { return this.isTauri(); }
-  async setCredentials(token: string, apiBaseUrl = "http://localhost:3000"): Promise<void> {
+  async setCredentials(token: string, apiBaseUrl = "https://didall.milvendas.ao"): Promise<void> {
     if (!this.isTauri()) return;
     const { invoke } = await import("@tauri-apps/api/core");
     await invoke("set_sync_credentials", { token, apiBaseUrl });
@@ -17,7 +17,7 @@ export class SyncService implements ISyncService {
     await invoke("clear_sync_credentials");
   }
   async getApiBaseUrl(): Promise<string> {
-    if (!this.isTauri()) return "http://localhost:3000";
+    if (!this.isTauri()) return "https://didall.milvendas.ao";
     const { invoke } = await import("@tauri-apps/api/core");
     return invoke<string>("get_api_base_url");
   }
@@ -27,7 +27,7 @@ export class SyncService implements ISyncService {
     await invoke("set_api_base_url", { url });
   }
   async isOnline(): Promise<boolean> {
-    if (!this.isTauri()) { try { const res = await fetch("http://localhost:3000/"); return res.ok; } catch { return false; } }
+    if (!this.isTauri()) { try { const res = await fetch("https://didall.milvendas.ao/"); return res.ok; } catch { return false; } }
     const { invoke } = await import("@tauri-apps/api/core");
     return invoke<boolean>("is_online");
   }

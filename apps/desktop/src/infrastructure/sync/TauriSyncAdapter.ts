@@ -5,16 +5,16 @@ const isTauri = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in 
 
 export class TauriSyncAdapter implements ISyncService {
   isAvailable(): boolean { return isTauri(); }
-  async setCredentials(token: string, apiBaseUrl = "http://localhost:3000"): Promise<void> {
+  async setCredentials(token: string, apiBaseUrl = "https://didall.milvendas.ao"): Promise<void> {
     if (!isTauri()) return;
     const { invoke } = await import("@tauri-apps/api/core");
     await invoke("set_sync_credentials", { token, apiBaseUrl });
   }
   async clearCredentials(): Promise<void> { if (!isTauri()) return; const { invoke } = await import("@tauri-apps/api/core"); await invoke("clear_sync_credentials"); }
-  async getApiBaseUrl(): Promise<string> { if (!isTauri()) return "http://localhost:3000"; const { invoke } = await import("@tauri-apps/api/core"); return invoke<string>("get_api_base_url"); }
+  async getApiBaseUrl(): Promise<string> { if (!isTauri()) return "https://didall.milvendas.ao"; const { invoke } = await import("@tauri-apps/api/core"); return invoke<string>("get_api_base_url"); }
   async setApiBaseUrl(url: string): Promise<void> { if (!isTauri()) return; const { invoke } = await import("@tauri-apps/api/core"); await invoke("set_api_base_url", { url }); }
   async isOnline(): Promise<boolean> {
-    if (!isTauri()) { try { const res = await fetch("http://localhost:3000/"); return res.ok; } catch { return false; } }
+    if (!isTauri()) { try { const res = await fetch("https://didall.milvendas.ao/"); return res.ok; } catch { return false; } }
     const { invoke } = await import("@tauri-apps/api/core"); return invoke<boolean>("is_online");
   }
   async getQueue(): Promise<QueueItem[]> { if (!isTauri()) return []; const { invoke } = await import("@tauri-apps/api/core"); return invoke<QueueItem[]>("get_queue"); }

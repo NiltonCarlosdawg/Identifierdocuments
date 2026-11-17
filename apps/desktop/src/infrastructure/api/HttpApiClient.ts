@@ -3,7 +3,7 @@ import type { IAuthRepository } from "../../domain/repositories/IAuthRepository"
 import type { ISyncService } from "../../application/ports/ISyncService";
 
 export class HttpApiClient implements IApiClient {
-  private defaultBaseUrl = "http://localhost:3000";
+  private defaultBaseUrl = "https://didall.milvendas.ao";
   constructor(
     private readonly authRepo: IAuthRepository,
     private readonly getBaseUrl?: () => string,

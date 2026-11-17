@@ -29,7 +29,7 @@ pub fn run() {
                 db_path,
                 uploads_dir,
                 downloads_dir,
-                api_base_url: std::sync::Mutex::new("http://localhost:3000".to_string()),
+                api_base_url: std::sync::Mutex::new("https://didall.milvendas.ao".to_string()),
                 // Note: A16 requires HTTPS validation — URL setters in sync/mod.rs
                 // already validate scheme at runtime (see set_api_base_url).
                 auth_token: std::sync::Mutex::new(None),
