@@ -2,7 +2,7 @@ import Elysia from "elysia";
 import { Type as t } from "@sinclair/typebox";
 import { db } from "../db";
 import { auditLogs, users } from "../db/schema";
-import { eq, and, desc, sql } from "drizzle-orm";
+import { eq, and, desc, sql, inArray } from "drizzle-orm";
 import { requireAuth, getFreshRoles } from "../middleware/auth";
 import { checkRateLimit } from "../middleware/rateLimit";
 import { withTenant } from "../db/withTenant";
@@ -39,7 +39,7 @@ export const auditModule = new (Elysia as any)({ prefix: "/audit" })
           .select({ id: users.id })
           .from(users)
           .where(and(eq(users.tenantId, tenantId), eq(users.sectorId, me.sectorId)));
-        conditions.push(sql`${auditLogs.userId} = ANY(${sql.array(sectorUserIds.map(u => u.id))})`);
+        conditions.push(inArray(auditLogs.userId, sectorUserIds.map(u => u.id)));
       }
       if (query.action) conditions.push(eq(auditLogs.action, query.action));
       if (query.resource) conditions.push(eq(auditLogs.resource, query.resource));
