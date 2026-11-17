@@ -1,3 +1,4 @@
+import { hashPassword } from "../lib/password";
 import Elysia from "elysia";
 import { Type as t } from "@sinclair/typebox";
 import { db } from "../db";
@@ -58,7 +59,7 @@ export const tenantsModule = new (Elysia as any)({ prefix: "/tenants" })
           .values({ tenantId: org.id, name: "Administração", code: "ADM" })
           .returning();
 
-        const passwordHash = await Bun.password.hash(body.adminPassword);
+        const passwordHash = await hashPassword(body.adminPassword);
 
         const [adminUser] = await tx
           .insert(users)

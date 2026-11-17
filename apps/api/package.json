@@ -13,7 +13,10 @@
   },
   "dependencies": {
     "@elysiajs/cors": "^1.1.0",
+    "@elysiajs/node": "^1.4.5",
     "@elysiajs/swagger": "^1.1.0",
+    "@sinclair/typebox": "^0.34.0",
+    "bcryptjs": "^3.0.3",
     "bullmq": "^6.1.0",
     "drizzle-orm": "^0.31.0",
     "elysia": "^1.1.0",
@@ -25,13 +28,14 @@
     "pdf-parse": "^1.1.1",
     "pino": "^10.3.1",
     "postgres": "^3.4.0",
-    "@sinclair/typebox": "^0.34.0"
+    "tsx": "^4.23.15"
   },
   "devDependencies": {
     "@types/nodemailer": "^8.0.1",
     "@types/pdf-parse": "^1.1.4",
     "bun-types": "^1.1.0",
     "drizzle-kit": "^0.22.0",
-    "typescript": "^5.4.0"
+    "typescript": "^5.4.0",
+    "@types/bcryptjs": "^3.0.0"
   }
 }

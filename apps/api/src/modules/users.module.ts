@@ -1,3 +1,4 @@
+import { hashPassword } from "../lib/password";
 import Elysia from "elysia";
 import { Type as t } from "@sinclair/typebox";
 import { users, userRoles, sectors, roles, organizations } from "../db/schema";
@@ -137,7 +138,7 @@ export const usersModule = new (Elysia as any)({ prefix: "/users" })
             set.status = 400; return { error: { code: "VALIDATION_ERROR", message: "Sector não encontrado." } };
           }
 
-          const passwordHash = await Bun.password.hash(body.password);
+          const passwordHash = await hashPassword(body.password);
           const [user] = await tx.insert(users).values({
             tenantId, sectorId,
             email: body.email, passwordHash, fullName: body.fullName,
@@ -231,7 +232,7 @@ export const usersModule = new (Elysia as any)({ prefix: "/users" })
           }
 
           const password = randomPassword();
-          const passwordHash = await Bun.password.hash(password);
+          const passwordHash = await hashPassword(password);
           const [user] = await tx.insert(users).values({
             tenantId, sectorId, email, passwordHash, fullName: body.fullName.trim(),
           }).returning();
@@ -477,7 +478,7 @@ export const usersModule = new (Elysia as any)({ prefix: "/users" })
               }
 
               const password = randomPassword();
-              const passwordHash = await Bun.password.hash(password);
+              const passwordHash = await hashPassword(password);
               const [user] = await tx.insert(users).values({
                 tenantId, sectorId, email, fullName, passwordHash,
               }).returning();

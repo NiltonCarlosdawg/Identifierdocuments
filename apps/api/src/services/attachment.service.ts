@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { DB } from "../db";
 import { identifiers, documents, documentVersions, documentShares, auditLogs } from "../db/schema";
 import { eq, and, or, isNull, desc } from "drizzle-orm";
@@ -10,7 +11,7 @@ import { getFreshRoles } from "../middleware/auth";
 import { tryEnqueueThumbnail } from "../jobs/queues";
 import { withIdempotency } from "../lib/idempotency";
 
-const APP_ROOT = path.resolve(import.meta.dir, "../..");
+const APP_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(APP_ROOT, "uploads");
 const THUMBNAIL_DIR = process.env.THUMBNAIL_DIR || path.join(APP_ROOT, "thumbnails");
 const THUMBNAIL_SCRIPT = process.env.THUMBNAIL_SCRIPT || path.join(APP_ROOT, "scripts", "generate_thumbnail.py");
@@ -84,12 +85,14 @@ export async function runThumbnailJob(filePath: string, docId: string): Promise<
     return;
   }
 
-  const child = Bun.spawn(["python3", scriptPath, path.resolve(filePath), thumbPath], {
-    stdio: ["ignore", "ignore", "pipe"],
-  });
-
-  const stderrText = await new Response(child.stderr).text().catch(() => "");
-  const exitCode = await child.exited;
+  const { spawn } = await import("node:child_process");
+  const { stderr: stderrText, code: exitCode } = await new Promise<{ stderr: string; code: number }>((resolve) => {
+    const child = spawn("python3", [scriptPath, path.resolve(filePath), thumbPath], { stdio: ["ignore", "ignore", "pipe"] });
+    let out = "";
+    child.stderr?.on("data", (d) => (out += d.toString()));
+    child.on("error", (e) => resolve({ stderr: e.message, code: 1 }));
+    child.on("close", (code) => resolve({ stderr: out, code: code ?? 1 }));
+  }).catch(() => ({ stderr: "", code: 1 }));
   if (exitCode !== 0) {
     console.error(
       `[THUMBNAIL] Falha ao gerar thumbnail para docId=${docId} (exit code ${exitCode}).` +

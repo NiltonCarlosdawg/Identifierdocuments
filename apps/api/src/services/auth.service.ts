@@ -1,3 +1,4 @@
+import { hashPassword, verifyPassword } from "../lib/password";
 import { db } from "../db";
 import { users, organizations, userRoles, roles, passwordResetTokens } from "../db/schema";
 import { eq, and, gt, isNull, sql } from "drizzle-orm";
@@ -48,7 +49,7 @@ export async function login(email: string, password: string, organizationSlug?: 
     throw new Error("Credenciais inválidas.");
   }
 
-  const valid = await Bun.password.verify(password, user.passwordHash);
+  const valid = await verifyPassword(password, user.passwordHash);
   if (!valid) {
     throw new Error("Credenciais inválidas.");
   }
@@ -105,10 +106,10 @@ export async function changePassword(auth: AuthPayload, currentPassword: string,
   const user = await db.query.users.findFirst({ where: eq(users.id, auth.userId) });
   if (!user) throw new Error("Utilizador não encontrado.");
 
-  const valid = await Bun.password.verify(currentPassword, user.passwordHash);
+  const valid = await verifyPassword(currentPassword, user.passwordHash);
   if (!valid) throw new Error("Password actual incorrecta.");
 
-  const newHash = await Bun.password.hash(newPassword);
+  const newHash = await hashPassword(newPassword);
   await db.update(users).set({ passwordHash: newHash }).where(eq(users.id, auth.userId));
   return { message: "Password alterada com sucesso." };
 }
@@ -189,7 +190,7 @@ export async function resetPassword(token: string, newPassword: string) {
 
   if (!rec) throw new Error("Código inválido ou expirado.");
 
-  const newHash = await Bun.password.hash(newPassword);
+  const newHash = await hashPassword(newPassword);
 
   await db.transaction(async (tx) => {
     await tx.update(users).set({ passwordHash: newHash }).where(eq(users.id, rec.userId));

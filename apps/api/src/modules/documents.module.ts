@@ -2,6 +2,7 @@ import Elysia from "elysia";
 import { Type as t } from "@sinclair/typebox";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   attachDocument, attachAttachment, createDocumentVersion,
   getDocumentMeta, downloadDocument, canAccessDocument,
@@ -273,7 +274,7 @@ export const documentsModule = new (Elysia as any)({ prefix: "/documents" })
           : { error: { code: "NOT_FOUND", message: "Documento não encontrado." } };
       }
 
-      const THUMBNAIL_DIR = path.resolve(process.env.THUMBNAIL_DIR || path.join(import.meta.dir, "../../thumbnails"));
+      const THUMBNAIL_DIR = path.resolve(process.env.THUMBNAIL_DIR || path.join(path.dirname(fileURLToPath(import.meta.url)), "../../thumbnails"));
       const thumbPath = path.join(THUMBNAIL_DIR, `${docId}.png`);
       try {
         if (!isPathInsideDir(thumbPath, THUMBNAIL_DIR) || !fs.existsSync(thumbPath)) {

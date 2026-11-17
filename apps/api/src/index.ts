@@ -1,6 +1,7 @@
 import Elysia from "elysia";
 import { swagger } from "@elysiajs/swagger";
 import { cors } from "@elysiajs/cors";
+import { node } from "@elysiajs/node";
 import { authMiddleware } from "./middleware/auth";
 import { tenantMiddleware } from "./middleware/tenant";
 import { authModule } from "./modules/auth.module";
@@ -26,7 +27,11 @@ const PORT = Number(process.env.PORT) || 3000;
 const enableSwagger = process.env.ENABLE_SWAGGER === "true"
   || process.env.NODE_ENV !== "production";
 
-const app = new (Elysia as any)()
+// Bun (dev/testes) mantém o adapter nativo; Node usa o adapter oficial —
+// o cPanel LGI/LVE limita processos/threads e o Bun não arranca em produção.
+const isBun = typeof (globalThis as { Bun?: unknown }).Bun !== "undefined";
+
+const app = new (Elysia as any)(isBun ? {} : { adapter: node() })
   .use(cors({
     origin: ["http://localhost:1420", "tauri://localhost", "https://tauri.localhost"],
     credentials: true,
@@ -138,7 +143,8 @@ app
     set.status = 500;
     return { error: { code: "INTERNAL_ERROR", message: "Erro interno do servidor." } };
   })
-  .listen(PORT);
+  // O proxy do cPanel/LiteSpeed faz proxy para 127.0.0.1:3000 — não expõe a porta na rede.
+  .listen({ port: PORT, hostname: "127.0.0.1" });
 
 logger.info(`DocID API arrancou em http://localhost:${PORT}`);
 
