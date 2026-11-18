@@ -1,7 +1,10 @@
 import { hashPassword } from "../lib/password";
+import { randomUUID } from "node:crypto";
 import Elysia from "elysia";
 import { Type as t } from "@sinclair/typebox";
 import { db } from "../db";
+import { withTenant } from "../db/withTenant";
+import { sql } from "drizzle-orm";
 import { organizations, sectors, users, roles, userRoles } from "../db/schema";
 import { eq, and, isNull } from "drizzle-orm";
 import { requireAuth, requireRole } from "../middleware/auth";
@@ -34,18 +37,18 @@ export const tenantsModule = new (Elysia as any)({ prefix: "/tenants" })
     try {
       const slug = body.slug ?? body.name.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 63);
 
-      const existing = await db.query.organizations.findFirst({
-        where: eq(organizations.slug, slug),
-      });
-      if (existing) {
+      const orgRows = (await db.execute(sql`SELECT * FROM auth_find_org_by_slug(${slug})`)) as unknown as Array<{ id: string }>;
+      if (orgRows[0]) {
         set.status = 409;
         return { error: { code: "SLUG_TAKEN", message: "Este slug já está em uso." } };
       }
 
-      const result = await db.transaction(async (tx) => {
+      const orgId = randomUUID();
+      const result = await withTenant(orgId, async (tx) => {
         const [org] = await tx
           .insert(organizations)
           .values({
+            id: orgId,
             name: body.name,
             slug,
             identifierPrefix: body.identifierPrefix ?? slug.toUpperCase().slice(0, 4),
@@ -124,9 +127,9 @@ export const tenantsModule = new (Elysia as any)({ prefix: "/tenants" })
   .use(requireAuth())
 
   .get("/me", async ({ auth, set }) => {
-    const org = await db.query.organizations.findFirst({
+    const org = await withTenant(auth!.tenantId, (tx) => tx.query.organizations.findFirst({
       where: eq(organizations.id, auth!.tenantId),
-    });
+    }));
     if (!org) {
       set.status = 404;
       return { error: { code: "NOT_FOUND", message: "Organização não encontrada." } };

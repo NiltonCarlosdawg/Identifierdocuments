@@ -29,7 +29,7 @@ export async function setupRLS() {
     await sql.unsafe(`
       CREATE POLICY tenant_isolation_${table} ON ${table}
         FOR ALL
-        USING (tenant_id = current_setting('app.current_tenant')::uuid);
+        USING (tenant_id = current_setting('app.current_tenant', true)::uuid);
     `);
   }
 
@@ -37,7 +37,7 @@ export async function setupRLS() {
     DROP POLICY IF EXISTS roles_allow_system ON roles;
     CREATE POLICY roles_allow_system ON roles
       FOR ALL
-      USING (tenant_id IS NULL OR tenant_id = current_setting('app.current_tenant')::uuid);
+      USING (tenant_id IS NULL OR tenant_id = current_setting('app.current_tenant', true)::uuid);
   `);
 
   await sql.unsafe(`
@@ -50,7 +50,7 @@ export async function setupRLS() {
         EXISTS (
           SELECT 1 FROM documents
           WHERE documents.id = document_id
-            AND documents.tenant_id = current_setting('app.current_tenant')::uuid
+            AND documents.tenant_id = current_setting('app.current_tenant', true)::uuid
         )
       );
   `);

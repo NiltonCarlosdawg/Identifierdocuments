@@ -5,6 +5,7 @@ import { db, type DB } from "../db";
 import { getClientIp } from "../lib/ip";
 import { userRoles, roles, users } from "../db/schema";
 import { eq, and, or, isNull } from "drizzle-orm";
+import { withTenant } from "../db/withTenant";
 
 const rawSecret = process.env.JWT_SECRET;
 if (!rawSecret) throw new Error("JWT_SECRET environment variable is required");
@@ -82,8 +83,8 @@ export function requireAuth() {
  * `executor` permite correr dentro de uma transacção aberta passando o `tx`:
  * usar o `db` de raiz aqui roubaria uma segunda conexão ao pool e, com
  * transacções concorrentes iguais ao `max` do pool, bloqueava em deadlock. */
-export async function getFreshRoles(userId: string, tenantId: string, executor: DB = db): Promise<string[]> {
-  const rows = await executor
+export async function getFreshRoles(userId: string, tenantId: string, executor?: DB): Promise<string[]> {
+  const query = (t: DB) => t
     .select({ roleName: roles.name })
     .from(userRoles)
     .innerJoin(roles, eq(userRoles.roleId, roles.id))
@@ -94,6 +95,8 @@ export async function getFreshRoles(userId: string, tenantId: string, executor: 
         isNull(roles.tenantId), // roles de sistema (tenantId null) aplicam-se a todas as organizações
       ),
     ));
+  if (executor) return (await query(executor)).map((r) => r.roleName);
+  const rows = await withTenant(tenantId, (tx: DB) => query(tx));
   return rows.map((r) => r.roleName);
 }
 
@@ -129,11 +132,11 @@ export function requireSectorScope(opts?: { bypassRoles?: string[] }) {
   return (app: any) => app
     .derive({ as: "scoped" }, async (ctx: any) => {
       if (!ctx.auth) return {};
-      const [user] = await db
+      const rows = await withTenant(ctx.auth.tenantId, (tx: DB) => tx
         .select({ sectorId: users.sectorId })
         .from(users)
-        .where(eq(users.id, ctx.auth.userId));
-      return { sectorScopeId: user?.sectorId ?? null };
+        .where(eq(users.id, ctx.auth!.userId)));
+      return { sectorScopeId: rows[0]?.sectorId ?? null };
     })
     .guard({
       beforeHandle: async (ctx: any) => {

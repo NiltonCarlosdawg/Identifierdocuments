@@ -113,12 +113,12 @@ export const auditModule = new (Elysia as any)({ prefix: "/audit" })
           controller.enqueue(encoder.encode("id,userId,action,resource,resourceId,ip,createdAt\n"));
           let page = 1;
           while (!aborted) {
-            const rows = await db.query.auditLogs.findMany({
+            const rows = await withTenant(tenantId, (tx) => tx.query.auditLogs.findMany({
               where: eq(auditLogs.tenantId, tenantId),
               orderBy: desc(auditLogs.createdAt),
               limit: CSV_BATCH,
               offset: (page - 1) * CSV_BATCH,
-            });
+            }));
             if (rows.length === 0) break;
             for (const r of rows) {
               if (aborted) { controller.close(); return; }
