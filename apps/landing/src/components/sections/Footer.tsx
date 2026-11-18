@@ -1,73 +1,77 @@
+import DoodleCrewFooter from "@/components/ui/doodle-crew-footer";
 import { DOWNLOADS } from "@/components/ui/download-section";
 
 const API_HEALTH = "https://didall.milvendas.ao/health";
 
+const CREW = [
+  {
+    kind: "clerk" as const,
+    letter: 0,
+    seat: "front" as const,
+    offset: -0.5,
+    name: "Clara",
+    says: "Ficha atualizada.",
+  },
+  {
+    kind: "analyst" as const,
+    letter: 2,
+    seat: "top" as const,
+    offset: 0.05,
+    name: "Rui",
+    says: "Tudo auditado.",
+  },
+  {
+    kind: "worker" as const,
+    letter: 4,
+    seat: "front" as const,
+    offset: 0.45,
+    flip: true,
+    name: "Aónio",
+    says: "Documentos registados.",
+  },
+];
+
 export function Footer() {
   return (
-    <footer className="on-dark border-t border-docid-border bg-docid-bg">
-      <div className="shell py-14">
-        <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="lg:col-span-2">
-            <div className="flex items-center">
-              <img src="/logo-dark.png" alt="DocID" width={91} height={24} className="h-6 w-auto" />
-            </div>
-            <p className="mt-4 max-w-[42ch] text-sm leading-relaxed text-docid-muted">
-              Gestão documental para empresas angolanas. Identificadores únicos, acesso por sector e auditoria por
-              organização.
-            </p>
-          </div>
-
-          <nav aria-label="Produto">
-            <h2 className="font-mono text-[10px] uppercase tracking-[0.16em] text-docid-muted">Produto</h2>
-            <ul className="mt-4 space-y-2.5 text-sm">
-              {[
-                { href: "#produto", label: "Produto" },
-                { href: "#funcionalidades", label: "Funcionalidades" },
-                { href: "#seguranca", label: "Segurança" },
-                { href: "#perguntas", label: "Perguntas" },
-              ].map((link) => (
-                <li key={link.href}>
-                  <a className="text-docid-text underline-offset-4 hover:underline" href={link.href}>
-                    {link.label}
-                  </a>
-                </li>
-              ))}
-            </ul>
-          </nav>
-
-          <div>
-            <h2 className="font-mono text-[10px] uppercase tracking-[0.16em] text-docid-muted">Descarregar</h2>
-            <ul className="mt-4 space-y-2.5 text-sm">
-              <li>
-                <a className="text-docid-text underline-offset-4 hover:underline" href={DOWNLOADS.installer.href}>
-                  Windows · instalador 1.1.6
-                </a>
-              </li>
-              <li>
-                <a className="text-docid-text underline-offset-4 hover:underline" href={DOWNLOADS.portable.href}>
-                  Windows · portátil
-                </a>
-              </li>
-              <li>
-                <a
-                  className="text-docid-muted underline-offset-4 hover:text-docid-text hover:underline"
-                  href={API_HEALTH}
-                  rel="noreferrer"
-                >
-                  Estado do serviço
-                </a>
-              </li>
-            </ul>
-          </div>
-        </div>
-
-        <div className="mt-12 flex flex-col gap-3 border-t border-docid-border pt-6 sm:flex-row sm:items-center sm:justify-between">
-          <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-docid-muted">
-            © 2026 Verano Labs · Luanda, Angola
-          </p>
-          <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-docid-muted">DocID 1.1.6 · Windows x64</p>
-        </div>
-      </div>
-    </footer>
+    <DoodleCrewFooter
+      wordmark="DOCID"
+      brand="DocID"
+      blurb="Gestão documental para empresas angolanas. Identificadores únicos, acesso por sector e auditoria por organização."
+      tagline="Um identificador único para cada documento, encontrado em segundos."
+      columns={[
+        {
+          title: "Produto",
+          links: [
+            { label: "Produto", href: "#produto" },
+            { label: "Funcionalidades", href: "#funcionalidades" },
+            { label: "Segurança", href: "#seguranca" },
+            { label: "Perguntas", href: "#perguntas" },
+          ],
+        },
+        {
+          title: "Descarregar",
+          links: [
+            { label: "Windows · instalador 1.1.6", href: DOWNLOADS.installer.href },
+            { label: "Windows · portátil", href: DOWNLOADS.portable.href },
+            { label: "Estado do serviço", href: API_HEALTH },
+          ],
+        },
+      ]}
+      actions={[
+        { label: "Ver o produto", href: "#produto", icon: "paper", variant: "outline" },
+        { label: "Descarregar para Windows", href: DOWNLOADS.installer.href, icon: "laptop", variant: "solid" },
+      ]}
+      copyright="© 2026 Verano Labs · Luanda, Angola"
+      legal={[]}
+      socials={[]}
+      crew={CREW}
+      doodles={["paper", "folder", "laptop", "check"]}
+      doodleCount={10}
+      preset="paper"
+      palette={{ background: "#f8f9fa", ink: "#14171c", accent: "#2563eb" }}
+      fontFamily='Archivo, Inter, "Helvetica Neue", Helvetica, Arial, sans-serif'
+      serifFamily='Inter, ui-sans-serif, system-ui, sans-serif'
+      height="680px"
+    />
   );
 }
