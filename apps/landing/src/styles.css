@@ -1,0 +1,193 @@
+@import "./fonts.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Hex for raw CSS, `-rgb` triplets for Tailwind's opacity modifiers. */
+:root {
+  --docid-bg: #f8f9fa;
+  --docid-bg-rgb: 248 249 250;
+  --docid-surface: #ffffff;
+  --docid-surface-rgb: 255 255 255;
+  --docid-surface-low: #f1f3f5;
+  --docid-surface-low-rgb: 241 243 245;
+  --docid-surface-lowest: #e9ecef;
+  --docid-surface-lowest-rgb: 233 236 239;
+  --docid-surface-high: #f8f9fa;
+  --docid-surface-high-rgb: 248 249 250;
+  --docid-border: #d7dbe0;
+  --docid-border-rgb: 215 219 224;
+  --docid-outline: #6c757d;
+  --docid-outline-rgb: 108 117 125;
+  --docid-text: #14171c;
+  --docid-text-rgb: 20 23 28;
+  --docid-muted: #565d66;
+  --docid-muted-rgb: 86 93 102;
+  --docid-primary: #2563eb;
+  --docid-primary-rgb: 37 99 235;
+  --docid-primary-soft: #4d6fd9;
+  --docid-primary-soft-rgb: 77 111 217;
+  --docid-secondary: #1f7a3a;
+  --docid-secondary-rgb: 31 122 58;
+  --docid-tertiary: #a45c14;
+  --docid-tertiary-rgb: 164 92 20;
+  --docid-error: #c9302c;
+  --docid-error-rgb: 201 48 44;
+  --docid-link: #1d4ed8;
+  --docid-link-rgb: 29 78 216;
+}
+
+.on-dark {
+  --docid-bg: #0b0d12;
+  --docid-bg-rgb: 11 13 18;
+  --docid-surface: #14171f;
+  --docid-surface-rgb: 20 23 31;
+  --docid-surface-low: #101319;
+  --docid-surface-low-rgb: 16 19 25;
+  --docid-surface-lowest: #080a0e;
+  --docid-surface-lowest-rgb: 8 10 14;
+  --docid-surface-high: #1c2028;
+  --docid-surface-high-rgb: 28 32 40;
+  --docid-border: #272c37;
+  --docid-border-rgb: 39 44 55;
+  --docid-outline: #8b93a3;
+  --docid-outline-rgb: 139 147 163;
+  --docid-text: #eef1f6;
+  --docid-text-rgb: 238 241 246;
+  --docid-muted: #a7b0c0;
+  --docid-muted-rgb: 167 176 192;
+  --docid-primary: #3b76ec;
+  --docid-primary-rgb: 59 118 236;
+  --docid-primary-soft: #9dbaff;
+  --docid-primary-soft-rgb: 157 186 255;
+  --docid-secondary: #62df7d;
+  --docid-secondary-rgb: 98 223 125;
+  --docid-tertiary: #ffb77d;
+  --docid-tertiary-rgb: 255 183 125;
+  --docid-error: #ffb4ab;
+  --docid-error-rgb: 255 180 171;
+  --docid-link: #9dbaff;
+  --docid-link-rgb: 157 186 255;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+    background-color: var(--docid-bg);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+  }
+
+  /* Anchors land below the fixed header. */
+  section[id], :target { scroll-margin-top: 5.5rem; }
+
+  body {
+    margin: 0;
+    font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+    font-size: 1rem;
+    line-height: 1.6;
+    color: var(--docid-text);
+    background-color: var(--docid-bg);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  h1, h2, h3 {
+    font-family: Archivo, Inter, ui-sans-serif, system-ui, sans-serif;
+    letter-spacing: -0.03em;
+    line-height: 1.04;
+    text-wrap: balance;
+    margin: 0;
+  }
+
+  p { text-wrap: pretty; }
+
+  ::selection {
+    background: rgba(37, 99, 235, 0.28);
+    color: var(--docid-text);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--docid-primary);
+    outline-offset: 3px;
+    border-radius: 2px;
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--docid-border) transparent;
+  }
+
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: var(--docid-border);
+    border-radius: 8px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+}
+
+@layer components {
+  .shell {
+    @apply mx-auto w-full max-w-[1180px] px-5 sm:px-8;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-5 text-sm font-semibold
+           transition-[transform,background-color,box-shadow,color] duration-200 ease-out-expo
+           motion-safe:hover:-translate-y-0.5;
+    min-height: 44px;
+  }
+
+  .btn-primary {
+    /* Fixed brand blue, not --docid-primary: white text on the lighter dark-mode
+       blue (#3b76ec) only reaches 4.0:1. */
+    @apply btn text-white;
+    background-color: #2563eb;
+    box-shadow: 0 1px 2px rgba(9, 14, 26, 0.28), 0 8px 22px -12px rgba(37, 99, 235, 0.85);
+  }
+  .btn-primary:hover { background-color: #1d4ed8; }
+
+  .btn-ghost {
+    @apply btn border border-docid-border bg-transparent text-docid-text;
+  }
+  .btn-ghost:hover { background-color: var(--docid-surface-low); }
+
+  .btn[aria-disabled="true"] {
+    @apply cursor-not-allowed opacity-55;
+    transform: none;
+  }
+
+  .eyebrow {
+    @apply font-mono text-[11px] font-medium uppercase tracking-[0.18em] text-docid-muted;
+  }
+
+  .rule {
+    @apply border-t border-docid-border;
+  }
+
+  .ledger-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+
+.skip-link {
+  position: absolute;
+  left: 1rem;
+  top: -4rem;
+  z-index: 60;
+  padding: 0.75rem 1rem;
+  border-radius: 0.5rem;
+  background: var(--docid-primary);
+  color: #fff;
+  font-size: 0.875rem;
+  font-weight: 600;
+  transition: top 0.2s ease-out;
+}
+.skip-link:focus { top: 1rem; }

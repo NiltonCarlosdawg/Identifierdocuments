@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="pt-AO">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DocID · Um identificador único para cada documento</title>
+    <meta
+      name="description"
+      content="O DocID dá um identificador único a cada documento, restringe o acesso por sector e registra todas as acções da organização. Aplicação para Windows 10 e 11."
+    />
+    <link rel="canonical" href="https://docid.milvendas.ao/" />
+    <meta name="theme-color" content="#0b0d12" />
+    <meta name="color-scheme" content="dark light" />
+    <link rel="icon" href="/icon.png" type="image/png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="pt_AO" />
+    <meta property="og:site_name" content="DocID" />
+    <meta property="og:url" content="https://docid.milvendas.ao/" />
+    <meta property="og:title" content="DocID · Um identificador único para cada documento" />
+    <meta
+      property="og:description"
+      content="Identificadores únicos, acesso por sector e auditoria por organização. Aplicação para Windows 10 e 11."
+    />
+    <meta property="og:image" content="https://docid.milvendas.ao/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="DocID: registo de documentos com identificador, sector e estado." />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="DocID · Um identificador único para cada documento" />
+    <meta
+      name="twitter:description"
+      content="Identificadores únicos, acesso por sector e auditoria por organização. Aplicação para Windows 10 e 11."
+    />
+    <meta name="twitter:image" content="https://docid.milvendas.ao/og.png" />
+
+    <link rel="preload" href="/fonts/archivo-600-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/inter-400-latin.woff2" as="font" type="font/woff2" crossorigin />
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "SoftwareApplication",
+            "@id": "https://docid.milvendas.ao/#app",
+            "name": "DocID",
+            "applicationCategory": "BusinessApplication",
+            "operatingSystem": "Windows 10, Windows 11",
+            "softwareVersion": "1.1.6",
+            "inLanguage": "pt-AO",
+            "description": "Plataforma de gestão documental que atribui um identificador único a cada documento, restringe o acesso por sector e registra todas as acções da organização.",
+            "url": "https://docid.milvendas.ao/",
+            "downloadUrl": "https://github.com/NiltonCarlosdawg/Identifierdocuments/releases/download/desktop-v1.1.6/DocID_1.1.6_x64-setup.exe",
+            "publisher": { "@type": "Organization", "name": "Verano Labs" }
+          },
+          {
+            "@type": "FAQPage",
+            "@id": "https://docid.milvendas.ao/#faq",
+            "mainEntity": [
+              {
+                "@type": "Question",
+                "name": "Preciso de internet para usar o DocID?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "Sim, para entrar e sincronizar. O trabalho em curso é reservado por leases, por isso uma falha de rede não duplica documentos nem deixa dois postos a gravar por cima um do outro."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "Onde ficam os dados da minha empresa?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "Na base de dados da organização, com isolamento por organização ao nível da linha. Cada pedido é autenticado e limitado à organização a que pertence."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "Funciona em Mac ou Linux?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "Ainda não. Esta versão corre em Windows 10 e 11, 64 bits. As versões para Linux e macOS estão em preparação e serão publicadas na mesma página de versões."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "Como actualizo a aplicação?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "A aplicação verifica actualizações ao arrancar e instala a versão mais recente. Também pode descarregar o instalador por cima da versão antiga: os dados ficam no servidor e a sessão mantém-se."
+                }
+              }
+            ]
+          }
+        ]
+      }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <noscript>
+      <div style="max-width: 42rem; margin: 4rem auto; padding: 0 1.25rem; font-family: system-ui, sans-serif">
+        <h1>DocID</h1>
+        <p>
+          Gestão documental com identificadores únicos, acesso por sector e auditoria por organização. Aplicação para
+          Windows 10 e 11.
+        </p>
+        <p>
+          <a href="https://github.com/NiltonCarlosdawg/Identifierdocuments/releases/download/desktop-v1.1.6/DocID_1.1.6_x64-setup.exe">
+            Descarregar o instalador 1.1.6 (8,6 MB)
+          </a>
+        </p>
+      </div>
+    </noscript>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
