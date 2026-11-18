@@ -31,9 +31,8 @@ export function Nav() {
       } on-dark`}
     >
       <div className="shell flex h-16 items-center justify-between gap-6">
-        <a href="#topo" className="flex items-center gap-2.5" aria-label="DocID, início">
-          <img src="/icon.png" alt="" width={26} height={26} className="rounded-[6px]" />
-          <span className="font-display text-lg font-semibold tracking-tight text-docid-text">DocID</span>
+        <a href="#topo" className="flex items-center" aria-label="DocID, início">
+          <img src="/logo-dark.png" alt="DocID" width={107} height={28} className="h-7 w-auto" />
         </a>
 
         <nav aria-label="Navegação principal" className="hidden items-center gap-7 md:flex">

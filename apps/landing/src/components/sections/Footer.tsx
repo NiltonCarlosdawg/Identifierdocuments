@@ -8,9 +8,8 @@ export function Footer() {
       <div className="shell py-14">
         <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-4">
           <div className="lg:col-span-2">
-            <div className="flex items-center gap-2.5">
-              <img src="/icon.png" alt="" width={24} height={24} className="rounded-[5px]" />
-              <span className="font-display text-base font-semibold tracking-tight text-docid-text">DocID</span>
+            <div className="flex items-center">
+              <img src="/logo-dark.png" alt="DocID" width={91} height={24} className="h-6 w-auto" />
             </div>
             <p className="mt-4 max-w-[42ch] text-sm leading-relaxed text-docid-muted">
               Gestão documental para empresas angolanas. Identificadores únicos, acesso por sector e auditoria por

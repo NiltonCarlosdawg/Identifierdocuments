@@ -41,8 +41,14 @@ charset plus cache headers.
 
 ## Assets
 
-- `public/icon.png`, `public/apple-touch-icon.png` — generated from the brand
-  monogram (blue `#2563eb`, white D).
-- `public/og.png` — 1200×630 social card.
+Generated from `docid logo.jpg` (repo root) with Python/PIL:
+
+- `public/logo-dark.png` — the lockup for dark backgrounds: original mark on a
+  white tile, wordmark recoloured white (transparent PNG, 3×).
+- `public/icon.png` (512), `public/apple-touch-icon.png` (180) — mark on a
+  white rounded tile.
+- `public/og.png` — 1200×630 social card, keeping the original navy-on-white
+  lockup.
+
 - `public/fonts/*.woff2` — self-hosted Archivo 600/700, Inter 400/600,
   JetBrains Mono 500 (latin subset, 183 KB total).
