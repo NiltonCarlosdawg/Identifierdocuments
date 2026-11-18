@@ -21,6 +21,15 @@ bunx tauri signer generate -w ~/.tauri/docid-updater.key
 
 Actualize a pubkey em `tauri.conf.json` se regenerar o par.
 
+## ChaveActual
+
+A pubkey em `tauri.conf.json` corresponde à chave privada de `~/.tauri/docid-updater.key`
+(gerada em 2026-11-18). Essa chave privada **não está no repositório**; está no teu `~/.tauri/`
+e deve ser guardada. Ela permite assinar o `.exe` do updater e publicar instaladores futuros.
+
+Antiga pubkey foi substituída: instalações de versões anteriores (≤1.1.5) não conseguirão
+auto-actualizar para 1.1.6 — actualizam manualmente (ver UPDATER.md → Endpoint).
+
 ## Endpoint
 
 Por omissão: `https://github.com/NiltonCarlosdawg/Identifierdocuments/releases/latest/download/latest.json`

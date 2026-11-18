@@ -26,7 +26,12 @@
   "bundle": {
     "active": true,
     "createUpdaterArtifacts": true,
-    "targets": ["nsis", "msi", "deb", "appimage"],
+    "targets": [
+      "nsis",
+      "msi",
+      "deb",
+      "appimage"
+    ],
     "publisher": "VeranoLabs",
     "copyright": "© 2026 VeranoLabs. Todos os direitos reservados.",
     "category": "Business",
@@ -43,7 +48,9 @@
       "nsis": {
         "installMode": "currentUser",
         "installerIcon": "icons/icon.ico",
-        "languages": ["Portuguese"]
+        "languages": [
+          "Portuguese"
+        ]
       },
       "wix": {
         "language": "pt-PT"
@@ -57,7 +64,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQwQTg2ODVEOTdGRDNDOApSV1RJMDMvWmhZWUtEYmhqUWNZckhoaVZoSFdiaXFRMGtDNFBjVXBxL3ZsMFFJL3lHWEc5ZjREMAo=",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEIzRjUwNjIyNUY3NEVBN0IKUldSNzZuUmZJZ2Ixczk1Y2Y1YjRJcWdwc1JlRFFORlZVYXVsNmJGdnh0M0R2cm80UUxmSVpUZDAK",
       "endpoints": [
         "https://github.com/NiltonCarlosdawg/Identifierdocuments/releases/latest/download/latest.json"
       ],
