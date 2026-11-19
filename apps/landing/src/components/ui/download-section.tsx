@@ -7,6 +7,11 @@ const RELEASE = "https://github.com/NiltonCarlosdawg/Identifierdocuments/release
 const ALL_RELEASES = "https://github.com/NiltonCarlosdawg/Identifierdocuments/releases";
 
 export const DOWNLOADS = {
+  bundle: {
+    href: "/downloads/DocID-Instalador-Windows-1.1.6.zip",
+    size: "223 MB",
+    sha256: "a5ac82a44e09de36307a0a25a18701fba41b42ee967770e8f857c33e80583213",
+  },
   installer: {
     href: `${RELEASE}/DocID_1.1.6_x64-setup.exe`,
     size: "8,6 MB",
@@ -95,11 +100,24 @@ export function DownloadSection() {
           <div className="overflow-hidden rounded-2xl border border-docid-border bg-docid-surface">
             <PlatformRow
               mark={<WindowsMark className="h-4 w-4" />}
-              name="Instalador"
-              meta="Recomendado · x64"
-              detail="Cria a aplicação no perfil do utilizador e activa as actualizações automáticas."
+              name="Pacote completo"
+              meta="Recomendado · instalação automática"
+              detail="ZIP com o DocID e o motor WebView2. Descompacte e execute INSTALAR-DocID.bat: instala tudo sozinho, mesmo sem internet."
               action={
-                <a className="btn-primary w-full sm:w-auto" href={DOWNLOADS.installer.href}>
+                <a className="btn-primary w-full sm:w-auto" href={DOWNLOADS.bundle.href}>
+                  <Download className="h-4 w-4" />
+                  Descarregar {DOWNLOADS.bundle.size}
+                </a>
+              }
+            />
+            <div className="rule" />
+            <PlatformRow
+              mark={<WindowsMark className="h-4 w-4" />}
+              name="Instalador simples"
+              meta="Requer WebView2 · x64"
+              detail="Apenas o DocID, sem o motor WebView2. Use se o computador já tiver o Microsoft Edge WebView2 instalado."
+              action={
+                <a className="btn-ghost w-full sm:w-auto" href={DOWNLOADS.installer.href}>
                   <Download className="h-4 w-4" />
                   Descarregar {DOWNLOADS.installer.size}
                 </a>
@@ -110,7 +128,7 @@ export function DownloadSection() {
               mark={<WindowsMark className="h-4 w-4" />}
               name="Versão portátil"
               meta="Sem instalação · x64"
-              detail="Um único ficheiro executável. Precisa do Microsoft Edge WebView2, já presente na maioria dos Windows 10 e 11."
+              detail="Um único ficheiro executável. Requer o Microsoft Edge WebView2 já instalado no computador."
               action={
                 <a className="btn-ghost w-full sm:w-auto" href={DOWNLOADS.portable.href}>
                   <Download className="h-4 w-4" />
@@ -148,6 +166,12 @@ export function DownloadSection() {
                   <span className="font-semibold">Executar mesmo assim</span>.
                 </p>
                 <dl className="mt-4 space-y-1.5">
+                  <div className="flex flex-wrap items-baseline gap-x-2">
+                    <dt className="font-mono text-[10px] uppercase tracking-[0.14em] text-docid-muted">SHA-256 pacote completo</dt>
+                    <dd className="w-full break-all font-mono text-[11px] leading-relaxed text-docid-muted">
+                      {DOWNLOADS.bundle.sha256}
+                    </dd>
+                  </div>
                   <div className="flex flex-wrap items-baseline gap-x-2">
                     <dt className="font-mono text-[10px] uppercase tracking-[0.14em] text-docid-muted">SHA-256 instalador</dt>
                     <dd className="w-full break-all font-mono text-[11px] leading-relaxed text-docid-muted">
