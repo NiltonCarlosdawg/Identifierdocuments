@@ -21,6 +21,8 @@ export default function Profile() {
   const [pwError, setPwError] = useState("");
   const [pwSuccess, setPwSuccess] = useState("");
 
+  const initials = (name?: string | null) => (name || "AD").split(" ").map(p => p[0]).join("").slice(0, 2).toUpperCase();
+
   const handleSaveName = async () => {
     if (!fullName.trim() || fullName === user?.fullName) return;
     setSaving(true); setSaveMsg("");
@@ -48,17 +50,33 @@ export default function Profile() {
   if (!user) return <div className="flex items-center justify-center py-16 text-sm text-docid-muted">A carregar perfil...</div>;
 
   return (
-    <div className="max-w-2xl">
+    <div className="space-y-6 max-w-2xl">
       <PageHeader title="Perfil" description="Gerir os seus dados pessoais" />
-      <div className="docid-panel p-6 mb-6">
+      <div className="docid-panel p-6">
         <div className="flex items-center gap-4 mb-6">
-          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-docid-primary/15 text-2xl font-bold text-docid-primary-soft">{(user.fullName || "AD").split(" ").map(p => p[0]).join("").slice(0, 2).toUpperCase()}</div>
-          <div><p className="text-lg font-semibold">{user.fullName}</p><p className="text-sm text-docid-muted">{user.email}</p></div>
+          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-docid-primary/15 text-2xl font-bold text-docid-primary-soft">{initials(user.fullName)}</div>
+          <div>
+            <p className="text-lg font-semibold">{user.fullName}</p>
+            <p className="text-sm text-docid-muted">{user.email}</p>
+          </div>
         </div>
-        <div className="grid grid-cols-2 gap-4 text-sm"><div><p className="text-xs text-docid-muted">Organização</p><p className="font-medium">{user.organization || "-"}</p></div><div><p className="text-xs text-docid-muted">Sector</p><p className="font-medium">{user.sectorName || user.sectorId || "-"}</p></div><div className="col-span-2"><p className="text-xs text-docid-muted">Roles</p><p className="font-medium">{user.roles.join(", ") || "-"}</p></div></div>
+        <div className="grid grid-cols-2 gap-4 text-sm">
+          <div>
+            <p className="text-xs text-docid-muted">Organização</p>
+            <p className="font-medium">{user.organization || "-"}</p>
+          </div>
+          <div>
+            <p className="text-xs text-docid-muted">Sector</p>
+            <p className="font-medium">{user.sectorName || user.sectorId || "-"}</p>
+          </div>
+          <div className="col-span-2">
+            <p className="text-xs text-docid-muted">Roles</p>
+            <p className="font-medium">{user.roles.join(", ") || "-"}</p>
+          </div>
+        </div>
       </div>
 
-      <div className="docid-panel p-6 mb-6">
+      <div className="docid-panel p-6">
         <h2 className="flex items-center gap-2 text-base font-semibold mb-4"><User className="h-4 w-4" /> Editar Nome</h2>
         <div className="flex items-end gap-3">
           <div className="flex-1"><label className="mb-1.5 block text-xs font-semibold text-docid-muted">Nome completo</label><input value={fullName} onChange={e => setFullName(e.target.value)} className="docid-input w-full" /></div>

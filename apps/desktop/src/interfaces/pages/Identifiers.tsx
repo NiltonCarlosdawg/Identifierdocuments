@@ -1,15 +1,51 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { api, sync } from "../../infrastructure/di/container";
 import { useGenerateIdentifier } from "../hooks/useGenerateIdentifier";
 import { usePendingIdentifiers, conflictLabel } from "../hooks/usePendingIdentifiers";
 import { useOfflineCache } from "../hooks/useOfflineCache";
 import { mapError } from "../../shared/errors/mapError";
 import { useAuthStore } from "../stores/authStore";
-import { PageHeader, Modal, StatusChip, EmptyState, Pagination, OfflineNotice } from "../components/docid-ui";
-import { Fingerprint, Plus, Copy, Ban, Search, WifiOff, RefreshCw, AlertTriangle, Trash2, RotateCcw, Clock, Smartphone } from "lucide-react";
+import { PageHeader, Modal, StatusChip, EmptyState, OfflineNotice } from "../components/docid-ui";
+import { Fingerprint, Plus, Copy, Ban, Search, WifiOff, RefreshCw, AlertTriangle, Trash2, RotateCcw, Clock, Smartphone, Lock, Globe, Monitor, FileText, ChevronDown } from "lucide-react";
 
 interface Category { id: string; name: string; group: string; prefix: string; requiresSequential: boolean; }
 interface IdentifierRow { id: string; identifier: string; categoryId: string; category: { id: string; name: string; group: string; prefix: string }; status: string; origin: string; visibility: string; issuedTo: string | null; description: string | null; createdAt: string; sector: { id: string; name: string } | null; document: { id: string; filename: string } | null; createdByUser: { id: string; fullName: string } | null; restricted?: boolean; }
+
+const STATUS_LABELS: Record<string, string> = {
+  draft: "Rascunho",
+  active: "Activo",
+  attached: "Anexado",
+  cancelled: "Cancelado",
+};
+
+const STATUS_TONES: Record<string, "success" | "warning" | "error" | "info" | "neutral"> = {
+  draft: "neutral",
+  active: "success",
+  attached: "info",
+  cancelled: "error",
+};
+
+function SkeletonLine({ className = "h-4 w-full" }: { className?: string }) {
+  return <div className={`animate-pulse rounded bg-docid-surface-high ${className}`} />;
+}
+
+function SkeletonRow() {
+  return (
+    <div className="docid-panel p-4 space-y-3">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0 flex-1">
+          <SkeletonLine className="h-3 w-1/2 font-mono" />
+          <SkeletonLine className="h-3 w-1/3 mt-1" />
+        </div>
+      </div>
+      <div className="grid grid-cols-3 gap-3 text-xs">
+        {[1, 2, 3].map(index => (
+          <div key={index}><SkeletonLine className="h-3 w-1/3" /></div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export default function Identifiers() {
   const [view, setView] = useState<"server" | "pending">("server");
@@ -60,13 +96,27 @@ export default function Identifiers() {
     onData: setCategories,
   });
 
+  const filteredRows = rows.filter(r => !search || r.identifier.toLowerCase().includes(search.toLowerCase()));
+
   return (
-    <div>
-      <PageHeader title="Identificadores" description="Gere os identificadores únicos dos documentos" actions={
-        <button onClick={() => setShowGenerate(true)} className="docid-button-primary"><Plus className="h-4 w-4" /> Gerar</button>
-      } />
+    <div className="space-y-6">
+      {/* Header */}
+      <PageHeader
+        title="Identificadores"
+        description="Gere e consulte os identificadores únicos dos documentos"
+        actions={
+          <button onClick={() => setShowGenerate(true)} className="docid-button-primary"><Plus className="h-4 w-4" /> Gerar identificador</button>
+        }
+      />
+      {error && <div className="rounded-lg border border-docid-error/30 bg-docid-error/10 px-4 py-3 text-sm text-docid-error">{error}</div>}
+      {isStale && <OfflineNotice cachedAt={cachedAt} onRetry={refresh} />}
+
+      {/* View tabs */}
       <div className="mb-4 flex gap-1 border-b border-docid-border">
-        <button onClick={() => setView("server")} className={`px-4 py-2.5 text-sm font-medium transition border-b-2 -mb-px ${view === "server" ? "border-docid-primary text-docid-primary-soft" : "border-transparent text-docid-muted hover:text-docid-text"}`}>Servidor</button>
+        <button onClick={() => setView("server")} className={`px-4 py-2.5 text-sm font-medium transition border-b-2 -mb-px ${view === "server" ? "border-docid-primary text-docid-primary-soft" : "border-transparent text-docid-muted hover:text-docid-text"}`}>
+          Servidor
+          <span className="ml-2 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-docid-surface-high px-1.5 text-[10px] font-bold text-docid-text">{meta.total}</span>
+        </button>
         <button onClick={() => setView("pending")} className={`relative px-4 py-2.5 text-sm font-medium transition border-b-2 -mb-px ${view === "pending" ? "border-docid-primary text-docid-primary-soft" : "border-transparent text-docid-muted hover:text-docid-text"}`}>
           Pendentes
           {pendingTotal > 0 && <span className="ml-2 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-500 px-1.5 text-[10px] font-bold text-white">{pendingTotal}</span>}
@@ -75,35 +125,52 @@ export default function Identifiers() {
 
       {view === "server" ? (
         <>
-          {error && <div className="mb-4 rounded-lg border border-docid-error/30 bg-docid-error/10 p-3 text-sm text-docid-error">{error}</div>}
-          {isStale && <OfflineNotice cachedAt={cachedAt} onRetry={refresh} />}
           <div className="mb-4 flex flex-wrap items-center gap-3">
             <div className="relative flex-1 max-w-xs"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-docid-outline" /><input value={search} onChange={e => setSearch(e.target.value)} className="docid-input w-full pl-9" placeholder="Pesquisar identificador..." /></div>
-            <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="docid-input w-36"><option value="">Todos os estados</option><option value="active">Activo</option><option value="attached">Associado</option><option value="cancelled">Cancelado</option><option value="draft">Rascunho</option></select>
-            <select value={filterOrigin} onChange={e => setFilterOrigin(e.target.value)} className="docid-input w-36"><option value="">Todas as origens</option><option value="digital">Digital</option><option value="physical">Físico</option></select>
+            <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="docid-input w-40"><option value="">Todos os estados</option><option value="active">Activo</option><option value="attached">Associado</option><option value="cancelled">Cancelado</option><option value="draft">Rascunho</option></select>
+            <select value={filterOrigin} onChange={e => setFilterOrigin(e.target.value)} className="docid-input w-40"><option value="">Todas as origens</option><option value="digital">Digital</option><option value="physical">Físico</option></select>
           </div>
+
           <div className="docid-panel overflow-hidden">
             {loading ? (
-              <div className="flex items-center justify-center py-16 text-sm text-docid-muted">A carregar...</div>
-            ) : rows.length === 0 ? (
+              <div className="grid grid-cols-1 gap-3 p-6">
+                {[...Array(4)].map((_, index) => <SkeletonRow key={index} />)}
+              </div>
+            ) : filteredRows.length === 0 ? (
               <EmptyState>Nenhum identificador encontrado.</EmptyState>
             ) : (
-              <table className="docid-table">
-                <thead><tr><th>Identificador</th><th>Categoria</th><th>Estado</th><th>Origem</th><th>Sector</th><th>Criado em</th><th></th></tr></thead>
-                <tbody>{rows.filter(r => !search || r.identifier.toLowerCase().includes(search.toLowerCase())).map(row => (
-                  <tr key={row.id} className="cursor-pointer" onClick={() => setSelected(row)}>
-                    <td className="font-mono text-xs font-medium">{row.identifier}{row.restricted && <span className="ml-2 text-docid-tertiary">🔒</span>}</td>
-                    <td><span className="text-xs text-docid-muted">{row.category?.name || row.categoryId}</span></td>
-                    <td><StatusChip tone={row.status === "active" ? "success" : row.status === "cancelled" ? "error" : row.status === "attached" ? "info" : "neutral"}>{row.status === "active" ? "Activo" : row.status === "cancelled" ? "Cancelado" : row.status === "attached" ? "Associado" : row.status}</StatusChip></td>
-                    <td className="text-xs">{row.origin === "digital" ? "🖥 Digital" : "📄 Físico"}</td>
-                    <td className="text-xs text-docid-muted">{row.sector?.name || "-"}</td>
-                    <td className="text-xs text-docid-muted">{new Date(row.createdAt).toLocaleDateString("pt-AO")}</td>
-                    <td><button onClick={e => { e.stopPropagation(); navigator.clipboard.writeText(row.identifier); }} className="rounded p-1 text-docid-muted hover:text-docid-text"><Copy className="h-4 w-4" /></button></td>
-                  </tr>
-                ))}</tbody>
-              </table>
+              <>
+                <table className="docid-table">
+                  <thead>
+                    <tr>
+                      <th className="w-48">Identificador</th>
+                      <th>Categoria</th>
+                      <th className="w-32">Estado</th>
+                      <th className="w-24">Origem</th>
+                      <th className="w-32">Sector</th>
+                      <th className="w-32">Criado em</th>
+                      <th className="w-24 text-right"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredRows.map(row => (
+                      <tr key={row.id} className="cursor-pointer hover:bg-docid-surface-high transition-colors" onClick={() => setSelected(row)}>
+                        <td className="font-mono text-xs font-medium text-docid-text">{row.identifier}{row.restricted && <span className="ml-2 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-docid-tertiary/10 px-1 text-[10px] font-bold text-docid-tertiary" title="Restrito"><Lock className="h-2.5 w-2.5" /></span>}</td>
+                        <td className="text-xs text-docid-text">{row.category?.name || row.categoryId}</td>
+                        <td><StatusChip tone={STATUS_TONES[row.status] ?? "neutral"}>{STATUS_LABELS[row.status] || row.status}</StatusChip></td>
+                        <td className="text-xs">{row.origin === "digital" ? <span className="inline-flex items-center gap-1.5"><Monitor className="h-3.5 w-3.5 text-docid-muted" /> Digital</span> : <span className="inline-flex items-center gap-1.5"><FileText className="h-3.5 w-3.5 text-docid-muted" /> Físico</span>}</td>
+                        <td className="text-xs text-docid-muted">{row.sector?.name || "-"}</td>
+                        <td className="text-xs text-docid-muted">{new Date(row.createdAt).toLocaleDateString("pt-AO")}</td>
+                        <td className="text-right"><button onClick={e => { e.stopPropagation(); navigator.clipboard.writeText(row.identifier); }} className="rounded p-1 text-docid-muted hover:text-docid-text hover:bg-docid-surface-high transition-colors" title="Copiar identificador"><Copy className="h-4 w-4" /></button></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div className="mt-4 flex items-center justify-between border-t border-docid-border px-4 py-3 text-sm text-docid-muted">
+                  <span>{meta.total} identificador(es)</span>
+                </div>
+              </>
             )}
-            <Pagination totalLabel={`${meta.total} identificador(es)`} />
           </div>
         </>
       ) : (
@@ -158,7 +225,7 @@ function PendingPanel({ items, loading, error, onRefresh, onRetry, onDelete, pen
     <div className="space-y-4">
       {error && <div className="rounded-lg border border-docid-error/30 bg-docid-error/10 p-3 text-sm text-docid-error">{error}</div>}
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-center justify-between">
         <div className="flex gap-1 rounded-lg bg-docid-surface-low p-0.5">
           {(["all", "pending", "conflict", "failed"] as const).map(f => (
             <button key={f} onClick={() => setFilter(f)}
@@ -171,21 +238,23 @@ function PendingPanel({ items, loading, error, onRefresh, onRetry, onDelete, pen
             </button>
           ))}
         </div>
-        <button onClick={onRefresh} className="ml-auto docid-button-secondary text-xs" disabled={loading}>
+        <button onClick={onRefresh} className="docid-button-secondary text-xs" disabled={loading}>
           <RefreshCw className={`h-3 w-3 ${loading ? "animate-spin" : ""}`} /> Actualizar
         </button>
       </div>
 
       {loading ? (
-        <div className="docid-panel flex items-center justify-center py-16 text-sm text-docid-muted">A carregar...</div>
+        <div className="grid grid-cols-1 gap-3 p-6">
+          {[...Array(3)].map((_, index) => <SkeletonRow key={index} />)}
+        </div>
       ) : filtered.length === 0 ? (
-        <div className="docid-panel flex flex-col items-center justify-center gap-3 py-12 text-center">
-          <Smartphone className="h-8 w-8 text-docid-outline" />
+        <div className="docid-panel flex flex-col items-center justify-center gap-3 py-16 text-center">
+          <Smartphone className="h-10 w-10 text-docid-outline opacity-60" />
           <p className="text-sm text-docid-muted">Nenhum identificador pendente.</p>
           <p className="text-xs text-docid-muted">Os identificadores gerados offline aparecerão aqui até serem sincronizados.</p>
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-2">
           {filtered.map(item => (
             <div key={item.id} className="docid-panel p-4 space-y-3">
               <div className="flex items-start justify-between gap-4">
@@ -201,12 +270,13 @@ function PendingPanel({ items, loading, error, onRefresh, onRetry, onDelete, pen
                     {item.issuedTo && <> · {item.issuedTo}</>}
                   </p>
                 </div>
+                <span className="shrink-0 text-[10px] text-docid-muted">{new Date(item.createdAt).toLocaleDateString("pt-AO")}</span>
               </div>
 
               <div className="grid grid-cols-3 gap-3 text-xs">
-                <div><span className="text-docid-muted">Tentativas</span><p className="font-medium">{item.attempts}/3</p></div>
-                <div><span className="text-docid-muted">Origem</span><p className="font-medium">{item.origin === "digital" ? "Digital" : "Físico"}</p></div>
-                <div><span className="text-docid-muted">Criado em</span><p className="font-medium">{new Date(item.createdAt).toLocaleDateString("pt-AO")}</p></div>
+                <div><span className="text-docid-muted block">Tentativas</span><p className="font-medium text-docid-text">{item.attempts}/3</p></div>
+                <div><span className="text-docid-muted block">Origem</span><p className="font-medium text-docid-text">{item.origin === "digital" ? "Digital" : "Físico"}</p></div>
+                <div><span className="text-docid-muted block">Criado em</span><p className="font-medium text-docid-text">{new Date(item.createdAt).toLocaleDateString("pt-AO")}</p></div>
               </div>
 
               {item.status === "conflict" && item.conflictReason && (
@@ -258,6 +328,94 @@ function PendingPanel({ items, loading, error, onRefresh, onRetry, onDelete, pen
   );
 }
 
+function CategoryCombobox({ categories, value, onChange }: { categories: Category[]; value: string; onChange: (id: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleClick = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [open]);
+
+  useEffect(() => {
+    if (open) inputRef.current?.focus();
+  }, [open]);
+
+  const selected = categories.find(c => c.id === value) || null;
+  const q = query.trim().toLowerCase();
+  const matches = q
+    ? categories.filter(c => c.name.toLowerCase().includes(q) || c.id.toLowerCase().includes(q) || c.group.toLowerCase().includes(q))
+    : categories;
+  const groups = matches.reduce<Record<string, Category[]>>((acc, c) => { (acc[c.group] = acc[c.group] || []).push(c); return acc; }, {});
+
+  const select = (id: string) => { onChange(id); setOpen(false); setQuery(""); };
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="docid-input flex w-full items-center justify-between gap-2 text-left"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+      >
+        <span className={selected ? "text-docid-text" : "text-docid-muted"}>
+          {selected ? `${selected.name} (${selected.id})` : "Seleccionar categoria..."}
+        </span>
+        <ChevronDown className={`h-4 w-4 shrink-0 text-docid-outline transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+
+      {open && (
+        <div className="absolute z-20 mt-1 w-full overflow-hidden rounded-lg border border-docid-border bg-docid-surface shadow-lg">
+          <div className="border-b border-docid-border p-2">
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-docid-outline" />
+              <input
+                ref={inputRef}
+                value={query}
+                onChange={e => setQuery(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === "Escape") { setOpen(false); setQuery(""); }
+                  if (e.key === "Enter") { e.preventDefault(); const first = matches[0]; if (first) select(first.id); }
+                }}
+                placeholder="Pesquisar por nome, código ou grupo..."
+                className="docid-input w-full py-1.5 pl-8 text-xs"
+              />
+            </div>
+          </div>
+          <div className="max-h-56 overflow-y-auto p-1" role="listbox">
+            {matches.length === 0 && (
+              <p className="px-3 py-2 text-xs text-docid-muted">Nenhuma categoria encontrada.</p>
+            )}
+            {Object.entries(groups).map(([group, cats]) => (
+              <div key={group}>
+                <p className="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wide text-docid-outline">{group}</p>
+                {cats.map(c => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => select(c.id)}
+                    className={`flex w-full items-center justify-between gap-2 rounded-md px-3 py-1.5 text-left text-sm transition ${c.id === value ? "bg-docid-primary/10 text-docid-primary-soft" : "text-docid-text hover:bg-docid-surface-high"}`}
+                  >
+                    <span className="truncate">{c.name}</span>
+                    <span className="shrink-0 font-mono text-[11px] text-docid-muted">{c.id}{c.requiresSequential ? "" : " *"}</span>
+                  </button>
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function GenerateModal({ categories, onClose, onDone }: { categories: Category[]; onClose: () => void; onDone: () => void }) {
   const [categoryId, setCategoryId] = useState("");
   const [issuedTo, setIssuedTo] = useState("");
@@ -275,8 +433,6 @@ function GenerateModal({ categories, onClose, onDone }: { categories: Category[]
       setIsOffline(!(await sync.isOnline()));
     })();
   }, []);
-
-  const groups = categories.reduce<Record<string, Category[]>>((acc, c) => { (acc[c.group] = acc[c.group] || []).push(c); return acc; }, {});
 
   const handleGenerate = async () => {
     if (!categoryId) return;
@@ -356,18 +512,11 @@ function GenerateModal({ categories, onClose, onDone }: { categories: Category[]
         )}
         <div>
           <label className="mb-1.5 block text-xs font-semibold text-docid-muted">Categoria</label>
-          <select value={categoryId} onChange={e => setCategoryId(e.target.value)} className="docid-input w-full">
-            <option value="">Seleccionar categoria...</option>
-            {Object.entries(groups).map(([group, cats]) => (
-              <optgroup key={group} label={group}>
-                {cats.map(c => (
-                  <option key={c.id} value={c.id}>
-                    {c.name} ({c.id}){c.requiresSequential ? "" : " *"}
-                  </option>
-                ))}
-              </optgroup>
-            ))}
-          </select>
+          <CategoryCombobox
+            categories={categories}
+            value={categoryId}
+            onChange={setCategoryId}
+          />
           {categoryId && !categories.find(c => c.id === categoryId)?.requiresSequential && isOffline && (
             <p className="mt-1 text-xs text-amber-500">* Sequência provisória até sincronizar.</p>
           )}
@@ -377,11 +526,11 @@ function GenerateModal({ categories, onClose, onDone }: { categories: Category[]
         <div>
           <label className="mb-1.5 block text-xs font-semibold text-docid-muted">Visibilidade</label>
           <div className="flex gap-2">
-            <button onClick={() => setVisibility("sector_only")} className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition ${visibility === "sector_only" ? "border-docid-primary bg-docid-primary/10 text-docid-primary-soft" : "border-docid-border text-docid-muted hover:bg-docid-surface-high"}`}>🔒 Apenas sector</button>
-            <button onClick={() => setVisibility("public")} className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition ${visibility === "public" ? "border-docid-primary bg-docid-primary/10 text-docid-primary-soft" : "border-docid-border text-docid-muted hover:bg-docid-surface-high"}`}>🌐 Público</button>
+            <button onClick={() => setVisibility("sector_only")} className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-medium transition ${visibility === "sector_only" ? "border-docid-primary bg-docid-primary/10 text-docid-primary-soft" : "border-docid-border text-docid-muted hover:bg-docid-surface-high"}`}><Lock className="h-4 w-4" /> Apenas sector</button>
+            <button onClick={() => setVisibility("public")} className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-medium transition ${visibility === "public" ? "border-docid-primary bg-docid-primary/10 text-docid-primary-soft" : "border-docid-border text-docid-muted hover:bg-docid-surface-high"}`}><Globe className="h-4 w-4" /> Público</button>
           </div>
         </div>
-        <div><label className="mb-1.5 block text-xs font-semibold text-docid-muted">Origem</label><div className="flex gap-2"><button onClick={() => setOrigin("digital")} className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition ${origin === "digital" ? "border-docid-primary bg-docid-primary/10 text-docid-primary-soft" : "border-docid-border text-docid-muted hover:bg-docid-surface-high"}`}>🖥 Digital</button><button onClick={() => setOrigin("physical")} className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition ${origin === "physical" ? "border-docid-primary bg-docid-primary/10 text-docid-primary-soft" : "border-docid-border text-docid-muted hover:bg-docid-surface-high"}`}>📄 Físico</button></div></div>
+        <div><label className="mb-1.5 block text-xs font-semibold text-docid-muted">Origem</label><div className="flex gap-2"><button onClick={() => setOrigin("digital")} className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-medium transition ${origin === "digital" ? "border-docid-primary bg-docid-primary/10 text-docid-primary-soft" : "border-docid-border text-docid-muted hover:bg-docid-surface-high"}`}><Monitor className="h-4 w-4" /> Digital</button><button onClick={() => setOrigin("physical")} className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-medium transition ${origin === "physical" ? "border-docid-primary bg-docid-primary/10 text-docid-primary-soft" : "border-docid-border text-docid-muted hover:bg-docid-surface-high"}`}><FileText className="h-4 w-4" /> Físico</button></div></div>
       </div>
     </Modal>
   );
@@ -407,7 +556,7 @@ function DetailModal({ row, onClose, onCancelled }: { row: IdentifierRow; onClos
   return (
     <Modal title="Detalhe do Identificador" onClose={onClose} footer={row.status === "active" && !showCancel ? <button onClick={() => setShowCancel(true)} className="docid-button-secondary text-docid-error"><Ban className="h-4 w-4" /> Cancelar</button> : undefined}>
       <div className="space-y-5">
-        <div className="flex items-center justify-between"><span className="font-mono text-lg font-bold">{row.identifier}</span><StatusChip tone={statusTone}>{row.status === "active" ? "Activo" : row.status === "cancelled" ? "Cancelado" : row.status === "attached" ? "Associado" : row.status}</StatusChip></div>
+        <div className="flex items-center justify-between"><span className="font-mono text-lg font-bold">{row.identifier}</span><StatusChip tone={statusTone}>{STATUS_LABELS[row.status] || row.status}</StatusChip></div>
         <div className="grid grid-cols-2 gap-4 text-sm">
           <div><p className="text-xs text-docid-muted">Categoria</p><p className="font-medium">{row.category?.name || row.categoryId}</p></div>
           <div><p className="text-xs text-docid-muted">Origem</p><p className="font-medium">{row.origin === "digital" ? "Digital" : "Físico"}</p></div>
@@ -419,9 +568,7 @@ function DetailModal({ row, onClose, onCancelled }: { row: IdentifierRow; onClos
           <div><p className="text-xs text-docid-muted">Criado em</p><p className="font-medium">{new Date(row.createdAt).toLocaleString("pt-AO")}</p></div>
         </div>
         {row.document && <div className="rounded-lg border border-docid-border bg-docid-surface-low p-3"><p className="text-xs text-docid-muted mb-1">Documento associado</p><p className="text-sm font-medium">{row.document.filename}</p></div>}
-
         <HistorySection identifierId={row.id} />
-
         {showCancel && (
           <div className="rounded-lg border border-docid-error/30 bg-docid-error/10 p-4 space-y-3">
             <p className="text-sm font-medium text-docid-error">Cancelar identificador</p>

@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api, sync, watcher } from "../../infrastructure/di/container";
-import { PageHeader, Modal, StatusChip, EmptyState, Pagination, OfflineNotice } from "../components/docid-ui";
+import { PageHeader, Modal, StatusChip, EmptyState, OfflineNotice } from "../components/docid-ui";
 import { useOfflineCache } from "../hooks/useOfflineCache";
 import { mapError, isNetworkError } from "../../shared/errors/mapError";
 import { useAuthStore } from "../stores/authStore";
@@ -70,6 +70,28 @@ interface DocDetail extends DocRow {
   primaryDocumentId?: string | null;
   tags?: string[];
   restricted?: boolean;
+}
+
+function SkeletonLine({ className = "h-4 w-full" }: { className?: string }) {
+  return <div className={`animate-pulse rounded bg-docid-surface-high ${className}`} />;
+}
+
+function SkeletonDocRow() {
+  return (
+    <div className="docid-panel p-4 space-y-3">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0 flex-1">
+          <SkeletonLine className="h-3 w-1/2" />
+          <SkeletonLine className="h-3 w-1/3 mt-1" />
+        </div>
+      </div>
+      <div className="grid grid-cols-3 gap-3 text-xs">
+        {[1, 2, 3].map(index => (
+          <div key={index}><SkeletonLine className="h-3 w-1/3" /></div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 export default function Documents() {
@@ -160,13 +182,19 @@ export default function Documents() {
   const listRows = viewMode === "perfis" ? profileRows : filtered;
 
   return (
-    <div>
-      <PageHeader title="Documentos" description="Gerir os documentos associados a identificadores" actions={
-        <button onClick={() => setShowUpload(true)} className="docid-button-primary"><Upload className="h-4 w-4" /> Anexar</button>
-      } />
-      {error && <div className="mb-4 rounded-lg border border-docid-error/30 bg-docid-error/10 p-3 text-sm text-docid-error">{error}</div>}
+    <div className="space-y-6">
+      {/* Header */}
+      <PageHeader
+        title="Documentos"
+        description="Gerir os documentos associados a identificadores"
+        actions={
+          <button onClick={() => setShowUpload(true)} className="docid-button-primary"><Upload className="h-4 w-4" /> Anexar documento</button>
+        }
+      />
+      {error && <div className="rounded-lg border border-docid-error/30 bg-docid-error/10 px-4 py-3 text-sm text-docid-error">{error}</div>}
       {isStale && <OfflineNotice cachedAt={cachedAt} onRetry={refresh} />}
-      {downloadError && <div className="mb-4 rounded-lg border border-docid-tertiary/30 bg-docid-tertiary/10 p-3 text-sm text-docid-tertiary">{downloadError}</div>}
+      {downloadError && <div className="rounded-lg border border-docid-tertiary/30 bg-docid-tertiary/10 px-4 py-3 text-sm text-docid-tertiary">{downloadError}</div>}
+
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <div className="relative flex-1 max-w-xs"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-docid-outline" /><input value={search} onChange={e => setSearch(e.target.value)} className="docid-input w-full pl-9" placeholder="Pesquisar documento..." /></div>
         <div className="flex rounded-lg border border-docid-outline/20 p-0.5">
@@ -174,9 +202,12 @@ export default function Documents() {
           <button type="button" onClick={() => setViewMode("perfis")} className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium ${viewMode === "perfis" ? "bg-docid-primary/15 text-docid-primary-soft" : "text-docid-muted"}`}><LayoutGrid className="h-3.5 w-3.5" /> Perfis</button>
         </div>
       </div>
+
       <div className="docid-panel overflow-hidden">
         {loading ? (
-          <div className="flex items-center justify-center py-16 text-sm text-docid-muted">A carregar...</div>
+          <div className="grid grid-cols-1 gap-3 p-6">
+            {[...Array(4)].map((_, index) => <SkeletonDocRow key={index} />)}
+          </div>
         ) : listRows.length === 0 ? (
           <EmptyState>{viewMode === "perfis" ? "Nenhum contrato/perfil encontrado (CPS, CPF, CTR, CLA)." : "Nenhum documento encontrado."}</EmptyState>
         ) : viewMode === "perfis" ? (
@@ -202,26 +233,42 @@ export default function Documents() {
                   ))}
                   {(row.tags || []).length > 4 && <span className="text-[10px] text-docid-muted">+{(row.tags || []).length - 4}</span>}
                 </div>
-              </button>
-            ))}
+            </button>
+          ))}
           </div>
         ) : (
-          <table className="docid-table">
-            <thead><tr><th>Ficheiro</th><th>Identificador</th><th>Categoria</th><th>Estado</th><th>Carregado por</th><th>Data</th><th></th></tr></thead>
-            <tbody>{listRows.map(row => (
-              <tr key={row.id} className="cursor-pointer" onClick={() => { setProfileDetail(PROFILE_CATEGORY_IDS.has(row.identifier?.categoryId || "")); setSelected(row); }}>
-                <td className="max-w-48 truncate font-medium">{row.filename}</td>
-                <td className="font-mono text-xs">{row.identifier?.identifier || "-"}</td>
-                <td className="text-xs text-docid-muted">{row.identifier?.categoryName || "-"}</td>
-                <td><StatusChip tone={row.status === "active" || row.status === "attached" ? "success" : row.status === "cancelled" ? "error" : "neutral"}>{row.status}</StatusChip></td>
-                <td className="text-xs text-docid-muted">{row.uploadedBy || "-"}</td>
-                <td className="text-xs text-docid-muted">{new Date(row.createdAt).toLocaleDateString("pt-AO")}</td>
-                <td><button onClick={e => { e.stopPropagation(); handleOpen(row); }} className="rounded p-1 text-docid-muted hover:text-docid-text"><Download className="h-4 w-4" /></button></td>
+          <>
+            <table className="docid-table">
+            <thead>
+              <tr>
+                <th className="w-64">Ficheiro</th>
+                <th className="w-48">Identificador</th>
+                <th>Categoria</th>
+                <th className="w-32">Estado</th>
+                <th className="w-32">Carregado por</th>
+                <th className="w-32">Data</th>
+                <th className="w-20 text-right"></th>
               </tr>
-            ))}</tbody>
-          </table>
+            </thead>
+            <tbody>
+              {listRows.map(row => (
+                <tr key={row.id} className="cursor-pointer hover:bg-docid-surface-high transition-colors" onClick={() => { setProfileDetail(PROFILE_CATEGORY_IDS.has(row.identifier?.categoryId || "")); setSelected(row); }}>
+                  <td className="max-w-48 truncate font-medium text-docid-text">{row.filename}</td>
+                  <td className="font-mono text-xs text-docid-text">{row.identifier?.identifier || "-"}</td>
+                  <td className="text-xs text-docid-muted">{row.identifier?.categoryName || "-"}</td>
+                  <td><StatusChip tone={row.status === "active" || row.status === "attached" ? "success" : row.status === "cancelled" ? "error" : "neutral"}>{row.status}</StatusChip></td>
+                  <td className="text-xs text-docid-muted">{row.uploadedBy || "-"}</td>
+                  <td className="text-xs text-docid-muted">{new Date(row.createdAt).toLocaleDateString("pt-AO")}</td>
+                  <td className="text-right"><button onClick={e => { e.stopPropagation(); handleOpen(row); }} className="rounded p-1 text-docid-muted hover:text-docid-text hover:bg-docid-surface-high transition-colors" title="Descarregar"><Download className="h-4 w-4" /></button></td>
+                </tr>
+              ))}
+            </tbody>
+            </table>
+            <div className="mt-4 flex items-center justify-between border-t border-docid-border px-4 py-3 text-sm text-docid-muted">
+              <span>{meta.total} documento(s)</span>
+            </div>
+          </>
         )}
-        <Pagination totalLabel={`${viewMode === "perfis" ? profileRows.length : meta.total} documento(s)`} />
       </div>
 
       {showUpload && <UploadModal onClose={closeUpload} onDone={finishUpload} initialPath={attachPath || ""} initialIdentifier={attachIdentifier} />}
@@ -405,9 +452,6 @@ function UploadModal({ onClose, onDone, initialPath = "", initialIdentifier = ""
 
     setLoading(false);
     setDoneSummary(true);
-    if (anyOk) {
-      // keep modal open to show per-file results; user closes
-    }
   };
 
   const canSubmit = rows.length > 0
