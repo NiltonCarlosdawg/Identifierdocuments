@@ -7,10 +7,10 @@ const RELEASE = "https://github.com/NiltonCarlosdawg/Identifierdocuments/release
 const ALL_RELEASES = "https://github.com/NiltonCarlosdawg/Identifierdocuments/releases";
 
 export const DOWNLOADS = {
-  bundle: {
-    href: "/downloads/DocID-Instalador-Windows-1.1.6.zip",
+  full: {
+    href: "/downloads/DocID_1.1.6_x64-setup-WebView2.exe",
     size: "223 MB",
-    sha256: "a5ac82a44e09de36307a0a25a18701fba41b42ee967770e8f857c33e80583213",
+    sha256: "87076c74a2f2b8b5c83e35b08c50a7ef24f712133edf17d5e4642214662badd9",
   },
   installer: {
     href: `${RELEASE}/DocID_1.1.6_x64-setup.exe`,
@@ -100,13 +100,13 @@ export function DownloadSection() {
           <div className="overflow-hidden rounded-2xl border border-docid-border bg-docid-surface">
             <PlatformRow
               mark={<WindowsMark className="h-4 w-4" />}
-              name="Pacote completo"
-              meta="Recomendado · instalação automática"
-              detail="ZIP com o DocID e o motor WebView2. Descompacte e execute INSTALAR-DocID.bat: instala tudo sozinho, mesmo sem internet."
+              name="Instalador completo"
+              meta="Recomendado · inclui WebView2"
+              detail="Um único ficheiro. Instala o DocID e o motor WebView2 no mesmo passo, mesmo sem internet. Duplo clique e seguir os passos."
               action={
-                <a className="btn-primary w-full sm:w-auto" href={DOWNLOADS.bundle.href}>
+                <a className="btn-primary w-full sm:w-auto" href={DOWNLOADS.full.href}>
                   <Download className="h-4 w-4" />
-                  Descarregar {DOWNLOADS.bundle.size}
+                  Descarregar {DOWNLOADS.full.size}
                 </a>
               }
             />
@@ -167,9 +167,9 @@ export function DownloadSection() {
                 </p>
                 <dl className="mt-4 space-y-1.5">
                   <div className="flex flex-wrap items-baseline gap-x-2">
-                    <dt className="font-mono text-[10px] uppercase tracking-[0.14em] text-docid-muted">SHA-256 pacote completo</dt>
+                    <dt className="font-mono text-[10px] uppercase tracking-[0.14em] text-docid-muted">SHA-256 instalador completo</dt>
                     <dd className="w-full break-all font-mono text-[11px] leading-relaxed text-docid-muted">
-                      {DOWNLOADS.bundle.sha256}
+                      {DOWNLOADS.full.sha256}
                     </dd>
                   </div>
                   <div className="flex flex-wrap items-baseline gap-x-2">

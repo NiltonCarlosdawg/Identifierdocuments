@@ -108,7 +108,7 @@ export function Hero() {
           </motion.div>
 
           <motion.p {...fade(0.3)} className="mt-5 font-mono text-[11px] uppercase tracking-[0.14em] text-docid-muted">
-            Versão 1.1.6 · Instalador 8,6 MB
+            Versão 1.1.6 · Instalador 223 MB
           </motion.p>
         </div>
 
