@@ -7,15 +7,10 @@ const RELEASE = "https://github.com/NiltonCarlosdawg/Identifierdocuments/release
 const ALL_RELEASES = "https://github.com/NiltonCarlosdawg/Identifierdocuments/releases";
 
 export const DOWNLOADS = {
-  full: {
+  installer: {
     href: "/downloads/DocID_1.1.6_x64-setup-WebView2.exe",
     size: "223 MB",
     sha256: "87076c74a2f2b8b5c83e35b08c50a7ef24f712133edf17d5e4642214662badd9",
-  },
-  installer: {
-    href: `${RELEASE}/DocID_1.1.6_x64-setup.exe`,
-    size: "8,6 MB",
-    sha256: "66f2f31576fe1c39fe60a3e8a43d1967629b1cad6378074c6a17c01edb1bbf12",
   },
   portable: {
     href: `${RELEASE}/docid-desktop-1.1.6.exe`,
@@ -104,20 +99,7 @@ export function DownloadSection() {
               meta="Recomendado · inclui WebView2"
               detail="Um único ficheiro. Instala o DocID e o motor WebView2 no mesmo passo, mesmo sem internet. Duplo clique e seguir os passos."
               action={
-                <a className="btn-primary w-full sm:w-auto" href={DOWNLOADS.full.href}>
-                  <Download className="h-4 w-4" />
-                  Descarregar {DOWNLOADS.full.size}
-                </a>
-              }
-            />
-            <div className="rule" />
-            <PlatformRow
-              mark={<WindowsMark className="h-4 w-4" />}
-              name="Instalador simples"
-              meta="Requer WebView2 · x64"
-              detail="Apenas o DocID, sem o motor WebView2. Use se o computador já tiver o Microsoft Edge WebView2 instalado."
-              action={
-                <a className="btn-ghost w-full sm:w-auto" href={DOWNLOADS.installer.href}>
+                <a className="btn-primary w-full sm:w-auto" href={DOWNLOADS.installer.href}>
                   <Download className="h-4 w-4" />
                   Descarregar {DOWNLOADS.installer.size}
                 </a>
@@ -166,12 +148,6 @@ export function DownloadSection() {
                   <span className="font-semibold">Executar mesmo assim</span>.
                 </p>
                 <dl className="mt-4 space-y-1.5">
-                  <div className="flex flex-wrap items-baseline gap-x-2">
-                    <dt className="font-mono text-[10px] uppercase tracking-[0.14em] text-docid-muted">SHA-256 instalador completo</dt>
-                    <dd className="w-full break-all font-mono text-[11px] leading-relaxed text-docid-muted">
-                      {DOWNLOADS.full.sha256}
-                    </dd>
-                  </div>
                   <div className="flex flex-wrap items-baseline gap-x-2">
                     <dt className="font-mono text-[10px] uppercase tracking-[0.14em] text-docid-muted">SHA-256 instalador</dt>
                     <dd className="w-full break-all font-mono text-[11px] leading-relaxed text-docid-muted">
