@@ -45,9 +45,14 @@ jobs:
           Copy-Item "apps/desktop/src-tauri/msix/AppxManifest.xml" "$stage/AppxManifest.xml"
           Copy-Item "apps/desktop/src-tauri/msix/Assets" "$stage/Assets" -Recurse
 
-          $sdk = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Directory |
-            Sort-Object Name -Descending | Select-Object -First 1
-          $bin = Join-Path $sdk.FullName "x64"
+          $sdkRoot = @("C:\Program Files (x86)\Windows Kits\10\bin", "C:\Program Files\Windows Kits\10\bin") |
+            Where-Object { Test-Path $_ }
+          $makeappx = Get-ChildItem $sdkRoot -Recurse -Filter makeappx.exe -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match '\\x64\\' } | Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $makeappx) { throw "makeappx.exe não encontrado" }
+          $bin = $makeappx.DirectoryName
+          "SDK: $bin"
+
           & "$bin\makeappx.exe" pack /d $stage /p DocID.msix /o
           if ($LASTEXITCODE -ne 0) { throw "makeappx falhou" }
 
@@ -66,11 +71,15 @@ jobs:
           Export-PfxCertificate -Cert $cert -FilePath cert.pfx -Password $pwd | Out-Null
           Export-Certificate -Cert $cert -FilePath DocID-POC.cer | Out-Null
 
-          $sdk = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Directory |
-            Sort-Object Name -Descending | Select-Object -First 1
-          & (Join-Path $sdk.FullName "x64\signtool.exe") sign /fd SHA256 /a /f cert.pfx /p poc DocID.msix
+          $sdkRoot = @("C:\Program Files (x86)\Windows Kits\10\bin", "C:\Program Files\Windows Kits\10\bin") |
+            Where-Object { Test-Path $_ }
+          $signtool = Get-ChildItem $sdkRoot -Recurse -Filter signtool.exe -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match '\\x64\\' } | Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $signtool) { throw "signtool.exe não encontrado" }
+
+          & $signtool.FullName sign /fd SHA256 /a /f cert.pfx /p poc DocID.msix
           if ($LASTEXITCODE -ne 0) { throw "signtool falhou" }
-          & (Join-Path $sdk.FullName "x64\signtool.exe") verify /pa DocID.msix
+          & $signtool.FullName verify /pa DocID.msix
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
