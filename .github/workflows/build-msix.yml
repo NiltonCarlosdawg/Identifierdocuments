@@ -79,7 +79,14 @@ jobs:
 
           & $signtool.FullName sign /fd SHA256 /a /f cert.pfx /p poc DocID.msix
           if ($LASTEXITCODE -ne 0) { throw "signtool falhou" }
-          & $signtool.FullName verify /pa DocID.msix
+
+          # signtool verify /pa falha sempre aqui: a raiz auto-assinada não é de confiança.
+          # Interessa-nos a assinatura existir e bater certo, não a cadeia.
+          $sig = Get-AuthenticodeSignature DocID.msix
+          "Assinatura: $($sig.Status)"
+          if ($sig.Status -in 'NotSigned', 'HashMismatch', 'NotSupportedFileFormat') {
+            throw "assinatura inválida: $($sig.Status)"
+          }
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
