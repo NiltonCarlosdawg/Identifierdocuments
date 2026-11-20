@@ -745,6 +745,32 @@ aplicadas posteriormente a itens aqui marcados como completos)*
 
 ---
 
+## FASE 15 — Painel de monitorização próprio (planeado, não iniciado)
+
+> **Origem:** incidente de 19/11/2026 — a API `didall.milvendas.ao` esteve ~37 h em baixo (503,
+> ninguém soube) por não existir supervisor nem alerta.
+> **Mitigação actual, fora do painel:** `apps/api/run.sh` corrido por cron a cada minuto
+> (repõe o serviço, regista em `docid-api-watchdog.log`); UptimeRobot externo como plano B.
+> **Objectivo:** deixar de depender de ferramentas externas e ter histórico nosso.
+
+### 15.1 — Recolha
+- [ ] **P0** Métricas base: uptime do processo, nº de arranques, RSS/CPU, latência `/health`, profundidade das filas BullMQ
+- [ ] **P0** Tabela `service_events` (up/down/restart, motivo, duração) com RLS de plataforma
+- [ ] **P1** Contagem de erros do log pino por minuto (nível + rota)
+
+### 15.2 — Alertas
+- [ ] **P0** Notificação própria na transição down/up (Telegram ou ntfy), com motivo e duração
+- [ ] **P1** Re-alerta a cada N minutos se continuar em baixo; silenciar em manutenção
+
+### 15.3 — Painel
+- [ ] **P1** Vista `platform_admin`: estado actual, uptime a 30 dias, histórico de incidentes, últimos restarts
+- [ ] **P2** Acções: reiniciar serviço, ver tail do log — só `platform_admin`, auditado
+
+### 15.4 — Substituição
+- [ ] **P2** Desligar o UptimeRobot quando o painel provar paridade
+
+---
+
 ## Resumo por Fase
 
 | Fase | Foco | Estado |
@@ -764,6 +790,7 @@ aplicadas posteriormente a itens aqui marcados como completos)*
 | **12** | Fila de escritas offline | ✅ Completo — tabela `local_write_queue`, comandos enqueue/get/remove/retry, replay FIFO com idempotência (`ALREADY_RESOLVED`/conflitos/401), interceptor no `HttpApiClient`, painel + badge de escritas no Layout; verificação manual em runtime pendente |
 | **13** | Itens fáceis do backlog | ✅ Completo — `GET /tenants/me/stats`, `GET /roles/:id/users`, widgets do Dashboard (fila offline, aprovações pendentes, documentos recentes), prompt few-shot do classificador, evicção da cache de downloads |
 | **14** | Anexos múltiplos + versionamento | ✅ Completo — `document_versions`, kind/label, endpoints attach/attachments/versions, UI lote + detalhe |
+| **15** | Painel de monitorização próprio | 📋 Planeado — ver FASE 15 (origem: incidente de 19/11/2026 sem supervisor nem alerta) |
 
 > Consultar `README.md` para visão geral do produto e arquitectura; este
 > ficheiro é o documento vivo de estado por fase.
