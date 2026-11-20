@@ -8,14 +8,18 @@ Actions → **Build MSIX (POC)** → *Run workflow*. Produz `DocID.msix` e `DocI
 
 ## Instalar na máquina de teste (sideload)
 
-1. Copiar `DocID-POC.cer` e `DocID.msix` para a máquina.
-2. Confiar no certificado (o MSIX auto-assinado não instala sem isto):
+Pacote pronto a testar: `https://docid.milvendas.ao/downloads/poc/DocID-MSIX-POC.zip`
+(traz `DocID.msix`, `DocID-POC.cer`, `instalar-poc.ps1` e `LEIA-ME.txt`).
+
+1. Extrair a pasta e executar `instalar-poc.ps1` em PowerShell **como Administrador**:
    ```powershell
-   Import-Certificate -FilePath .\DocID-POC.cer -CertStoreLocation Cert:\LocalMachine\TrustedPeople
+   powershell -ExecutionPolicy Bypass -File .\instalar-poc.ps1
    ```
-   (pede admin; alternativa: duplo clique → *Instalar certificado* → *Autoridades de confiança de raiz*)
-3. Ativar sideload: Definições → Sistema → Para programadores → **Modo de programador** (ou `Settings > Apps > Advanced app settings`).
-4. Duplo clique no `DocID.msix` → *Instalar*.
+   O script confia no certificado (`Cert:\LocalMachine\TrustedPeople`) e instala com `Add-AppxPackage`.
+2. Se o Windows recusar por política, ativar **Instalar aplicações de forma arbitrária** em
+   Definições → Sistema → Para programadores (o *Modo de programador* é alternativa, não é
+   necessário nas edições que já permitem sideload por omissão, Windows 10 1803+).
+3. Confirmar: `Get-AppxPackage MilVendas.DocID`.
 
 ## O que o POC tem de provar
 
