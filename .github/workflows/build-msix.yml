@@ -63,7 +63,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $pwd = ConvertTo-SecureString -String "poc" -Force -AsPlainText
+          $pwd = ConvertTo-SecureString -String "${{ secrets.MSIX_POC_PASSWORD }}" -Force -AsPlainText
           $cert = New-SelfSignedCertificate -Type Custom -Subject "CN=MilVendas" `
             -KeyUsage DigitalSignature -FriendlyName "DocID POC" `
             -CertStoreLocation "Cert:\CurrentUser\My" `
@@ -77,7 +77,7 @@ jobs:
             Where-Object { $_.FullName -match '\\x64\\' } | Sort-Object FullName -Descending | Select-Object -First 1
           if (-not $signtool) { throw "signtool.exe não encontrado" }
 
-          & $signtool.FullName sign /fd SHA256 /a /f cert.pfx /p poc DocID.msix
+          & $signtool.FullName sign /fd SHA256 /a /f cert.pfx /p "${{ secrets.MSIX_POC_PASSWORD }}" DocID.msix
           if ($LASTEXITCODE -ne 0) { throw "signtool falhou" }
 
           # signtool verify /pa falha sempre aqui: a raiz auto-assinada não é de confiança.
