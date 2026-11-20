@@ -3,7 +3,6 @@ import { ColumnLines } from "@/components/ui/column-lines";
 import { Reveal } from "@/components/Reveal";
 import { cn } from "@/lib/utils";
 
-const RELEASE = "https://github.com/NiltonCarlosdawg/Identifierdocuments/releases/download/desktop-v1.1.6";
 const ALL_RELEASES = "https://github.com/NiltonCarlosdawg/Identifierdocuments/releases";
 
 export const DOWNLOADS = {
@@ -11,11 +10,6 @@ export const DOWNLOADS = {
     href: "/downloads/DocID_1.1.6_x64-setup-WebView2.exe",
     size: "223 MB",
     sha256: "87076c74a2f2b8b5c83e35b08c50a7ef24f712133edf17d5e4642214662badd9",
-  },
-  portable: {
-    href: `${RELEASE}/docid-desktop-1.1.6.exe`,
-    size: "42,9 MB",
-    sha256: "f89cbaf7a79b0c1513bb86df868b4b8fb98c765482e59ad74b83c6a7f9bcae78",
   },
 } as const;
 
@@ -107,19 +101,6 @@ export function DownloadSection() {
             />
             <div className="rule" />
             <PlatformRow
-              mark={<WindowsMark className="h-4 w-4" />}
-              name="Versão portátil"
-              meta="Sem instalação · x64"
-              detail="Um único ficheiro executável. Requer o Microsoft Edge WebView2 já instalado no computador."
-              action={
-                <a className="btn-ghost w-full sm:w-auto" href={DOWNLOADS.portable.href}>
-                  <Download className="h-4 w-4" />
-                  Descarregar {DOWNLOADS.portable.size}
-                </a>
-              }
-            />
-            <div className="rule" />
-            <PlatformRow
               mark={<LinuxMark className="h-4 w-4" />}
               name="Linux"
               meta="Em breve"
@@ -152,12 +133,6 @@ export function DownloadSection() {
                     <dt className="font-mono text-[10px] uppercase tracking-[0.14em] text-docid-muted">SHA-256 instalador</dt>
                     <dd className="w-full break-all font-mono text-[11px] leading-relaxed text-docid-muted">
                       {DOWNLOADS.installer.sha256}
-                    </dd>
-                  </div>
-                  <div className="flex flex-wrap items-baseline gap-x-2">
-                    <dt className="font-mono text-[10px] uppercase tracking-[0.14em] text-docid-muted">SHA-256 portátil</dt>
-                    <dd className="w-full break-all font-mono text-[11px] leading-relaxed text-docid-muted">
-                      {DOWNLOADS.portable.sha256}
                     </dd>
                   </div>
                 </dl>
