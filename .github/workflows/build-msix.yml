@@ -1,0 +1,76 @@
+name: Build MSIX (POC)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  msix:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Install deps (desktop)
+        working-directory: apps/desktop
+        run: bun install
+
+      - name: Build frontend
+        working-directory: apps/desktop
+        run: bun run build
+
+      # --no-bundle: só o .exe, sem NSIS/updater (build de Store não tem auto-update)
+      - name: Build app (exe only)
+        working-directory: apps/desktop
+        run: bunx tauri build --no-bundle
+
+      - name: Pack MSIX
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $stage = "msix-stage"
+          New-Item -ItemType Directory -Path $stage | Out-Null
+          Copy-Item "apps/desktop/src-tauri/target/release/docid-desktop.exe" "$stage/DocID.exe"
+          Copy-Item "apps/desktop/src-tauri/msix/AppxManifest.xml" "$stage/AppxManifest.xml"
+          Copy-Item "apps/desktop/src-tauri/msix/Assets" "$stage/Assets" -Recurse
+
+          $sdk = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Directory |
+            Sort-Object Name -Descending | Select-Object -First 1
+          $bin = Join-Path $sdk.FullName "x64"
+          & "$bin\makeappx.exe" pack /d $stage /p DocID.msix /o
+          if ($LASTEXITCODE -ne 0) { throw "makeappx falhou" }
+
+          & "$bin\makeappx.exe" unpack /p DocID.msix /d msix-unpacked /o
+          if (-not (Test-Path "msix-unpacked/DocID.exe")) { throw "DocID.exe não está no pacote" }
+
+      - name: Sign MSIX (self-signed, sideload only)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $pwd = ConvertTo-SecureString -String "poc" -Force -AsPlainText
+          $cert = New-SelfSignedCertificate -Type Custom -Subject "CN=MilVendas" `
+            -KeyUsage DigitalSignature -FriendlyName "DocID POC" `
+            -CertStoreLocation "Cert:\CurrentUser\My" `
+            -TextExtension @("2.5.29.37={text}1.3.6.1.5.5.7.3.3", "2.5.29.19={text}")
+          Export-PfxCertificate -Cert $cert -FilePath cert.pfx -Password $pwd | Out-Null
+          Export-Certificate -Cert $cert -FilePath DocID-POC.cer | Out-Null
+
+          $sdk = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Directory |
+            Sort-Object Name -Descending | Select-Object -First 1
+          & (Join-Path $sdk.FullName "x64\signtool.exe") sign /fd SHA256 /a /f cert.pfx /p poc DocID.msix
+          if ($LASTEXITCODE -ne 0) { throw "signtool falhou" }
+          & (Join-Path $sdk.FullName "x64\signtool.exe") verify /pa DocID.msix
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docid-msix-poc
+          path: |
+            DocID.msix
+            DocID-POC.cer
