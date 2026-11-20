@@ -57,6 +57,16 @@ preferir regra por hash (AppLocker também aceita *file hash*).
 No aviso do SmartScreen: **Mais informações** → **Executar mesmo assim**.
 Um clique por versão, sem direitos de administrador (desde que a política não bloqueie).
 
+**Se o botão “Executar mesmo assim” não aparecer**, não insista: uma das duas situações está ativa:
+
+- o dispositivo tem **Smart App Control** ligado (Windows 11 22H2+), que bloqueia código
+  não assinado sem opção de continuar — confirmar com o administrador;
+- uma política corporativa do SmartScreen proíbe ultrapassar o aviso.
+
+Nesses casos, encaminhar para a administração: ou aplicam a Opção 1/2, ou usam o pacote
+MSIX da Microsoft Store (em preparação). A MilVendas não pode forçar este botão num
+dispositivo gerido por outra organização.
+
 ## Atenção: Smart App Control
 
 Em Windows 11 com **Smart App Control** ativo, ficheiros não assinados podem ser bloqueados
