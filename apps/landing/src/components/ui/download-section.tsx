@@ -7,7 +7,7 @@ const ALL_RELEASES = "https://github.com/NiltonCarlosdawg/Identifierdocuments/re
 
 export const DOWNLOADS = {
   installer: {
-    href: "/downloads/DocID_1.1.6_x64-setup-WebView2.exe",
+    href: "/downloads/DocID_1.1.6_x64-setup.exe",
     size: "223 MB",
     sha256: "87076c74a2f2b8b5c83e35b08c50a7ef24f712133edf17d5e4642214662badd9",
   },
@@ -136,6 +136,12 @@ export function DownloadSection() {
                     </dd>
                   </div>
                 </dl>
+                <a
+                  className="mt-2 inline-flex text-xs font-medium text-docid-link underline-offset-4 hover:underline"
+                  href="/downloads/SHA256SUMS"
+                >
+                  Verificar integridade (SHA256SUMS)
+                </a>
                 <a
                   className={cn("mt-4 inline-flex items-center gap-1.5 text-sm font-medium text-docid-link underline-offset-4 hover:underline")}
                   href={ALL_RELEASES}

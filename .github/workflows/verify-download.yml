@@ -1,0 +1,22 @@
+name: Verify published installer
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "apps/landing/src/components/ui/download-section.tsx"
+      - "docs/GUIA_WHITELIST_WINDOWS.md"
+      - "scripts/verify-installer.sh"
+      - ".github/workflows/verify-download.yml"
+  # schedules só correm na branch default; mantido para quando este trabalho for integrado
+  schedule:
+    - cron: "37 6 * * *"
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Descarregar e conferir SHA-256
+        run: bash scripts/verify-installer.sh
