@@ -32,8 +32,8 @@ têm URL de documentação oficial e citação literal. O que não foi encontrad
 | `DocID_1.1.6_x64-setup.exe` (release e site) | 223 675 805 B | Instalador NSIS + runtime WebView2 **standalone offline**. `webviewInstallMode: { type: "offlineInstaller", silent: true }` (`tauri.conf.json:48-51`); ~215 MB vêm do runtime. |
 | `DocID_1.1.6_x64-setup.exe.sig` | 417 B | Assinatura minisign do updater sobre os bytes do instalador. `trusted comment` regista `file:DocID_1.1.6_x64-setup.exe`. Não é assinatura Authenticode. |
 | `latest.json` | 1 143 B | `version: 1.1.6`, `pub_date: 2026-11-18T00:00:00Z`, `url: https://docid.milvendas.ao/downloads/DocID_1.1.6_x64-setup.exe` (corrigido em 20/11), `signature`. |
-| Exe portátil antigo | 42 945 219 B | Build de 18/11, anterior ao WebView2 embutido. Removido do release e da landing em `ad36e8c`; continua em `dist-windows/`. |
-| NSIS sem WebView2 | 8 592 635 B | Ficheiro local em `dist-windows/` — mostra o custo real do runtime (~215 MB). |
+| Exe portátil antigo | 42 945 219 B | Build de 18/11, anterior ao WebView2 embutido. Removido do release e da landing em `ad36e8c`, e do repo em 20/11. |
+| NSIS sem WebView2 | 8 592 635 B | Estava em `dist-windows/` — mostrava o custo real do runtime (~215 MB). Removido do repo em 20/11. |
 | MSIX POC | 8 309 720 B | `.exe` cru + `AppxManifest.xml` (full-trust) + 3 ícones; usa WebView2 do sistema. |
 | MSI | — | Declarado em `tauri.conf.json:31` e `:59-61`, mas **nunca foi produzido**: ausente do release, de `dist-windows/` e de todo o histórico Git. |
 
@@ -134,10 +134,10 @@ diferentes — ou seja, o risco é **transferência longa e interrompida**, não
 | # | Acção | Evidência / porquê |
 |---|---|---|
 | **0** | **Garantir que o utilizador continua a ter "Mais informações → Executar mesmo assim"** | A landing já diz isto (`download-section.tsx:127-130`) e o guia B2B repete na Opção 4. Mas a Microsoft avisa que uma política corporativa pode impedir o override (“Enterprise policy can prevent continuation entirely” — `smartscreen-reputation`) e que no Windows 11 com Smart App Control ativo “unknown, unsigned code are blocked by default” (`smart-app-control`) — **nesses casos o botão não aparece**. Acções: (a) pedir aos IT que não bloqueiem o override do SmartScreen; (b) acrescentar ao guia o diagnóstico “se o botão não aparecer, é Smart App Control ou política corporativa → encaminhar para o canal MSIX/Store”; (c) manter esta via como escape até o MSIX assinado pela Store existir. Isto **não remove o aviso** — só protege o caminho de instalação manual. |
-| 1 | Publicar um `SHA256SUMS` ao lado do instalador e ligá-lo na landing e no guia B2B | O download demora ~7 min; se for interrompido o Windows não deteta o ficheiro corrompido. O hash publicado está correto, mas o utilizador não tem forma cómoda de o conferir. |
+| 1 | ~~Publicar um `SHA256SUMS` ao lado do instalador e ligá-lo na landing e no guia B2B~~ **Aplicado em 20/11** | `https://docid.milvendas.ao/downloads/SHA256SUMS` (confirmado por `sha256sum -c`) e link "Verificar integridade" na secção de downloads da landing. |
 | 2 | ~~Alinhar o nome do asset do release com o ficheiro servido e com o `file:` do `.sig`~~ **Aplicado em 20/11:** o site passa a servir `DocID_1.1.6_x64-setup.exe`, mesmo nome do asset do GitHub e do `trusted comment` do `.sig`. | Antes: release `DocID_1.1.6_x64-setup.exe`; site/guia/`latest.json` `…-WebView2.exe`. Os bytes não mudaram, por isso a assinatura minisign continua válida. |
-| 3 | Verificação automática no CI: descarregar o instalador publicado, calcular SHA-256 e comparar com o valor da landing/guia | Hoje não existe essa asserção; um deploy trocado passaria despercebido. |
-| 4 | Mover a senha literal `poc` do workflow MSIX para um secret | `.github/workflows/build-msix.yml:66,80`. Não é segredo de produção, mas é um padrão que não deve ser copiado para o certificado real. |
+| 3 | ~~Verificação automática no CI~~ **Aplicada em 20/11** | `scripts/verify-installer.sh` + `.github/workflows/verify-download.yml` (dispatch, push nos ficheiros relevantes e cron diário). Run `44755801114` verde: landing e `SHA256SUMS` batem com o ficheiro publicado. |
+| 4 | ~~Mover a senha literal `poc` do workflow MSIX para um secret~~ **Aplicado em 20/11** | Secret `MSIX_POC_PASSWORD` criado; `.github/workflows/build-msix.yml` passa a lê-lo. |
 | 5 | Fazer o bump para 1.1.7 antes de qualquer alteração ao instalador | Hoje `1.1.6` em três sítios; quem já tem 1.1.6 não recebe update. Atenção: o body do release diz que installs 1.1.5 não atualizam sozinhos por rotação da chave minisign — backup da chave em `~/.tauri/docid-updater.key` não está documentado no repo. |
 
 ### P1 — reduzir fricção sem certificado (dias)
@@ -147,7 +147,7 @@ diferentes — ou seja, o risco é **transferência longa e interrompida**, não
 | 6 | Concluir o teste de sideload do MSIX e submeter à Store | É o único caminho sem aviso e sem custo de certificado; a Store re-assina. Exige identity/publisher do Partner Center, `runFullTrust` justificado, WACK, política de privacidade e aprovação (5+ dias úteis). |
 | 7 | Oferecer um instalador "leve" como opção secundária | Tauri `downloadBootstrapper` (~2 MB + download do runtime pela Microsoft) para quem tem internet; manter o offline de 223 MB para quem não tem. Reduz o tempo de download de 7 min para segundos na maioria dos casos (decisão a aprovar: dois installers por release). |
 | 8 | Intune/Defender/AppLocker conforme `docs/GUIA_WHITELIST_WINDOWS.md` | Resolve 100% nos clientes com IT gerido, sem certificado e sem Store. |
-| 9 | Limpar `dist-windows/` (4 ficheiros órfãos/antigos) e alinhar o body do release | Evita que alguém distribua o exe de 42,9 MB anterior ao WebView2. |
+| 9 | ~~Limpar `dist-windows/` e alinhar o body do release~~ **Aplicado em 20/11** | Os 5 ficheiros antigos foram removidos do repo; o body do release passa a apontar para o download e `SHA256SUMS` públicos. |
 
 ### P2 — só se for comprar certificado
 
