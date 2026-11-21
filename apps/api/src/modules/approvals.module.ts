@@ -8,17 +8,7 @@ import { requireAuth, getFreshRoles } from "../middleware/auth";
 import { notify } from "../services/notification.service";
 import { safeError } from "../lib/errors";
 import { withIdempotency } from "../lib/idempotency";
-import { canSeeApproval } from "../services/access-decision.service";
-
-async function canResolveApproval(
-  auth: { userId: string; tenantId: string },
-  approval: any,
-): Promise<boolean> {
-  const roleNames = await getFreshRoles(auth.userId, auth.tenantId);
-  if (roleNames.includes("ORG_ADMIN")) return true;
-  if (roleNames.includes("SECTOR_SUPERVISOR") && approval.supervisorId === auth.userId) return true;
-  return false;
-}
+import { approvalAuditEntry, canResolveApproval, canSeeApproval } from "../services/access-decision.service";
 
 export const approvalsModule = new (Elysia as any)({ prefix: "/approvals" })
   .use(requireAuth())
@@ -68,7 +58,7 @@ export const approvalsModule = new (Elysia as any)({ prefix: "/approvals" })
     detail: { summary: "Detalhe da aprovação", tags: ["Aprovações"] },
   })
 
-  .patch("/:id", async ({ tenantId, auth, params, body, set, headers }) => {
+  .patch("/:id", async ({ tenantId, auth, params, body, set, headers, clientIp }) => {
     try {
       return await withTenant(tenantId, async (tx) => {
         return await withIdempotency(tx, tenantId, headers["idempotency-key"], async () => {
@@ -87,7 +77,8 @@ export const approvalsModule = new (Elysia as any)({ prefix: "/approvals" })
             return { error: { code: "ALREADY_RESOLVED", message: "Aprovação já foi resolvida." } };
           }
 
-          if (!await canResolveApproval(auth!, existing)) {
+          const roleNames = await getFreshRoles(auth!.userId, auth!.tenantId, tx);
+          if (!canResolveApproval(roleNames, auth!.userId, existing)) {
             set.status = 403;
             return { error: { code: "FORBIDDEN", message: "Sem permissão para aprovar este documento." } };
           }
@@ -97,6 +88,16 @@ export const approvalsModule = new (Elysia as any)({ prefix: "/approvals" })
             .set({ status: body.status, notes: body.notes ?? null, resolvedAt: now })
             .where(and(eq(approvals.id, params.id), eq(approvals.tenantId, tenantId)))
             .returning();
+
+          await tx.insert(auditLogs).values(approvalAuditEntry({
+            tenantId,
+            userId: auth!.userId,
+            status: body.status,
+            documentId: approval.documentId,
+            approvalId: approval.id,
+            notes: body.notes,
+            ip: clientIp,
+          }));
 
           const doc = existing.document;
           const identifierStr = doc?.identifier?.identifier;
