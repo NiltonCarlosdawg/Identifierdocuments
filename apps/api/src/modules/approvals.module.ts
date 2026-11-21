@@ -8,6 +8,7 @@ import { requireAuth, getFreshRoles } from "../middleware/auth";
 import { notify } from "../services/notification.service";
 import { safeError } from "../lib/errors";
 import { withIdempotency } from "../lib/idempotency";
+import { canSeeApproval } from "../services/access-decision.service";
 
 async function canResolveApproval(
   auth: { userId: string; tenantId: string },
@@ -25,21 +26,17 @@ export const approvalsModule = new (Elysia as any)({ prefix: "/approvals" })
   .get("/", async (ctx: any) => {
     const { tenantId, auth, query } = ctx;
     return withTenant(tenantId, async (tx) => {
-      const roleNames = await getFreshRoles(auth!.userId, auth!.tenantId);
+      const roleNames = await getFreshRoles(auth!.userId, auth!.tenantId, tx);
       const conditions = [eq(approvals.tenantId, tenantId)];
       if (query.status) conditions.push(eq(approvals.status, query.status as any));
       if (query.sectorId) conditions.push(eq(approvals.sectorId, query.sectorId));
-
-      if (roleNames.includes("SECTOR_SUPERVISOR") && !roleNames.includes("ORG_ADMIN")) {
-        conditions.push(eq(approvals.supervisorId, auth!.userId));
-      }
 
       const rows = await tx.query.approvals.findMany({
         where: and(...conditions),
         with: { document: { with: { identifier: true } }, sector: true, supervisor: true },
         orderBy: (a) => [a.requestedAt],
       });
-      return { data: rows };
+      return { data: rows.filter((row: any) => canSeeApproval(roleNames, auth!.userId, row)) };
     });
   }, {
     query: t.Object({
@@ -58,16 +55,8 @@ export const approvalsModule = new (Elysia as any)({ prefix: "/approvals" })
       });
       if (!approval) { set.status = 404; return { error: { code: "NOT_FOUND", message: "Aprovação não encontrada." } }; }
 
-      // CORREÇÃO: este endpoint não tinha nenhum controlo de acesso — qualquer
-      // user autenticado do tenant conseguia ver notes/requesterId de qualquer
-      // aprovação, incluindo de sectores alheios. Alinhado com a mesma regra do
-      // GET /approvals (list): só ORG_ADMIN, o supervisor responsável, ou o
-      // próprio requerente do pedido podem ver o detalhe.
-      const roleNames = await getFreshRoles(auth!.userId, auth!.tenantId);
-      const isAdmin = roleNames.includes("ORG_ADMIN");
-      const isSupervisor = approval.supervisorId === auth!.userId;
-      const isRequester = approval.requesterId === auth!.userId;
-      if (!isAdmin && !isSupervisor && !isRequester) {
+      const roleNames = await getFreshRoles(auth!.userId, auth!.tenantId, tx);
+      if (!canSeeApproval(roleNames, auth!.userId, approval)) {
         set.status = 403;
         return { error: { code: "FORBIDDEN", message: "Sem permissão para ver esta aprovação." } };
       }
