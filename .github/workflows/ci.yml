@@ -16,16 +16,37 @@ jobs:
     defaults:
       run:
         working-directory: apps/api
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: docid_test
+          POSTGRES_PASSWORD: test-only-password
+          POSTGRES_DB: docid_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U docid_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://docid_test:test-only-password@localhost:5432/docid_test
+      JWT_SECRET: test-only-secret
+      BULLMQ_ENABLED: "false"
+      CLASSIFIER_ENABLED: "false"
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
       - name: Install
         working-directory: .
         run: bun install --frozen-lockfile
+      - name: Migrations
+        run: bun src/db/migrate.ts
       - name: Typecheck
         run: bunx tsc --noEmit
-      - name: Unit tests (sem servidor)
-        run: bun test src/__tests__/classifier-cache.test.ts src/__tests__/notification.service.test.ts src/__tests__/document-tags.test.ts
+      - name: Unit tests
+        run: bun test src/__tests__/classifier-cache.test.ts src/__tests__/notification.service.test.ts src/__tests__/document-tags.test.ts src/__tests__/access-decision.test.ts src/__tests__/attachment-admin.test.ts src/__tests__/migrate-fresh.test.ts
 
   desktop:
     name: Desktop (typecheck + unit tests)
@@ -57,7 +78,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev \
+            libwebkit2gtk-4.1-dev librsvg2-dev \
             patchelf libssl-dev libgtk-3-dev libayatana-appindicator3-dev
       - name: Cargo test (lib)
         run: cargo test --lib -- --test-threads=2

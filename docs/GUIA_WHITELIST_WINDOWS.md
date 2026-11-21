@@ -9,9 +9,10 @@
 
 ## Ficheiro a distribuir
 
-- URL: `https://docid.milvendas.ao/downloads/DocID_1.1.6_x64-setup.exe`
+- URL: `https://docid.milvendas.ao/downloads/DocID_1.1.6_x64-setup-WebView2.exe`
 - Tamanho: 223 675 805 bytes
 - SHA-256: `87076c74a2f2b8b5c83e35b08c50a7ef24f712133edf17d5e4642214662badd9`
+- Cópia com nome curto (compatibilidade com `latest.json` antigo): `https://docid.milvendas.ao/downloads/DocID_1.1.6_x64-setup.exe`
 - Lista de integridade: `https://docid.milvendas.ao/downloads/SHA256SUMS`
 
 O instalador inclui o runtime WebView2 — não é preciso instalar mais nada.
@@ -19,14 +20,14 @@ O download demora vários minutos; **confirmar sempre o hash antes de aprovar**,
 um ficheiro interrompido:
 
 ```powershell
-Get-FileHash .\DocID_1.1.6_x64-setup.exe -Algorithm SHA256
+Get-FileHash .\DocID_1.1.6_x64-setup-WebView2.exe -Algorithm SHA256
 ```
 
 ## Opção 1 — Intune (recomendado: instalação silenciosa, zero avisos)
 
 1. Empacotar o `.exe` com o `IntuneWinAppUtil` da Microsoft.
 2. Intune admin center → **Apps** → **Windows** → **Add** → *Windows app (Win32)*.
-3. Comando de instalação: `DocID_1.1.6_x64-setup.exe /S`
+3. Comando de instalação: `DocID_1.1.6_x64-setup-WebView2.exe /S`
    (testar numa máquina piloto antes de implementar; `/S` é o comando silencioso do NSIS).
 4. Comando de desinstalação: usar o `unins000.exe` criado na pasta de instalação.
 5. Requisitos: Windows 10 1809+ / Windows 11, x64. Regras de deteção: ficheiro

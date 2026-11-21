@@ -7,7 +7,7 @@ const ALL_RELEASES = "https://github.com/NiltonCarlosdawg/Identifierdocuments/re
 
 export const DOWNLOADS = {
   installer: {
-    href: "/downloads/DocID_1.1.6_x64-setup.exe",
+    href: "/downloads/DocID_1.1.6_x64-setup-WebView2.exe",
     size: "223 MB",
     sha256: "87076c74a2f2b8b5c83e35b08c50a7ef24f712133edf17d5e4642214662badd9",
   },

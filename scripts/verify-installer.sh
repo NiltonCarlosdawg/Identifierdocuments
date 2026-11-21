@@ -3,7 +3,7 @@
 set -euo pipefail
 
 BASE="${BASE:-https://docid.milvendas.ao/downloads}"
-FILE="DocID_1.1.6_x64-setup.exe"
+FILE="DocID_1.1.6_x64-setup-WebView2.exe"
 SOURCE="apps/landing/src/components/ui/download-section.tsx"
 
 expected=$(python3 - "$SOURCE" <<'PY'
