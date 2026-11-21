@@ -120,18 +120,26 @@ de auditoria. O objetivo é corrigir apenas esses três, mantendo os fluxos leg�
 
 ## Decisões do builder-check
 
-- **Teste antigo contradiz o objetivo 1 (resolvido aqui).**
+- **Teste antigo contradiz o objetivo 1 (confirmado pelo dono do produto em 21/11).**
   `src/__tests__/phase3-4.integration.test.ts:421-428` chama-se "admin não descarrega
   sector_only (403)" e espera `403`/`ACCESS_REQUIRED`. Essa asserção deixa de valer:
-  atualizar para `200` e renomear o teste, porque "admin vê tudo" é regra declarada
-  pelo dono do produto. O teste `:466-480` ("supervisor aprova → admin descarrega")
-  continua a devolver 200, mas deixa de provar a partilha — não alterar, só assinalar.
-  Procurar outras asserções com o mesmo pressuposto antes de fechar.
-- **Assimetria entre os dois fluxos de pedido (fora de escopo, preservar).**
-  `documents.module.ts:603-615` cria um `document_access_requests` e um `approvals` para o
-  mesmo pedido; resolver num não atualiza o outro. Alinhar exigiria mexer em mais handlers
-  e não está nos três pontos pedidos. Mantém-se como está e regista-se como risco conhecido no
-  relatório final.
+  atualizar para `200` e renomear o teste. O dono do produto confirmou: **poder total ao
+  admin dentro do tenant**, incluindo download de `sector_only`. O teste `:466-480`
+  ("supervisor aprova → admin descarrega") continua a devolver 200, mas deixa de provar a
+  partilha — não alterar, só assinalar. Procurar outras asserções com o mesmo pressuposto.
+- **Assimetria entre os dois fluxos de pedido — explicação factual.**
+  `POST /documents/:param/request-access` (`documents.module.ts:603-633`) cria dois registos
+  para o mesmo pedido: `document_access_requests` (usado no ecrã do documento, via
+  `GET/PATCH /documents/:param/access-requests...`) e `approvals` (usado no ecrã de
+  Aprovações e no Dashboard, via `GET/PATCH /approvals`). Resolver num não atualiza o outro.
+  Consequência observável: o requerente recebe o ficheiro e a notificação em ambos os
+  caminhos, mas o pedido continua "Pendente" no ecrã onde não foi decidido; o Dashboard
+  (`Dashboard.tsx:119-122`) pode mostrar contagem errada; clicar no outro ecrã devolve
+  `ALREADY_RESOLVED` (`approvals.module.ts:96-99`, `documents.module.ts:711-713`). Como não
+  existe unique constraint em `document_shares` (`db/schema.ts:181-199`), aprovar nos dois
+  ecrãs cria duas partilhas ativas para a mesma pessoa. É incoerência de estado e UX,
+  **não** uma falha de controlo de acesso.
+  Decisão de escopo ainda pendente: alinhar nesta ronda ou deixar para depois.
 
 ## Em aberto (decisão do dono do produto)
 
