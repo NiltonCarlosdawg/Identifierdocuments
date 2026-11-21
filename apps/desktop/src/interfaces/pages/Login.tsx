@@ -103,7 +103,7 @@ export default function Login() {
           <p className="mb-3 text-sm text-docid-muted">Problemas no acesso?</p>
           <button type="button" className="docid-button-secondary" onClick={() => navigate("/onboarding")}>Criar organização</button>
         </div>
-        <p className="mt-8 text-center text-xs uppercase tracking-wider text-docid-outline">© 2026 <span className="font-semibold text-docid-muted">VeranoLabs</span> · Luanda, Angola</p>
+        <p className="mt-8 text-center text-xs uppercase tracking-wider text-docid-outline">© 2026 · Luanda, Angola</p>
       </div>
     </main>
   );

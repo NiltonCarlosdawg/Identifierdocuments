@@ -188,7 +188,7 @@ export default function Onboarding() {
 
         <div className="mt-8 border-t border-docid-border pt-6 text-center">
           <p className="text-xs text-docid-muted">Já tem conta? <button onClick={() => navigate("/login")} className="font-semibold text-docid-primary-soft hover:underline">Entrar</button></p>
-          <p className="mt-4 text-xs uppercase tracking-wider text-docid-outline">© 2026 <span className="font-semibold text-docid-muted">VeranoLabs</span> · Luanda, Angola</p>
+          <p className="mt-4 text-xs uppercase tracking-wider text-docid-outline">© 2026 · Luanda, Angola</p>
         </div>
       </div>
     </main>
