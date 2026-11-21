@@ -1,9 +1,9 @@
 import { useState, useEffect } from "react";
 import { api } from "../../infrastructure/di/container";
-import { PageHeader, Modal, EmptyState, Pagination, OfflineNotice } from "../components/docid-ui";
+import { PageHeader, EmptyState, OfflineNotice } from "../components/docid-ui";
 import { useOfflineCache } from "../hooks/useOfflineCache";
 import { useCachedAux } from "../hooks/useCachedAux";
-import { History, Search, Filter, ChevronDown, ChevronRight, User, Globe, Clock, Tag, Fingerprint, HardDrive, Info } from "lucide-react";
+import { History, Filter, ChevronDown, ChevronRight, User, Globe, Clock, Tag, Fingerprint, HardDrive, Info, AlertCircle, AlertTriangle, CheckCircle2 } from "lucide-react";
 
 interface AuditLog {
   id: string;
@@ -58,11 +58,25 @@ function formatNarrative(log: AuditLog, sectorMap: Record<string, string>, userM
   }
 }
 
-function toneIcon(action: string): string {
-  if (action === "ATTACH_FAILED") return "🔴";
-  if (action === "CANCEL" || action === "REVOKE_SHARE") return "🟡";
-  if (action === "GENERATE" || action === "ATTACH" || action === "SHARE") return "🟢";
-  return "🔵";
+function toneIcon(action: string) {
+  if (action === "ATTACH_FAILED") return <AlertCircle className="h-4 w-4 text-docid-error" />;
+  if (action === "CANCEL" || action === "REVOKE_SHARE") return <AlertTriangle className="h-4 w-4 text-amber-500" />;
+  if (action === "GENERATE" || action === "ATTACH" || action === "SHARE") return <CheckCircle2 className="h-4 w-4 text-docid-secondary" />;
+  return <Info className="h-4 w-4 text-docid-primary-soft" />;
+}
+
+function SkeletonAudit() {
+  return (
+    <div className="docid-panel p-4 space-y-2">
+      <div className="flex items-start gap-3">
+        <span className="text-lg leading-none mt-0.5 shrink-0" />
+        <div className="min-w-0 flex-1">
+          <div className="animate-pulse rounded bg-docid-surface-high h-3 w-1/2" />
+          <div className="animate-pulse rounded bg-docid-surface-high h-3 w-1/3 mt-1 text-docid-muted" />
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export default function Audit() {
@@ -117,9 +131,9 @@ export default function Audit() {
   }[a] || a);
 
   return (
-    <div>
+    <div className="space-y-6">
       <PageHeader title="Auditoria" description="Registo de todas as acções realizadas na organização" />
-      {error && <div className="mb-4 rounded-lg border border-docid-error/30 bg-docid-error/10 p-3 text-sm text-docid-error">{error}</div>}
+      {error && <div className="rounded-lg border border-docid-error/30 bg-docid-error/10 px-4 py-3 text-sm text-docid-error">{error}</div>}
       {isStale && <OfflineNotice cachedAt={cachedAt} onRetry={refresh} />}
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <div className="relative flex-1 max-w-xs">
@@ -137,54 +151,60 @@ export default function Audit() {
       </div>
       <div className="space-y-3">
         {loading ? (
-          <div className="docid-panel flex items-center justify-center py-16 text-sm text-docid-muted">A carregar...</div>
+          <div className="grid grid-cols-1 gap-3 p-6">
+            {[...Array(4)].map((_, index) => <SkeletonAudit key={index} />)}
+          </div>
         ) : rows.length === 0 ? (
           <EmptyState>Nenhum registo de auditoria encontrado.</EmptyState>
         ) : (
-          rows.map(row => {
-            const metaData = parseMeta(row.metadata);
-            const narrative = formatNarrative(row, sectorMap, userMap);
-            const expanded = expandedId === row.id;
-            return (
-              <div key={row.id} className="docid-panel p-4 space-y-2">
-                <div className="flex items-start gap-3">
-                  <span className="text-lg leading-none mt-0.5 shrink-0">{toneIcon(row.action)}</span>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-docid-text leading-relaxed">{narrative}</p>
-                    <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-docid-muted">
-                      <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{new Date(row.createdAt).toLocaleString("pt-AO")}</span>
-                      {row.ip && row.ip !== "unknown" && <span className="flex items-center gap-1"><Globe className="h-3 w-3" />{row.ip}</span>}
+          <>
+            {rows.map(row => {
+              const metaData = parseMeta(row.metadata);
+              const narrative = formatNarrative(row, sectorMap, userMap);
+              const expanded = expandedId === row.id;
+              return (
+                <div key={row.id} className="docid-panel p-4 space-y-2">
+                  <div className="flex items-start gap-3">
+                    <span className="mt-0.5 shrink-0">{toneIcon(row.action)}</span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-docid-text leading-relaxed">{narrative}</p>
+                      <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-docid-muted">
+                        <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{new Date(row.createdAt).toLocaleString("pt-AO")}</span>
+                        {row.ip && row.ip !== "unknown" && <span className="flex items-center gap-1"><Globe className="h-3 w-3" />{row.ip}</span>}
+                      </div>
                     </div>
+                    <button onClick={() => setExpandedId(expanded ? null : row.id)} className="shrink-0 rounded-lg p-1.5 text-docid-muted hover:text-docid-text hover:bg-docid-surface-high transition-colors">
+                      {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                      <span className="sr-only">{expanded ? "Ocultar" : "Ver"} detalhes</span>
+                    </button>
                   </div>
-                  <button onClick={() => setExpandedId(expanded ? null : row.id)} className="shrink-0 rounded p-1.5 text-docid-muted hover:text-docid-text hover:bg-docid-surface-high">
-                    {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                    <span className="sr-only">{expanded ? "Ocultar" : "Ver"} detalhes</span>
-                  </button>
+                  {expanded && (
+                    <div className="ml-8 mt-2 rounded-lg border border-docid-border bg-docid-surface-low p-3 space-y-2 text-xs">
+                      <p className="flex items-center gap-1.5 text-docid-muted font-semibold mb-2"><Info className="h-3 w-3" /> Detalhes técnicos</p>
+                      <div className="grid grid-cols-2 gap-x-6 gap-y-1.5">
+                        <div className="flex items-center gap-1.5"><User className="h-3 w-3 shrink-0 text-docid-outline" /><span className="text-docid-muted">Utilizador:</span><span className="font-mono">{row.userId || "—"}</span></div>
+                        <div className="flex items-center gap-1.5"><Tag className="h-3 w-3 shrink-0 text-docid-outline" /><span className="text-docid-muted">Acção:</span><span>{row.action}</span></div>
+                        <div className="flex items-center gap-1.5"><HardDrive className="h-3 w-3 shrink-0 text-docid-outline" /><span className="text-docid-muted">Recurso:</span><span>{row.resource}</span></div>
+                        <div className="flex items-center gap-1.5"><Fingerprint className="h-3 w-3 shrink-0 text-docid-outline" /><span className="text-docid-muted">ID do recurso:</span><span className="font-mono">{row.resourceId || "—"}</span></div>
+                        <div className="flex items-center gap-1.5"><Globe className="h-3 w-3 shrink-0 text-docid-outline" /><span className="text-docid-muted">IP:</span><span>{row.ip || "—"}</span></div>
+                        <div className="flex items-center gap-1.5"><Clock className="h-3 w-3 shrink-0 text-docid-outline" /><span className="text-docid-muted">Data/Hora:</span><span>{new Date(row.createdAt).toISOString()}</span></div>
+                      </div>
+                      {row.metadata && (
+                        <details className="mt-2">
+                          <summary className="cursor-pointer text-docid-muted hover:text-docid-text text-xs font-medium">Metadados completos</summary>
+                          <pre className="mt-2 max-h-48 overflow-auto rounded bg-docid-surface p-2 text-[10px] text-docid-text font-mono whitespace-pre-wrap break-words">{JSON.stringify(metaData, null, 2)}</pre>
+                        </details>
+                      )}
+                    </div>
+                  )}
                 </div>
-                {expanded && (
-                  <div className="ml-8 mt-2 rounded-lg border border-docid-border bg-docid-surface-low p-3 space-y-2 text-xs">
-                    <p className="flex items-center gap-1.5 text-docid-muted font-semibold mb-2"><Info className="h-3 w-3" /> Detalhes técnicos</p>
-                    <div className="grid grid-cols-2 gap-x-6 gap-y-1.5">
-                      <div className="flex items-center gap-1.5"><User className="h-3 w-3 shrink-0 text-docid-outline" /><span className="text-docid-muted">Utilizador:</span><span className="font-mono">{row.userId || "—"}</span></div>
-                      <div className="flex items-center gap-1.5"><Tag className="h-3 w-3 shrink-0 text-docid-outline" /><span className="text-docid-muted">Acção:</span><span>{row.action}</span></div>
-                      <div className="flex items-center gap-1.5"><HardDrive className="h-3 w-3 shrink-0 text-docid-outline" /><span className="text-docid-muted">Recurso:</span><span>{row.resource}</span></div>
-                      <div className="flex items-center gap-1.5"><Fingerprint className="h-3 w-3 shrink-0 text-docid-outline" /><span className="text-docid-muted">ID do recurso:</span><span className="font-mono">{row.resourceId || "—"}</span></div>
-                      <div className="flex items-center gap-1.5"><Globe className="h-3 w-3 shrink-0 text-docid-outline" /><span className="text-docid-muted">IP:</span><span>{row.ip || "—"}</span></div>
-                      <div className="flex items-center gap-1.5"><Clock className="h-3 w-3 shrink-0 text-docid-outline" /><span className="text-docid-muted">Data/Hora:</span><span>{new Date(row.createdAt).toISOString()}</span></div>
-                    </div>
-                    {row.metadata && (
-                      <details className="mt-2">
-                        <summary className="cursor-pointer text-docid-muted hover:text-docid-text text-xs font-medium">Metadados completos</summary>
-                        <pre className="mt-2 max-h-48 overflow-auto rounded bg-docid-surface p-2 text-[10px] text-docid-text font-mono whitespace-pre-wrap break-words">{JSON.stringify(metaData, null, 2)}</pre>
-                      </details>
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })
+              );
+            })}
+          </>
         )}
-        <Pagination totalLabel={`${meta.total} registo(s) — Página ${meta.page}`} />
+        <div className="mt-4 flex items-center justify-between border-t border-docid-border px-4 py-3 text-sm text-docid-muted">
+          <span>{meta.total} registo(s) — Página {meta.page}</span>
+        </div>
       </div>
     </div>
   );

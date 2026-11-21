@@ -20,7 +20,7 @@ export default function Settings() {
   );
 
   return (
-    <div>
+    <div className="space-y-6">
       <PageHeader title="Configurações" description="Gerir definições do servidor e preferências da aplicação" />
       <div className="mb-4 flex gap-2 flex-wrap">
         {isAdmin && <TabBtn active={tab === "server"} onClick={() => setTab("server")}>Servidor</TabBtn>}
@@ -30,7 +30,9 @@ export default function Settings() {
         <TabBtn active={tab === "dispositivos"} onClick={() => setTab("dispositivos")}><Smartphone className="h-4 w-4" /> Dispositivos</TabBtn>
         {isAdmin && <TabBtn active={tab === "notificacoes"} onClick={() => setTab("notificacoes")}><Bell className="h-4 w-4" /> Notificações</TabBtn>}
       </div>
-      {tab === "server" ? <ServerTab /> : tab === "appearance" ? <AppearanceTab /> : tab === "watcher" ? <WatcherTab /> : tab === "organizacao" ? <OrganizationTab /> : tab === "dispositivos" ? <DevicesTab /> : <NotificationsTab />}
+      <div className="max-w-2xl">
+        {tab === "server" ? <ServerTab /> : tab === "appearance" ? <AppearanceTab /> : tab === "watcher" ? <WatcherTab /> : tab === "organizacao" ? <OrganizationTab /> : tab === "dispositivos" ? <DevicesTab /> : <NotificationsTab />}
+      </div>
     </div>
   );
 }
@@ -101,10 +103,10 @@ function ServerTab() {
   })();
 
   return (
-    <div className="docid-panel p-6 max-w-xl space-y-5">
+    <div className="docid-panel p-6 space-y-6">
       <div>
         <label className="mb-1.5 block text-xs font-semibold text-docid-muted">URL da API</label>
-        <input value={input} onChange={e => setInput(e.target.value)} className="docid-input w-full font-mono text-sm" placeholder="http://localhost:3000" />
+        <input value={input} onChange={e => setInput(e.target.value)} className="docid-input w-full font-mono text-sm" placeholder="https://didall.milvendas.ao" />
         {saveError && <p className="mt-1 text-xs text-docid-error">{saveError}</p>}
         <p className="mt-1 text-xs text-docid-muted">URL actual: <span className="font-mono text-docid-text">{apiBaseUrl}</span></p>
       </div>
@@ -114,7 +116,7 @@ function ServerTab() {
         {saved && <span className="text-sm text-docid-secondary">Guardado!</span>}
       </div>
 
-      <div className="border-t border-docid-border pt-5 space-y-3">
+      <div className="pt-6 space-y-3">
         <div>
           <label className="mb-1.5 block text-xs font-semibold text-docid-muted">Actualizações</label>
           <p className="text-xs text-docid-muted mb-3">Verifica se existe uma nova versão assinada publicada em GitHub Releases.</p>
@@ -135,7 +137,7 @@ function AppearanceTab() {
   const isDark = theme === "dark";
 
   return (
-    <div className="docid-panel p-6 max-w-xl space-y-5">
+    <div className="docid-panel p-6 space-y-6">
       <div>
         <label className="mb-1.5 block text-xs font-semibold text-docid-muted">Tema</label>
         <div className="flex gap-3">
@@ -233,7 +235,7 @@ function OrganizationTab() {
   return (
     <div className="space-y-6 max-w-xl">
       {isStale && <OfflineNotice cachedAt={cachedAt} onRetry={refresh} />}
-      <div className="docid-panel p-6 space-y-5">
+      <div className="docid-panel p-6 space-y-6">
         <h3 className="text-sm font-semibold text-docid-text">Dados da Organização</h3>
         {(error || loadError) && <p className="text-xs text-docid-error">{error || loadError}</p>}
         <div>
@@ -409,7 +411,7 @@ function DevicesTab() {
       {isStale && <OfflineNotice cachedAt={cachedAt} onRetry={refresh} />}
       {(loadError || writeError) && <div className="rounded-lg border border-docid-error/30 bg-docid-error/10 p-3 text-sm text-docid-error">{loadError || writeError}</div>}
 
-      <div className="docid-panel p-6 space-y-4">
+      <div className="docid-panel p-6 space-y-6">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-semibold text-docid-text">Dispositivos Registados</h3>
           <button onClick={handleRefresh} className="docid-button-secondary text-xs" disabled={loading}>
@@ -475,7 +477,7 @@ function DevicesTab() {
 
       {isTauri && (
         <>
-          <div className="docid-panel p-6 space-y-4">
+          <div className="docid-panel p-6 space-y-6">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold text-docid-text">Scanner Predefinido</h3>
               <button onClick={loadScanners} className="docid-button-secondary text-xs" disabled={scannerDevices.length === 0}>
@@ -498,7 +500,7 @@ function DevicesTab() {
             )}
           </div>
 
-          <div className="docid-panel p-6 space-y-4">
+          <div className="docid-panel p-6 space-y-6">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold text-docid-text">Impressora Predefinida</h3>
               <button onClick={loadPrinters} className="docid-button-secondary text-xs" disabled={printersLoading}>
@@ -521,7 +523,7 @@ function DevicesTab() {
             )}
           </div>
 
-          <div className="docid-panel p-6 space-y-4">
+          <div className="docid-panel p-6 space-y-6">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold text-docid-text">Leases Locais</h3>
             </div>
@@ -648,7 +650,7 @@ function NotificationsTab() {
   ];
 
   return (
-    <div className="docid-panel p-6 max-w-xl space-y-5">
+    <div className="docid-panel p-6 space-y-6">
       <h3 className="text-sm font-semibold text-docid-text">Preferências de Notificação</h3>
       <p className="text-xs text-docid-muted">Seleccione para que eventos pretende ser notificado. Eventos de fila/watcher usam notificações nativas do sistema (Tauri).</p>
       {isStale && <OfflineNotice cachedAt={cachedAt} onRetry={refresh} />}

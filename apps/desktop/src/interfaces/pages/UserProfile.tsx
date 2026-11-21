@@ -45,7 +45,7 @@ export default function UserProfile() {
   }
 
   return (
-    <div className="max-w-2xl">
+    <div className="space-y-6 max-w-2xl">
       <PageHeader
         title="Perfil do utilizador"
         description="Consulta de dados de um membro da organização"
@@ -55,13 +55,16 @@ export default function UserProfile() {
           </Link>
         }
       />
-      {error && <div className="mb-4 rounded-lg border border-docid-error/30 bg-docid-error/10 p-3 text-sm text-docid-error">{error}</div>}
+      {error && <div className="rounded-lg border border-docid-error/30 bg-docid-error/10 px-4 py-3 text-sm text-docid-error">{error}</div>}
       {isStale && <OfflineNotice cachedAt={cachedAt} onRetry={refresh} />}
 
       {loading && !profile ? (
-        <div className="flex items-center justify-center py-16 text-sm text-docid-muted">A carregar...</div>
+        <div className="docid-panel p-16 flex flex-col items-center justify-center text-center">
+          <div className="animate-pulse rounded bg-docid-surface-high h-16 w-16 mb-3" />
+          <p className="text-sm text-docid-muted">A carregar perfil...</p>
+        </div>
       ) : !profile ? (
-        <div className="docid-panel p-6 text-sm text-docid-muted">Utilizador não encontrado.</div>
+        <EmptyState>Utilizador não encontrado.</EmptyState>
       ) : (
         <div className="docid-panel p-6 space-y-6">
           <div className="flex items-center gap-4">
@@ -91,7 +94,7 @@ export default function UserProfile() {
               <div className="flex flex-wrap gap-1">
                 {(profile.roles || []).length === 0 && <span className="text-docid-muted">—</span>}
                 {(profile.roles || []).map(r => (
-                  <span key={r.id} className="rounded-full bg-docid-surface-high px-2 py-0.5 text-[10px] font-medium text-docid-muted">{r.name}</span>
+                  <span key={r.id} className="rounded-full bg-docid-primary/10 px-3 py-1 text-xs font-medium text-docid-primary-soft">{r.name}</span>
                 ))}
               </div>
             </div>
@@ -100,4 +103,8 @@ export default function UserProfile() {
       )}
     </div>
   );
+}
+
+function EmptyState({ children }: { children: React.ReactNode }) {
+  return <div className="docid-panel flex min-h-40 items-center justify-center p-8 text-center text-sm text-docid-muted">{children}</div>;
 }

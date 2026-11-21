@@ -128,7 +128,7 @@ export default function Onboarding() {
               {confirmPassword && confirmPassword !== adminPassword && <p className="mt-1 text-xs text-docid-error">As palavras-passe não coincidem.</p>}
             </div>
             <div className="flex justify-between pt-4">
-              <button onClick={() => setStep("admin")} className="docid-button-secondary"><ArrowLeft className="h-4 w-4" /> Voltar</button>
+              <button onClick={() => setStep("org")} className="docid-button-secondary"><ArrowLeft className="h-4 w-4" /> Voltar</button>
               <button onClick={() => setStep("confirm")} disabled={!canAdvanceToConfirm} className="docid-button-primary">Rever <ArrowRight className="h-4 w-4" /></button>
             </div>
           </div>

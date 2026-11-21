@@ -15,6 +15,7 @@ import { eq, and, isNull, or } from "drizzle-orm";
 import { notify } from "../services/notification.service";
 import { withTenant } from "../db/withTenant";
 import { safeError } from "../lib/errors";
+import { isTenantAdmin, shouldCreateShare, syncCounterpart } from "../services/access-decision.service";
 
 
 async function resolveIdentifierPrimary(tx: any, tenantId: string, code: string, extraWith: Record<string, boolean> = {}) {
@@ -712,10 +713,13 @@ export const documentsModule = new (Elysia as any)({ prefix: "/documents" })
             set.status = 400; return { error: { code: "ALREADY_RESOLVED", message: "Pedido já foi resolvido." } };
           }
 
-          const isOwner = idRow.document.uploadedBy === auth!.userId;
+          const roleNames = await getFreshRoles(auth!.userId, tenantId, tx);
           const isSupervisor = idRow.sector?.supervisorId === auth!.userId;
-          if (!isOwner && !isSupervisor) {
-            set.status = 403; return { error: { code: "FORBIDDEN", message: "Apenas o dono do documento ou o supervisor do sector podem resolver este pedido." } };
+          if (
+            req.requesterId === auth!.userId ||
+            (!isTenantAdmin(roleNames) && !(roleNames.includes("SECTOR_SUPERVISOR") && isSupervisor))
+          ) {
+            set.status = 403; return { error: { code: "FORBIDDEN", message: "Apenas o supervisor do sector ou o admin podem resolver este pedido." } };
           }
 
           if (body.status === "approved") {
@@ -724,12 +728,22 @@ export const documentsModule = new (Elysia as any)({ prefix: "/documents" })
               .set({ status: "approved", resolvedBy: auth!.userId, resolvedAt: now })
               .where(eq(documentAccessRequests.id, params.requestId));
 
-            const [share] = await tx.insert(documentShares).values({
-              documentId: idRow.document.id,
-              sharedBy: auth!.userId,
-              sharedWithUserId: req.requesterId,
-              sourceRequestId: req.id,
-            }).returning();
+            const existingShare = await tx.query.documentShares.findFirst({
+              where: and(
+                eq(documentShares.documentId, idRow.document.id),
+                eq(documentShares.sharedWithUserId, req.requesterId),
+                eq(documentShares.status, "active"),
+                isNull(documentShares.revokedAt),
+              ),
+            });
+            const share = shouldCreateShare(existingShare)
+              ? (await tx.insert(documentShares).values({
+                  documentId: idRow.document.id,
+                  sharedBy: auth!.userId,
+                  sharedWithUserId: req.requesterId,
+                  sourceRequestId: req.id,
+                }).returning())[0]
+              : existingShare;
 
             await notify(tx, {
               type: "access:granted",
@@ -764,6 +778,14 @@ export const documentsModule = new (Elysia as any)({ prefix: "/documents" })
               ip: clientIp,
             });
           }
+
+          await syncCounterpart(tx, {
+            documentId: idRow.document.id,
+            requesterId: req.requesterId,
+            status: body.status === "approved" ? "approved" : "denied",
+            resolvedBy: auth!.userId,
+            resolvedAt: new Date(),
+          });
 
           const updated = await tx.query.documentAccessRequests.findFirst({
             where: eq(documentAccessRequests.id, params.requestId),

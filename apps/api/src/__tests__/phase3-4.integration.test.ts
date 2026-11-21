@@ -418,13 +418,11 @@ describe("Visibility — sector_only vs public", () => {
     expect(found.length).toBe(1);
   });
 
-  test("admin não descarrega sector_only (403)", async () => {
+  test("admin descarrega sector_only (poder total)", async () => {
     const res = await fetch(`${BASE}/documents/${restrictedIdentifier}/download`, {
       headers: { Authorization: `Bearer ${adminToken}` },
     });
-    expect(res.status).toBe(403);
-    const body = await res.json();
-    expect(body.error.code).toBe("ACCESS_REQUIRED");
+    expect(res.status).toBe(200);
   });
 
   test("admin descarrega public sem problemas", async () => {

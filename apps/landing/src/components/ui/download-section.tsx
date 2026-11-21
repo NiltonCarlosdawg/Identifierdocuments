@@ -3,19 +3,13 @@ import { ColumnLines } from "@/components/ui/column-lines";
 import { Reveal } from "@/components/Reveal";
 import { cn } from "@/lib/utils";
 
-const RELEASE = "https://github.com/NiltonCarlosdawg/Identifierdocuments/releases/download/desktop-v1.1.6";
 const ALL_RELEASES = "https://github.com/NiltonCarlosdawg/Identifierdocuments/releases";
 
 export const DOWNLOADS = {
   installer: {
-    href: `${RELEASE}/DocID_1.1.6_x64-setup.exe`,
-    size: "8,6 MB",
-    sha256: "66f2f31576fe1c39fe60a3e8a43d1967629b1cad6378074c6a17c01edb1bbf12",
-  },
-  portable: {
-    href: `${RELEASE}/docid-desktop-1.1.6.exe`,
-    size: "42,9 MB",
-    sha256: "f89cbaf7a79b0c1513bb86df868b4b8fb98c765482e59ad74b83c6a7f9bcae78",
+    href: "/downloads/DocID_1.1.6_x64-setup.exe",
+    size: "223 MB",
+    sha256: "87076c74a2f2b8b5c83e35b08c50a7ef24f712133edf17d5e4642214662badd9",
   },
 } as const;
 
@@ -95,26 +89,13 @@ export function DownloadSection() {
           <div className="overflow-hidden rounded-2xl border border-docid-border bg-docid-surface">
             <PlatformRow
               mark={<WindowsMark className="h-4 w-4" />}
-              name="Instalador"
-              meta="Recomendado · x64"
-              detail="Cria a aplicação no perfil do utilizador e activa as actualizações automáticas."
+              name="Instalador completo"
+              meta="Recomendado · inclui WebView2"
+              detail="Um único ficheiro. Instala o DocID e o motor WebView2 no mesmo passo, mesmo sem internet. Duplo clique e seguir os passos."
               action={
                 <a className="btn-primary w-full sm:w-auto" href={DOWNLOADS.installer.href}>
                   <Download className="h-4 w-4" />
                   Descarregar {DOWNLOADS.installer.size}
-                </a>
-              }
-            />
-            <div className="rule" />
-            <PlatformRow
-              mark={<WindowsMark className="h-4 w-4" />}
-              name="Versão portátil"
-              meta="Sem instalação · x64"
-              detail="Um único ficheiro executável. Precisa do Microsoft Edge WebView2, já presente na maioria dos Windows 10 e 11."
-              action={
-                <a className="btn-ghost w-full sm:w-auto" href={DOWNLOADS.portable.href}>
-                  <Download className="h-4 w-4" />
-                  Descarregar {DOWNLOADS.portable.size}
                 </a>
               }
             />
@@ -154,13 +135,13 @@ export function DownloadSection() {
                       {DOWNLOADS.installer.sha256}
                     </dd>
                   </div>
-                  <div className="flex flex-wrap items-baseline gap-x-2">
-                    <dt className="font-mono text-[10px] uppercase tracking-[0.14em] text-docid-muted">SHA-256 portátil</dt>
-                    <dd className="w-full break-all font-mono text-[11px] leading-relaxed text-docid-muted">
-                      {DOWNLOADS.portable.sha256}
-                    </dd>
-                  </div>
                 </dl>
+                <a
+                  className="mt-2 inline-flex text-xs font-medium text-docid-link underline-offset-4 hover:underline"
+                  href="/downloads/SHA256SUMS"
+                >
+                  Verificar integridade (SHA256SUMS)
+                </a>
                 <a
                   className={cn("mt-4 inline-flex items-center gap-1.5 text-sm font-medium text-docid-link underline-offset-4 hover:underline")}
                   href={ALL_RELEASES}

@@ -65,15 +65,15 @@ export default function Scanner() {
   const sizeKB = page ? (page.length / 1024).toFixed(1) : "0";
 
   return (
-    <div>
+    <div className="space-y-6">
       <PageHeader title="Digitalizar" description="Digitalizar documentos físicos" actions={
         <button onClick={scan} disabled={scanning || !selectedDevice} className="docid-button-primary">
           <Scan className={`h-4 w-4 ${scanning ? "animate-pulse" : ""}`} /> {scanning ? "A digitalizar..." : hasPages ? "Adicionar página" : "Digitalizar"}
         </button>
       } />
-      {error && <div className="mb-4 rounded-lg border border-docid-error/30 bg-docid-error/10 p-3 text-sm text-docid-error">{error}</div>}
-      {printInfo && <div className="mb-4 rounded-lg border border-docid-secondary/30 bg-docid-secondary/10 p-3 text-sm text-docid-secondary">{printInfo}</div>}
-      {!available && <div className="mb-4 rounded-lg border border-docid-tertiary/30 bg-docid-tertiary/10 p-3 text-sm text-docid-tertiary">Scanner apenas disponível no ambiente desktop (Tauri).</div>}
+      {error && <div className="rounded-lg border border-docid-error/30 bg-docid-error/10 px-4 py-3 text-sm text-docid-error">{error}</div>}
+      {printInfo && <div className="rounded-lg border border-docid-secondary/30 bg-docid-secondary/10 px-4 py-3 text-sm text-docid-secondary">{printInfo}</div>}
+      {!available && <div className="rounded-lg border border-docid-tertiary/30 bg-docid-tertiary/10 px-4 py-3 text-sm text-docid-tertiary">Scanner apenas disponível no ambiente desktop (Tauri).</div>}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="docid-panel p-5 space-y-5 lg:col-span-1">
           <h3 className="text-sm font-semibold text-docid-text">Dispositivo</h3>

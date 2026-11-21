@@ -2,22 +2,13 @@ import Elysia from "elysia";
 import { Type as t } from "@sinclair/typebox";
 import { db } from "../db";
 import { approvals, documents, documentShares, auditLogs, users } from "../db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
 import { withTenant } from "../db/withTenant";
 import { requireAuth, getFreshRoles } from "../middleware/auth";
 import { notify } from "../services/notification.service";
 import { safeError } from "../lib/errors";
 import { withIdempotency } from "../lib/idempotency";
-
-async function canResolveApproval(
-  auth: { userId: string; tenantId: string },
-  approval: any,
-): Promise<boolean> {
-  const roleNames = await getFreshRoles(auth.userId, auth.tenantId);
-  if (roleNames.includes("ORG_ADMIN")) return true;
-  if (roleNames.includes("SECTOR_SUPERVISOR") && approval.supervisorId === auth.userId) return true;
-  return false;
-}
+import { approvalAuditEntry, canResolveApproval, canSeeApproval, shouldCreateShare, syncCounterpart } from "../services/access-decision.service";
 
 export const approvalsModule = new (Elysia as any)({ prefix: "/approvals" })
   .use(requireAuth())
@@ -25,21 +16,17 @@ export const approvalsModule = new (Elysia as any)({ prefix: "/approvals" })
   .get("/", async (ctx: any) => {
     const { tenantId, auth, query } = ctx;
     return withTenant(tenantId, async (tx) => {
-      const roleNames = await getFreshRoles(auth!.userId, auth!.tenantId);
+      const roleNames = await getFreshRoles(auth!.userId, auth!.tenantId, tx);
       const conditions = [eq(approvals.tenantId, tenantId)];
       if (query.status) conditions.push(eq(approvals.status, query.status as any));
       if (query.sectorId) conditions.push(eq(approvals.sectorId, query.sectorId));
-
-      if (roleNames.includes("SECTOR_SUPERVISOR") && !roleNames.includes("ORG_ADMIN")) {
-        conditions.push(eq(approvals.supervisorId, auth!.userId));
-      }
 
       const rows = await tx.query.approvals.findMany({
         where: and(...conditions),
         with: { document: { with: { identifier: true } }, sector: true, supervisor: true },
         orderBy: (a) => [a.requestedAt],
       });
-      return { data: rows };
+      return { data: rows.filter((row: any) => canSeeApproval(roleNames, auth!.userId, row)) };
     });
   }, {
     query: t.Object({
@@ -58,16 +45,8 @@ export const approvalsModule = new (Elysia as any)({ prefix: "/approvals" })
       });
       if (!approval) { set.status = 404; return { error: { code: "NOT_FOUND", message: "Aprovação não encontrada." } }; }
 
-      // CORREÇÃO: este endpoint não tinha nenhum controlo de acesso — qualquer
-      // user autenticado do tenant conseguia ver notes/requesterId de qualquer
-      // aprovação, incluindo de sectores alheios. Alinhado com a mesma regra do
-      // GET /approvals (list): só ORG_ADMIN, o supervisor responsável, ou o
-      // próprio requerente do pedido podem ver o detalhe.
-      const roleNames = await getFreshRoles(auth!.userId, auth!.tenantId);
-      const isAdmin = roleNames.includes("ORG_ADMIN");
-      const isSupervisor = approval.supervisorId === auth!.userId;
-      const isRequester = approval.requesterId === auth!.userId;
-      if (!isAdmin && !isSupervisor && !isRequester) {
+      const roleNames = await getFreshRoles(auth!.userId, auth!.tenantId, tx);
+      if (!canSeeApproval(roleNames, auth!.userId, approval)) {
         set.status = 403;
         return { error: { code: "FORBIDDEN", message: "Sem permissão para ver esta aprovação." } };
       }
@@ -79,7 +58,7 @@ export const approvalsModule = new (Elysia as any)({ prefix: "/approvals" })
     detail: { summary: "Detalhe da aprovação", tags: ["Aprovações"] },
   })
 
-  .patch("/:id", async ({ tenantId, auth, params, body, set, headers }) => {
+  .patch("/:id", async ({ tenantId, auth, params, body, set, headers, clientIp }) => {
     try {
       return await withTenant(tenantId, async (tx) => {
         return await withIdempotency(tx, tenantId, headers["idempotency-key"], async () => {
@@ -98,7 +77,8 @@ export const approvalsModule = new (Elysia as any)({ prefix: "/approvals" })
             return { error: { code: "ALREADY_RESOLVED", message: "Aprovação já foi resolvida." } };
           }
 
-          if (!await canResolveApproval(auth!, existing)) {
+          const roleNames = await getFreshRoles(auth!.userId, auth!.tenantId, tx);
+          if (!canResolveApproval(roleNames, auth!.userId, existing)) {
             set.status = 403;
             return { error: { code: "FORBIDDEN", message: "Sem permissão para aprovar este documento." } };
           }
@@ -108,6 +88,16 @@ export const approvalsModule = new (Elysia as any)({ prefix: "/approvals" })
             .set({ status: body.status, notes: body.notes ?? null, resolvedAt: now })
             .where(and(eq(approvals.id, params.id), eq(approvals.tenantId, tenantId)))
             .returning();
+
+          await tx.insert(auditLogs).values(approvalAuditEntry({
+            tenantId,
+            userId: auth!.userId,
+            status: body.status,
+            documentId: approval.documentId,
+            approvalId: approval.id,
+            notes: body.notes,
+            ip: clientIp,
+          }));
 
           const doc = existing.document;
           const identifierStr = doc?.identifier?.identifier;
@@ -140,18 +130,28 @@ export const approvalsModule = new (Elysia as any)({ prefix: "/approvals" })
             }
 
             if (existing.type === "access_request" && existing.requesterId) {
-              await tx.insert(documentShares).values({
-                documentId: approval.documentId,
-                sharedWithUserId: existing.requesterId,
-                sharedBy: auth!.userId,
-                status: "active",
+              const existingShare = await tx.query.documentShares.findFirst({
+                where: and(
+                  eq(documentShares.documentId, approval.documentId),
+                  eq(documentShares.sharedWithUserId, existing.requesterId),
+                  eq(documentShares.status, "active"),
+                  isNull(documentShares.revokedAt),
+                ),
               });
-              await notify(tx, {
-                type: "document:shared",
-                userId: existing.requesterId,
-                tenantId,
-                payload: { documentId: approval.documentId, identifier: identifierStr },
-              });
+              if (shouldCreateShare(existingShare)) {
+                await tx.insert(documentShares).values({
+                  documentId: approval.documentId,
+                  sharedWithUserId: existing.requesterId,
+                  sharedBy: auth!.userId,
+                  status: "active",
+                });
+                await notify(tx, {
+                  type: "document:shared",
+                  userId: existing.requesterId,
+                  tenantId,
+                  payload: { documentId: approval.documentId, identifier: identifierStr },
+                });
+              }
             }
           }
 
@@ -187,6 +187,16 @@ export const approvalsModule = new (Elysia as any)({ prefix: "/approvals" })
                 notes: body.notes,
                 status: body.status,
               },
+            });
+          }
+
+          if (existing.type === "access_request" && existing.requesterId) {
+            await syncCounterpart(tx, {
+              documentId: approval.documentId,
+              requesterId: existing.requesterId,
+              status: body.status === "approved" ? "approved" : "denied",
+              resolvedBy: auth!.userId,
+              resolvedAt: now,
             });
           }
 

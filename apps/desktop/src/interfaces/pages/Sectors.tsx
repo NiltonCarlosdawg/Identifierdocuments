@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { api } from "../../infrastructure/di/container";
-import { PageHeader, Modal, StatusChip, EmptyState, Pagination, OfflineNotice } from "../components/docid-ui";
+import { PageHeader, Modal, EmptyState, OfflineNotice } from "../components/docid-ui";
 import { useOfflineCache } from "../hooks/useOfflineCache";
 import { useCachedAux } from "../hooks/useCachedAux";
 import { mapError } from "../../shared/errors/mapError";
@@ -8,6 +8,22 @@ import { Search, Plus, Users, Pencil, Trash2 } from "lucide-react";
 
 interface SectorRow { id: string; name: string; code: string; supervisorName: string | null; supervisorId: string | null; memberCount: number; createdAt: string; }
 interface User { id: string; fullName: string; }
+
+function SkeletonSector() {
+  return (
+    <div className="docid-panel p-4 space-y-3">
+      <div className="flex items-start justify-between">
+        <div><div className="animate-pulse rounded bg-docid-surface-high h-4 w-1/3" /><div className="animate-pulse rounded bg-docid-surface-high h-3 w-1/4 mt-1" /></div>
+        <div className="animate-pulse rounded bg-docid-surface-high h-4 w-20" />
+      </div>
+      <div className="grid grid-cols-3 gap-3 text-xs">
+        {[1, 2, 3].map(index => (
+          <div key={index}><div className="animate-pulse rounded bg-docid-surface-high h-3 w-1/3" /></div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export default function Sectors() {
   const [rows, setRows] = useState<SectorRow[]>([]);
@@ -39,33 +55,41 @@ export default function Sectors() {
   };
 
   return (
-    <div>
+    <div className="space-y-6">
       <PageHeader title="Sectores" description="Gerir os sectores da organização" actions={<button onClick={() => setShowCreate(true)} className="docid-button-primary"><Plus className="h-4 w-4" /> Criar sector</button>} />
-      {error && <div className="mb-4 rounded-lg border border-docid-error/30 bg-docid-error/10 p-3 text-sm text-docid-error">{error}</div>}
+      {error && <div className="rounded-lg border border-docid-error/30 bg-docid-error/10 px-4 py-3 text-sm text-docid-error">{error}</div>}
       {isStale && <OfflineNotice cachedAt={cachedAt} onRetry={refresh} />}
       <div className="mb-4 flex items-center gap-3">
         <div className="relative flex-1 max-w-xs"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-docid-outline" /><input value={search} onChange={e => setSearch(e.target.value)} className="docid-input w-full pl-9" placeholder="Pesquisar sector..." /></div>
       </div>
       {loading ? (
-        <div className="flex items-center justify-center py-16 text-sm text-docid-muted">A carregar...</div>
+        <div className="grid grid-cols-1 gap-3 p-6">
+          {[...Array(3)].map((_, index) => <SkeletonSector key={index} />)}
+        </div>
       ) : filtered.length === 0 ? (
         <EmptyState>Nenhum sector encontrado.</EmptyState>
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {filtered.map(s => (
-            <div key={s.id} className="docid-panel p-4 space-y-3">
+            <div key={s.id} className="docid-panel p-5 space-y-4 hover:border-docid-primary/40 transition-colors">
               <div className="flex items-start justify-between">
                 <div>
-                  <p className="font-semibold text-docid-text">{s.name}</p>
-                  <p className="text-xs text-docid-muted font-mono">{s.code}</p>
+                  <div className="flex items-center gap-2">
+                    <p className="font-semibold text-docid-text">{s.name}</p>
+                    <span className="inline-flex items-center rounded-full border border-docid-border px-2 py-0.5 text-[10px] font-medium text-docid-muted">{s.code}</span>
+                  </div>
+                  <p className="text-xs text-docid-muted mt-1">{new Date(s.createdAt).toLocaleDateString("pt-AO")}</p>
                 </div>
-                <div className="flex gap-1">
-                  <button onClick={() => { setSelected(s); }} className="rounded p-1.5 text-docid-muted hover:text-docid-text"><Pencil className="h-3.5 w-3.5" /></button>
-                </div>
+                <button onClick={() => { setSelected(s); }} className="rounded-lg p-2 text-docid-muted hover:bg-docid-surface-high hover:text-docid-text transition-colors"><Pencil className="h-4 w-4" /></button>
               </div>
-              <div className="flex items-center gap-4 text-xs text-docid-muted">
-                <span>Supervisor: {s.supervisorName || "—"}</span>
-                <button onClick={() => handleViewMembers(s)} className="flex items-center gap-1 text-docid-primary-soft hover:underline"><Users className="h-3 w-3" /> {s.memberCount} membro(s)</button>
+              <div className="pt-2">
+                <div className="flex items-center gap-3 text-xs text-docid-muted mb-3">
+                  <div className="flex items-center gap-1.5"><Users className="h-3 w-3" /><span>{s.memberCount} membro(s)</span></div>
+                  <span className="ml-auto text-xs font-medium">{s.supervisorName || "Sem supervisor"}</span>
+                </div>
+                <button onClick={() => handleViewMembers(s)} className="flex items-center gap-1.5 rounded-lg border border-docid-border bg-docid-surface-low px-3 py-2 text-sm font-medium text-docid-primary-soft transition hover:bg-docid-surface-high">
+                  <Users className="h-4 w-4" /> Ver membros
+                </button>
               </div>
             </div>
           ))}
@@ -169,11 +193,18 @@ function EditSectorModal({ sector, onClose, onDone }: { sector: SectorRow; onClo
 
 function MembersModal({ sector, members, onClose }: { sector: SectorRow; members: User[]; onClose: () => void }) {
   return (
-    <Modal title={`Membros: ${sector.name}`} onClose={onClose}>
+    <Modal title={`Membros: ${sector.name}`} onClose={onClose} maxWidth="max-w-md">
       {members.length === 0 ? (
         <EmptyState>Nenhum membro neste sector.</EmptyState>
       ) : (
-        <ul className="divide-y divide-docid-border">{members.map(m => <li key={m.id} className="py-2 text-sm">{m.fullName}</li>)}</ul>
+        <ul className="divide-y divide-docid-border">
+          {members.map(m => (
+            <li key={m.id} className="flex items-center justify-between py-3">
+              <p className="text-sm text-docid-text">{m.fullName}</p>
+              <span className="text-xs text-docid-muted">Membro</span>
+            </li>
+          ))}
+        </ul>
       )}
     </Modal>
   );

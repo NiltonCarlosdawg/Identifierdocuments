@@ -49,7 +49,7 @@ jobs:
         run: bun run build
 
       - name: Build Tauri bundle
-        uses: tauri-apps/tauri-action@v2
+        uses: tauri-apps/tauri-action@v1
         with:
           projectPath: apps/desktop
         env:

@@ -1,10 +1,26 @@
 import { useEffect, useState } from "react";
-import { Fingerprint, FileText, AlertTriangle, CheckCircle, XCircle, Clock, Hash, CloudOff, Upload, Inbox, FolderOpen, ArrowRight } from "lucide-react";
+import { Link } from "react-router-dom";
+import {
+  Fingerprint,
+  FileText,
+  AlertTriangle,
+  CheckCircle,
+  XCircle,
+  Clock,
+  Hash,
+  CloudOff,
+  Upload,
+  Inbox,
+  FolderOpen,
+  ArrowRight,
+  Plus,
+  Scan,
+} from "lucide-react";
 import { api } from "../../infrastructure/di/container";
 import { useAuthStore } from "../stores/authStore";
 import { useOfflineCache } from "../hooks/useOfflineCache";
 import { pendingCount, useQueueStore } from "../stores/queueStore";
-import { PageHeader, MetricCard, EmptyState, OfflineNotice } from "../components/docid-ui";
+import { PageHeader, MetricCard, StatusChip, EmptyState, OfflineNotice } from "../components/docid-ui";
 
 interface StatsData {
   identifiers: {
@@ -59,6 +75,23 @@ const STATUS_TONES: Record<string, string> = {
   cancelled: "text-docid-error",
 };
 
+function SkeletonLine({ className = "h-4 w-full" }: { className?: string }) {
+  return <div className={`animate-pulse rounded bg-docid-surface-high ${className}`} />;
+}
+
+function SkeletonMetric() {
+  return (
+    <div className="docid-panel p-5">
+      <div className="flex items-center justify-between mb-3">
+        <SkeletonLine className="h-4 w-20" />
+        <SkeletonLine className="h-5 w-5 rounded-full" />
+      </div>
+      <SkeletonLine className="h-3 w-32 mt-1" />
+      <SkeletonLine className="h-10 w-24 mt-3" />
+    </div>
+  );
+}
+
 export default function Dashboard() {
   const user = useAuthStore(s => s.user);
   const [stats, setStats] = useState<StatsData | null>(null);
@@ -102,208 +135,302 @@ export default function Dashboard() {
     onData: setRecentDocs,
   });
 
+  const totalIdentifiers = stats?.identifiers.total ?? 0;
+  const activeIdentifiers = stats?.identifiers.byStatus?.active ?? 0;
+  const totalDocs = stats?.documents.total ?? 0;
+  const failDocs = stats?.documents.verificationFailures ?? 0;
+
+  const quickActions = [
+    { label: "Novo identificador", icon: Fingerprint, to: "/identificadores", tone: "primary" },
+    { label: "Subir documento", icon: Upload, to: "/documentos", tone: "secondary" },
+    { label: "Digitalizar", icon: Scan, to: "/digitalizar", tone: "tertiary" },
+    { label: "Aprovações", icon: CheckCircle, to: "/aprovacoes", tone: "primary" },
+  ];
+
   return (
-    <div>
+    <div className="space-y-6">
+      {/* Header */}
       <PageHeader
         title="Dashboard"
-        description={`Bem-vindo, ${user?.fullName || "utilizador"}.`}
+        description={`Bem-vindo de volta, ${user?.fullName || "utilizador"}. ${user?.organization ? `Organização: ${user.organization}` : ""}`}
+        actions={(
+          <div className="flex items-center gap-2">
+            <button
+              onClick={refresh}
+              disabled={loading}
+              className="inline-flex items-center gap-2 rounded-lg border border-docid-border bg-docid-surface-low px-3 py-2 text-sm font-medium text-docid-text transition hover:bg-docid-surface-high disabled:opacity-50"
+            >
+              <Clock className="h-4 w-4" /> Atualizar
+            </button>
+            <button className="docid-button-primary text-sm">
+              <Plus className="h-4 w-4" /> Novo
+            </button>
+          </div>
+        )}
       />
 
+      {/* Error / offline notices */}
       {error && (
-        <div className="mb-6 rounded-lg border border-docid-error/30 bg-docid-error/10 px-4 py-3 text-sm text-docid-error">
+        <div className="rounded-lg border border-docid-error/30 bg-docid-error/10 px-4 py-3 text-sm text-docid-error">
           {error}
-          <button onClick={refresh} className="ml-2 underline">Tentar novamente</button>
+          <button onClick={refresh} className="mt-2 inline-flex items-center gap-1 underline underline-offset-4 hover:text-docid-text">
+            Tentar novamente <ArrowRight className="h-3.5 w-3.5" />
+          </button>
         </div>
       )}
-
       {isStale && <OfflineNotice cachedAt={cachedAt} onRetry={refresh} />}
 
+      {/* Loading state */}
       {loading && !stats && (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {[...Array(4)].map((_, i) => (
-            <div key={i} className="docid-panel p-5">
-              <div className="mb-4 h-5 w-5 animate-pulse rounded bg-docid-surface-high" />
-              <div className="mb-2 h-3 w-20 animate-pulse rounded bg-docid-surface-high" />
-              <div className="h-8 w-16 animate-pulse rounded bg-docid-surface-high" />
-            </div>
-          ))}
+          {[...Array(4)].map((_, index) => <SkeletonMetric key={index} />)}
         </div>
       )}
 
+      {/* Empty state */}
       {!loading && !error && !stats && (
         <EmptyState>Nenhum dado disponível.</EmptyState>
       )}
 
+      {/* Content */}
       {stats && (
         <>
+          {/* Metric cards */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <MetricCard
-              label="Total de Identificadores"
-              value={stats.identifiers.total}
+              label="Identificadores totais"
+              value={totalIdentifiers}
               icon={Fingerprint}
               accent="text-docid-primary-soft"
             />
             <MetricCard
-              label="Total de Documentos"
-              value={stats.documents.total}
+              label="Documentos"
+              value={totalDocs}
               icon={FileText}
               accent="text-docid-secondary"
             />
             <MetricCard
-              label="Falhas de Verificação"
-              value={stats.documents.verificationFailures}
-              icon={AlertTriangle}
-              accent={stats.documents.verificationFailures > 0 ? "text-docid-error" : "text-docid-muted"}
-              badge={stats.documents.verificationFailures > 0 ? "Atenção" : "OK"}
+              label="Identificadores activos"
+              value={activeIdentifiers}
+              icon={CheckCircle}
+              accent={totalIdentifiers > 0 ? "text-docid-secondary" : "text-docid-muted"}
+              badge={totalIdentifiers > 0 ? `${Math.round((activeIdentifiers / totalIdentifiers) * 100)}%` : "—"}
             />
             <MetricCard
-              label="Identificadores Activos"
-              value={stats.identifiers.byStatus?.active ?? 0}
-              icon={CheckCircle}
-              accent="text-docid-secondary"
-            />
+              label="Falhas de verificação"
+              value={failDocs}
+              icon={AlertTriangle}
+              accent={failDocs > 0 ? "text-docid-error" : "text-docid-secondary"}
+              badge={failDocs > 0 ? "Atenção" : "OK"}
+              />
           </div>
 
-          <div className="mt-6 docid-panel p-5">
-            <h2 className="mb-1 text-sm font-semibold uppercase tracking-wider text-docid-muted">Actividade (últimos 14 dias)</h2>
-            <p className="mb-4 text-xs text-docid-muted">Identificadores gerados e documentos associados por dia.</p>
-            <ActivityChart data={stats.activity || []} />
-          </div>
-
-          <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
-            <div className="docid-panel p-5">
-              <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-docid-muted">
-                <CloudOff className="h-4 w-4" /> Fila Offline
-              </h2>              <button
-                onClick={() => setQueuePanelOpen(true)}
-                className="flex w-full items-center justify-between rounded-lg border border-docid-border bg-docid-surface-low px-4 py-3 text-left hover:bg-docid-surface-high"
-              >
-                <span className="flex items-center gap-3">
-                  <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-docid-surface-highest text-docid-text">
-                    {queueOnline ? <Upload className="h-4 w-4" /> : <CloudOff className="h-4 w-4 text-orange-500" />}
-                  </span>
-                  <span>
-                    <span className="block text-lg font-semibold text-docid-text">{queuePending}</span>
-                    <span className="block text-xs text-docid-muted">{queuePending === 1 ? "ficheiro pendente" : "ficheiros pendentes"}</span>
-                  </span>
-                </span>
-                <span className="flex items-center gap-1 text-xs text-docid-muted">Ver fila <ArrowRight className="h-3.5 w-3.5" /></span>
-              </button>
-              {!queueOnline && <p className="mt-3 text-xs text-docid-muted">Sem ligação — os envios ficam em fila e serão sincronizados automaticamente.</p>}
-            </div>
-
-            <div className="docid-panel p-5">
-              <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-docid-muted">
-                <Inbox className="h-4 w-4" /> Aprovações Pendentes
-              </h2>
-              {approvals.length === 0 ? (
-                <p className="text-sm text-docid-muted">Nenhuma aprovação pendente.</p>
-              ) : (
-                <ul className="space-y-2">
-                  {approvals.slice(0, 4).map(a => (
-                    <li key={a.id} className="flex items-center justify-between gap-2 rounded-lg bg-docid-surface-low px-3 py-2 text-sm">
-                      <span className="min-w-0 flex-1 truncate font-mono text-xs font-medium text-docid-text">
-                        {a.document?.identifier?.identifier || a.document?.id?.slice(0, 8) || a.id.slice(0, 8)}
-                      </span>
-                      <span className="shrink-0 text-xs text-docid-muted">
-                        {a.supervisor?.fullName || a.sector?.name || "—"}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              <div className="mt-3 flex items-center gap-1 text-xs text-docid-secondary">
-                {approvals.length > 4 && <span>{approvals.length} no total</span>}
+          {/* Quick actions */}
+          <div className="docid-panel p-5">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="text-sm font-semibold uppercase tracking-wider text-docid-muted">Ações rápidas</h2>
+                <p className="text-xs text-docid-muted">Atalhos para as tarefas mais frequentes.</p>
               </div>
             </div>
-
-            <div className="docid-panel p-5">
-              <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-docid-muted">
-                <FolderOpen className="h-4 w-4" /> Documentos Recentes
-              </h2>
-              {recentDocs.length === 0 ? (
-                <p className="text-sm text-docid-muted">Nenhum documento recente.</p>
-              ) : (
-                <ul className="space-y-2">
-                  {recentDocs.slice(0, 4).map(d => (
-                    <li key={d.id} className="flex items-center justify-between gap-2 rounded-lg bg-docid-surface-low px-3 py-2 text-sm">
-                      <span className="min-w-0 flex-1 truncate text-xs font-medium text-docid-text">{d.filename}</span>
-                      <span className="shrink-0 text-xs text-docid-muted">{new Date(d.createdAt).toLocaleDateString("pt-AO")}</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              <div className="mt-3 flex items-center gap-1 text-xs text-docid-secondary">
-                {recentDocs.length > 4 && <span>{recentDocs.length} no total</span>}
-              </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              {quickActions.map((action) => (
+                <Link
+                  key={action.label}
+                  to={action.to}
+                  className="flex items-center gap-3 rounded-lg border border-docid-border bg-docid-surface-low px-4 py-3 text-sm font-medium text-docid-text transition hover:bg-docid-surface-high hover:text-docid-primary"
+                >
+                  <div className={`flex h-9 w-9 items-center justify-center rounded-lg bg-docid-surface-high ${action.tone === "primary" ? "text-docid-primary" : action.tone === "secondary" ? "text-docid-secondary" : action.tone === "tertiary" ? "text-docid-tertiary" : "text-docid-muted"}`}>
+                    <action.icon className="h-5 w-5" />
+                  </div>
+                  <span>{action.label}</span>
+                  <ArrowRight className="h-3.5 w-3.5 text-docid-outline shrink-0" />
+                </Link>
+              ))}
             </div>
           </div>
 
-          <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
+          {/* Activity + Identifier status */}
+          <div className="grid gap-6 lg:grid-cols-3">
+            <div className="lg:col-span-2 docid-panel p-5">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h2 className="text-sm font-semibold uppercase tracking-wider text-docid-muted">Actividade (últimos 14 dias)</h2>
+                  <p className="text-xs text-docid-muted">Identificadores gerados e documentos associados por dia.</p>
+                </div>
+                <StatusChip tone={totalIdentifiers > 0 ? "success" : "neutral"}>
+                  {totalIdentifiers} no total
+                </StatusChip>
+              </div>
+              <ActivityChart data={stats.activity || []} />
+            </div>
+
             <div className="docid-panel p-5">
-              <h2 className="mb-4 text-sm font-semibold uppercase tracking-wider text-docid-muted">Estado dos Identificadores</h2>
+              <h2 className="mb-4 text-sm font-semibold uppercase tracking-wider text-docid-muted">Estado dos identificadores</h2>
               <div className="space-y-3">
                 {Object.entries(stats.identifiers.byStatus || {}).length === 0 ? (
                   <p className="text-sm text-docid-muted">Nenhum identificador registado.</p>
                 ) : (
-                  Object.entries(stats.identifiers.byStatus).map(([status, count]) => {
-                    const Icon = STATUS_ICONS[status] || Hash;
-                    const total = stats.identifiers.total || 1;
-                    const pct = Math.round((count / total) * 100);
-                    return (
-                      <div key={status}>
-                        <div className="mb-1 flex items-center justify-between text-sm">
-                          <span className="flex items-center gap-2 text-docid-text">
-                            <Icon className={`h-4 w-4 ${STATUS_TONES[status] || "text-docid-muted"}`} />
-                            {STATUS_LABELS[status] || status}
-                          </span>
-                          <span className="font-semibold text-docid-text">{count}</span>
+                  <>
+                    {Object.entries(stats.identifiers.byStatus).map(([status, count]) => {
+                      const Icon = STATUS_ICONS[status] || Hash;
+                      const pct = totalIdentifiers > 0 ? Math.round((count / totalIdentifiers) * 100) : 0;
+                      return (
+                        <div key={status} className="group">
+                          <div className="mb-1.5 flex items-center justify-between text-sm">
+                            <span className="flex items-center gap-2 text-docid-text">
+                              <Icon className={`h-4 w-4 ${STATUS_TONES[status] || "text-docid-muted"}`} />
+                              {STATUS_LABELS[status] || status}
+                            </span>
+                            <span className="font-semibold text-docid-text">{count}</span>
+                          </div>
+                          <div className="h-2 w-full overflow-hidden rounded-full bg-docid-surface-high">
+                            <div
+                              className={`h-full rounded-full transition-all ${STATUS_TONES[status] || "bg-docid-muted"}`}
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                          <span className="text-xs text-docid-muted">{pct}%</span>
                         </div>
-                        <div className="h-2 overflow-hidden rounded-full bg-docid-surface-high">
-                          <div
-                            className={`h-full rounded-full transition-all ${STATUS_TONES[status] || "bg-docid-muted"}`}
-                            style={{ width: `${pct}%`, backgroundColor: "currentColor" }}
-                          />
-                        </div>
-                      </div>
-                    );
-                  })
+                      );
+                    })}
+                  </>
                 )}
               </div>
             </div>
+          </div>
 
-            <div className="docid-panel p-5">
-              <h2 className="mb-4 text-sm font-semibold uppercase tracking-wider text-docid-muted">
-                Top Categorias
-                {stats.identifiers.byCategory.length > 0 && (
-                  <span className="ml-2 font-normal text-docid-muted">({stats.identifiers.byCategory.length})</span>
-                )}
-              </h2>
-              {stats.identifiers.byCategory.length === 0 ? (
-                <p className="text-sm text-docid-muted">Nenhuma categoria registada.</p>
+          {/* Recent docs + Pending approvals */}
+          <div className="grid gap-6 lg:grid-cols-3">
+            <div className="lg:col-span-2 docid-panel p-5">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h2 className="text-sm font-semibold uppercase tracking-wider text-docid-muted">Documentos recentes</h2>
+                  <p className="text-xs text-docid-muted">Últimos documentos enviados à organização.</p>
+                </div>
+                <Link
+                  to="/documentos"
+                  className="text-xs font-medium text-docid-primary hover:underline"
+                >
+                  Ver todos <ArrowRight className="h-3.5 w-3.5 ml-1" />
+                </Link>
+              </div>
+              {recentDocs.length === 0 ? (
+                <EmptyState>Nenhum documento recente.</EmptyState>
               ) : (
                 <div className="space-y-2">
-                  {stats.identifiers.byCategory.map((cat) => {
-                    const total = stats.identifiers.total || 1;
-                    const pct = Math.round((cat.cnt / total) * 100);
-                    return (
-                      <div key={cat.category} className="flex items-center gap-3">
-                        <span className="w-1/3 truncate text-sm text-docid-text">{cat.category}</span>
-                        <div className="flex-1">
-                          <div className="h-2 overflow-hidden rounded-full bg-docid-surface-high">
-                            <div
-                              className="h-full rounded-full bg-docid-primary-soft"
-                              style={{ width: `${Math.max(pct, 2)}%` }}
-                            />
-                          </div>
-                        </div>
-                        <span className="w-12 text-right text-sm font-semibold text-docid-text">{cat.cnt}</span>
-                        <span className="w-10 text-right text-xs text-docid-muted">{pct}%</span>
+                  {recentDocs.map((d) => (
+                    <div key={d.id} className="flex items-center justify-between gap-3 rounded-lg border border-docid-border bg-docid-surface-low p-3">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-docid-text truncate">{d.filename}</p>
+                        <p className="text-xs text-docid-muted truncate">
+                          {d.uploadedBy ?? "—"} · {new Date(d.createdAt).toLocaleDateString("pt-AO")}
+                        </p>
                       </div>
-                    );
-                  })}
+                      <StatusChip
+                        tone={d.status === "active" ? "success" : d.status === "draft" ? "neutral" : "info"}
+                      >
+                        {d.status.charAt(0).toUpperCase() + d.status.slice(1)}
+                      </StatusChip>
+                    </div>
+                  ))}
                 </div>
               )}
+            </div>
+
+            <div className="docid-panel p-5">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h2 className="text-sm font-semibold uppercase tracking-wider text-docid-muted">Aprovações pendentes</h2>
+                  <p className="text-xs text-docid-muted">Documentos à espera da sua decisão.</p>
+                </div>
+                {approvals.length > 0 && (
+                  <Link
+                    to="/aprovacoes"
+                    className="text-xs font-medium text-docid-primary hover:underline"
+                  >
+                    Ver todas <ArrowRight className="h-3.5 w-3.5 ml-1" />
+                  </Link>
+                )}
+              </div>
+              {approvals.length === 0 ? (
+                <p className="text-sm text-docid-muted">Nenhuma aprovação pendente.</p>
+              ) : (
+                <ul className="space-y-2">
+                  {approvals.slice(0, 5).map((a) => (
+                    <li key={a.id} className="flex items-center justify-between gap-2 rounded-lg border border-docid-border bg-docid-surface-low p-3">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-docid-text truncate">
+                          {a.document?.identifier?.identifier || a.document?.id?.slice(0, 8) || a.id.slice(0, 8)}
+                        </p>
+                        <p className="text-xs text-docid-muted truncate">
+                          {a.supervisor?.fullName || a.sector?.name || "—"}
+                        </p>
+                      </div>
+                      <StatusChip tone="warning">{a.status.charAt(0).toUpperCase() + a.status.slice(1)}</StatusChip>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {approvals.length > 5 && (
+                <p className="mt-3 text-xs text-docid-muted">{approvals.length} no total.</p>
+              )}
+            </div>
+          </div>
+
+          {/* Top categories */}
+          <div className="docid-panel p-5">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-docid-muted">
+                Top categorias {stats.identifiers.byCategory.length > 0 && `(${stats.identifiers.byCategory.length})`}
+              </h2>
+            </div>
+            {stats.identifiers.byCategory.length === 0 ? (
+              <p className="text-sm text-docid-muted">Nenhuma categoria registada.</p>
+            ) : (
+              <div className="space-y-2">
+                {stats.identifiers.byCategory.map((cat) => {
+                  const pct = totalIdentifiers > 0 ? Math.round((cat.cnt / totalIdentifiers) * 100) : 0;
+                  return (
+                    <div key={cat.category} className="flex items-center gap-3">
+                      <span className="w-24 shrink-0 truncate text-sm text-docid-text">{cat.category}</span>
+                      <div className="flex-1 h-2 overflow-hidden rounded-full bg-docid-surface-high">
+                        <div className="h-full rounded-full bg-docid-primary-soft" style={{ width: `${Math.max(pct, 2)}%` }} />
+                      </div>
+                      <span className="w-12 shrink-0 text-right text-sm font-semibold text-docid-text">{cat.cnt}</span>
+                      <span className="w-10 shrink-0 text-right text-xs text-docid-muted">{pct}%</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Offline queue summary */}
+          <div className="docid-panel p-5">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className={`flex h-10 w-10 items-center justify-center rounded-lg bg-docid-surface-highest ${queueOnline ? "text-docid-secondary" : "text-docid-error"}`}>
+                  {queueOnline ? <Upload className="h-5 w-5" /> : <CloudOff className="h-5 w-5" />}
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-docid-text">Fila offline</p>
+                  <p className="text-xs text-docid-muted">
+                    {queueOnline ? "Sincronizado com o servidor" : "Sem ligação — envios em fila"}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${queuePending === 0 ? "bg-docid-secondary/10 text-docid-secondary" : "bg-docid-error/10 text-docid-error"}`}>
+                  {queuePending} pendente{queuePending !== 1 ? "s" : ""}
+                </span>
+                <button
+                  onClick={() => setQueuePanelOpen(true)}
+                  className="text-xs font-medium text-docid-primary hover:underline"
+                >
+                  Ver fila <ArrowRight className="h-3.5 w-3.5 ml-1" />
+                </button>
+              </div>
             </div>
           </div>
         </>

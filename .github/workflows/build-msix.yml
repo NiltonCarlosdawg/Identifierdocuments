@@ -1,0 +1,97 @@
+name: Build MSIX (POC)
+
+on:
+  # dispatch só fica disponível depois de o ficheiro estar na branch default
+  workflow_dispatch:
+  push:
+    paths:
+      - "apps/desktop/src-tauri/msix/**"
+      - ".github/workflows/build-msix.yml"
+
+jobs:
+  msix:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Install deps (desktop)
+        working-directory: apps/desktop
+        run: bun install
+
+      - name: Build frontend
+        working-directory: apps/desktop
+        run: bun run build
+
+      # --no-bundle: só o .exe, sem NSIS/updater (build de Store não tem auto-update)
+      - name: Build app (exe only)
+        working-directory: apps/desktop
+        run: bunx tauri build --no-bundle
+
+      - name: Pack MSIX
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $stage = "msix-stage"
+          New-Item -ItemType Directory -Path $stage | Out-Null
+          Copy-Item "apps/desktop/src-tauri/target/release/docid-desktop.exe" "$stage/DocID.exe"
+          Copy-Item "apps/desktop/src-tauri/msix/AppxManifest.xml" "$stage/AppxManifest.xml"
+          Copy-Item "apps/desktop/src-tauri/msix/Assets" "$stage/Assets" -Recurse
+
+          $sdkRoot = @("C:\Program Files (x86)\Windows Kits\10\bin", "C:\Program Files\Windows Kits\10\bin") |
+            Where-Object { Test-Path $_ }
+          $makeappx = Get-ChildItem $sdkRoot -Recurse -Filter makeappx.exe -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match '\\x64\\' } | Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $makeappx) { throw "makeappx.exe não encontrado" }
+          $bin = $makeappx.DirectoryName
+          "SDK: $bin"
+
+          & "$bin\makeappx.exe" pack /d $stage /p DocID.msix /o
+          if ($LASTEXITCODE -ne 0) { throw "makeappx falhou" }
+
+          & "$bin\makeappx.exe" unpack /p DocID.msix /d msix-unpacked /o
+          if (-not (Test-Path "msix-unpacked/DocID.exe")) { throw "DocID.exe não está no pacote" }
+
+      - name: Sign MSIX (self-signed, sideload only)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $pwd = ConvertTo-SecureString -String "${{ secrets.MSIX_POC_PASSWORD }}" -Force -AsPlainText
+          $cert = New-SelfSignedCertificate -Type Custom -Subject "CN=MilVendas" `
+            -KeyUsage DigitalSignature -FriendlyName "DocID POC" `
+            -CertStoreLocation "Cert:\CurrentUser\My" `
+            -TextExtension @("2.5.29.37={text}1.3.6.1.5.5.7.3.3", "2.5.29.19={text}")
+          Export-PfxCertificate -Cert $cert -FilePath cert.pfx -Password $pwd | Out-Null
+          Export-Certificate -Cert $cert -FilePath DocID-POC.cer | Out-Null
+
+          $sdkRoot = @("C:\Program Files (x86)\Windows Kits\10\bin", "C:\Program Files\Windows Kits\10\bin") |
+            Where-Object { Test-Path $_ }
+          $signtool = Get-ChildItem $sdkRoot -Recurse -Filter signtool.exe -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match '\\x64\\' } | Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $signtool) { throw "signtool.exe não encontrado" }
+
+          & $signtool.FullName sign /fd SHA256 /a /f cert.pfx /p "${{ secrets.MSIX_POC_PASSWORD }}" DocID.msix
+          if ($LASTEXITCODE -ne 0) { throw "signtool falhou" }
+
+          # signtool verify /pa falha sempre aqui: a raiz auto-assinada não é de confiança.
+          # Interessa-nos a assinatura existir e bater certo, não a cadeia.
+          $sig = Get-AuthenticodeSignature DocID.msix
+          "Assinatura: $($sig.Status)"
+          if ($sig.Status -in 'NotSigned', 'HashMismatch', 'NotSupportedFileFormat') {
+            throw "assinatura inválida: $($sig.Status)"
+          }
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docid-msix-poc
+          path: |
+            DocID.msix
+            DocID-POC.cer

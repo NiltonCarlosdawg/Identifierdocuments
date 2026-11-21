@@ -1,15 +1,30 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../../infrastructure/di/container";
-import { PageHeader, Modal, StatusChip, EmptyState, Pagination, OfflineNotice } from "../components/docid-ui";
+import { PageHeader, Modal, StatusChip, EmptyState, OfflineNotice } from "../components/docid-ui";
 import { useOfflineCache } from "../hooks/useOfflineCache";
 import { useCachedAux } from "../hooks/useCachedAux";
 import { mapError } from "../../shared/errors/mapError";
 import { useAuthStore } from "../stores/authStore";
-import { UsersIcon, Search, Plus, Shield, RefreshCw, Upload, Download, CheckCircle2, AlertTriangle, Ban, Mail, Eye } from "lucide-react";
+import { Search, Plus, Shield, RefreshCw, Upload, Download, CheckCircle2, AlertTriangle, Ban, Mail, Eye } from "lucide-react";
 
 interface UserRow { id: string; email: string; fullName: string; isActive: boolean; sectorId: string | null; sectorName: string | null; roles: { id: string; name: string }[]; createdAt: string; }
 interface Sector { id: string; name: string; }
+
+function SkeletonUser() {
+  return (
+    <div className="docid-panel p-4">
+      <div className="flex items-center gap-3">
+        <div className="animate-pulse rounded bg-docid-surface-high h-10 w-10" />
+        <div className="min-w-0 flex-1">
+          <div className="animate-pulse rounded bg-docid-surface-high h-3 w-1/3" />
+          <div className="animate-pulse rounded bg-docid-surface-high h-3 w-1/4 mt-1" />
+        </div>
+        <div className="animate-pulse rounded bg-docid-surface-high h-4 w-20 shrink-0" />
+      </div>
+    </div>
+  );
+}
 
 export default function Users() {
   const navigate = useNavigate();
@@ -49,9 +64,15 @@ export default function Users() {
   const filtered = rows.filter(r => !search || r.fullName.toLowerCase().includes(search.toLowerCase()) || r.email.toLowerCase().includes(search.toLowerCase()));
 
   return (
-    <div>
-      <PageHeader title="Utilizadores" description="Gerir contas de utilizador da organização" actions={<div className="flex gap-2">{canManage && <button onClick={() => setShowInvite(true)} className="docid-button-secondary"><Mail className="h-4 w-4" /> Convidar</button>}{isAdmin && <button onClick={() => setShowImport(true)} className="docid-button-secondary"><Upload className="h-4 w-4" /> Importar CSV</button>}{canManage && <button onClick={() => setShowCreate(true)} className="docid-button-primary"><Plus className="h-4 w-4" /> Criar utilizador</button>}</div>} />
-      {error && <div className="mb-4 rounded-lg border border-docid-error/30 bg-docid-error/10 p-3 text-sm text-docid-error">{error}</div>}
+    <div className="space-y-6">
+      <PageHeader title="Utilizadores" description="Gerir contas de utilizador da organização" actions={
+        <div className="flex gap-2">
+          {canManage && <button onClick={() => setShowInvite(true)} className="docid-button-secondary"><Mail className="h-4 w-4" /> Convidar</button>}
+          {isAdmin && <button onClick={() => setShowImport(true)} className="docid-button-secondary"><Upload className="h-4 w-4" /> Importar CSV</button>}
+          {canManage && <button onClick={() => setShowCreate(true)} className="docid-button-primary"><Plus className="h-4 w-4" /> Criar utilizador</button>}
+        </div>
+      } />
+      {error && <div className="rounded-lg border border-docid-error/30 bg-docid-error/10 px-4 py-3 text-sm text-docid-error">{error}</div>}
       {isStale && <OfflineNotice cachedAt={cachedAt} onRetry={refresh} />}
       <div className="mb-4 flex items-center gap-3">
         <div className="relative flex-1 max-w-xs"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-docid-outline" /><input value={search} onChange={e => setSearch(e.target.value)} className="docid-input w-full pl-9" placeholder="Pesquisar utilizador..." /></div>
@@ -59,29 +80,47 @@ export default function Users() {
       </div>
       <div className="docid-panel overflow-hidden">
         {loading ? (
-          <div className="flex items-center justify-center py-16 text-sm text-docid-muted">A carregar...</div>
+          <div className="grid grid-cols-1 gap-3 p-6">
+            {[...Array(4)].map((_, index) => <SkeletonUser key={index} />)}
+          </div>
         ) : rows.length === 0 ? (
           <EmptyState>Nenhum utilizador encontrado.</EmptyState>
         ) : (
-          <table className="docid-table">
-            <thead><tr><th>Nome</th><th>Email</th><th>Sector</th><th>Roles</th><th>Estado</th><th>Criado em</th><th></th></tr></thead>
-            <tbody>{filtered.map(row => (
-              <tr key={row.id} className="cursor-pointer" onClick={() => navigate(`/utilizadores/${row.id}`)}>
-                <td className="font-medium">{row.fullName}</td>
-                <td className="text-xs text-docid-muted">{row.email}</td>
-                <td className="text-xs">{row.sectorName || "-"}</td>
-                <td><div className="flex flex-wrap gap-1">{(row.roles || []).map(r => <span key={r.id} className="rounded-full bg-docid-surface-high px-2 py-0.5 text-[10px] font-medium text-docid-muted">{r.name}</span>)}</div></td>
-                <td><StatusChip tone={row.isActive ? "success" : "error"}>{row.isActive ? "Activo" : "Inactivo"}</StatusChip></td>
-                <td className="text-xs text-docid-muted">{new Date(row.createdAt).toLocaleDateString("pt-AO")}</td>
-                <td className="flex gap-1">
-                  <button title="Ver perfil" onClick={e => { e.stopPropagation(); navigate(`/utilizadores/${row.id}`); }} className="rounded p-1 text-docid-muted hover:text-docid-text"><Eye className="h-4 w-4" /></button>
-                  {canManage && <button title="Gerir" onClick={e => { e.stopPropagation(); setSelected(row); }} className="rounded p-1 text-docid-muted hover:text-docid-text"><Shield className="h-4 w-4" /></button>}
-                </td>
-              </tr>
-            ))}</tbody>
-          </table>
+          <>
+            <table className="docid-table">
+              <thead>
+                <tr>
+                  <th className="w-48">Nome</th>
+                  <th className="w-48">Email</th>
+                  <th className="w-32">Sector</th>
+                  <th className="w-32">Roles</th>
+                  <th className="w-32">Estado</th>
+                  <th className="w-32">Criado em</th>
+                  <th className="w-24 text-right"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map(row => (
+                  <tr key={row.id} className="cursor-pointer hover:bg-docid-surface-high transition-colors" onClick={() => navigate(`/utilizadores/${row.id}`)}>
+                    <td className="font-medium text-docid-text">{row.fullName}</td>
+                    <td className="text-xs text-docid-muted">{row.email}</td>
+                    <td className="text-xs text-docid-text">{row.sectorName || "-"}</td>
+                    <td><div className="flex flex-wrap gap-1">{(row.roles || []).map(r => <span key={r.id} className="rounded-full bg-docid-primary/10 px-2 py-0.5 text-[10px] font-medium text-docid-primary-soft">{r.name}</span>)}</div></td>
+                    <td><StatusChip tone={row.isActive ? "success" : "error"}>{row.isActive ? "Activo" : "Inactivo"}</StatusChip></td>
+                    <td className="text-xs text-docid-muted">{new Date(row.createdAt).toLocaleDateString("pt-AO")}</td>
+                    <td className="text-right flex gap-1">
+                      <button title="Ver perfil" onClick={e => { e.stopPropagation(); navigate(`/utilizadores/${row.id}`); }} className="rounded-lg p-1.5 text-docid-muted hover:text-docid-text hover:bg-docid-surface-high transition-colors"><Eye className="h-4 w-4" /></button>
+                      {canManage && <button title="Gerir" onClick={e => { e.stopPropagation(); setSelected(row); }} className="rounded-lg p-1.5 text-docid-muted hover:text-docid-text hover:bg-docid-surface-high transition-colors"><Shield className="h-4 w-4" /></button>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="mt-4 flex items-center justify-between border-t border-docid-border px-4 py-3 text-sm text-docid-muted">
+              <span>{meta?.total ?? 0} utilizador(es)</span>
+            </div>
+          </>
         )}
-        <Pagination totalLabel={`${meta?.total ?? 0} utilizador(es)`} />
       </div>
       {showCreate && <CreateUserModal sectors={sectors} onClose={() => setShowCreate(false)} onDone={() => { setShowCreate(false); refresh(); }} />}
       {showInvite && <InviteUserModal sectors={sectors} isAdmin={isAdmin} onClose={() => setShowInvite(false)} onDone={() => { setShowInvite(false); refresh(); }} />}
@@ -299,13 +338,13 @@ function ImportUsersModal({ onClose, onDone }: { onClose: () => void; onDone: ()
         {report && (
           <div className="space-y-3">
             <div className="grid grid-cols-3 gap-2">
-              <div className="rounded-lg bg-docid-surface-low p-3 text-center"><p className="text-2xl font-bold text-docid-success">{report.created.length}</p><p className="text-xs text-docid-muted">Criados</p></div>
+              <div className="rounded-lg bg-docid-surface-low p-3 text-center"><p className="text-2xl font-bold text-docid-secondary">{report.created.length}</p><p className="text-xs text-docid-muted">Criados</p></div>
               <div className="rounded-lg bg-docid-surface-low p-3 text-center"><p className="text-2xl font-bold text-docid-secondary">{report.skipped.length}</p><p className="text-xs text-docid-muted">Ignorados</p></div>
               <div className="rounded-lg bg-docid-surface-low p-3 text-center"><p className="text-2xl font-bold text-docid-error">{report.errors.length}</p><p className="text-xs text-docid-muted">Erros</p></div>
             </div>
             {report.created.length > 0 && (
               <div>
-                <p className="mb-1 flex items-center gap-1 text-xs font-semibold text-docid-success"><CheckCircle2 className="h-3.5 w-3.5" /> Credenciais geradas — distribua aos utilizadores</p>
+                <p className="mb-1 flex items-center gap-1 text-xs font-semibold text-docid-secondary"><CheckCircle2 className="h-3.5 w-3.5" /> Credenciais geradas — distribua aos utilizadores</p>
                 <div className="max-h-40 overflow-auto rounded-lg border border-docid-border">
                   <table className="docid-table"><thead><tr><th>Email</th><th>Nome</th><th>Password</th></tr></thead><tbody>{report.created.map(u => <tr key={u.email}><td className="text-xs">{u.email}</td><td className="text-xs">{u.fullName}</td><td className="font-mono text-xs">{u.password}</td></tr>)}</tbody></table>
                 </div>

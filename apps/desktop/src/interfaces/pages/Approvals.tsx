@@ -7,6 +7,29 @@ import { ThumbsUp, ThumbsDown } from "lucide-react";
 
 interface ApprovalRow { id: string; type: string; status: string; notes: string | null; requestedAt: string; resolvedAt: string | null; sector: { id: string; name: string } | null; supervisor: { id: string; fullName: string } | null; requesterId: string | null; document: { id: string; uploadedBy: string | null; identifier: { identifier: string; category: { name: string } } | null } | null; }
 
+const TYPE_LABELS: Record<string, string> = {
+  access_request: "Pedido de Acesso",
+  cross_sector: "Partilha Cross-Sector",
+};
+
+function SkeletonApproval() {
+  return (
+    <div className="docid-panel p-5 space-y-4">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0 flex-1">
+          <div className="animate-pulse rounded bg-docid-surface-high h-4 w-1/3 font-mono" />
+          <div className="animate-pulse rounded bg-docid-surface-high h-3 w-1/2 mt-1" />
+        </div>
+      </div>
+      <div className="space-y-2 text-xs">
+        {[1, 2, 3].map(index => (
+          <div key={index} className="animate-pulse rounded bg-docid-surface-high h-3 w-2/3" />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function Approvals() {
   const [rows, setRows] = useState<ApprovalRow[]>([]);
   const [tab, setTab] = useState<"pending" | "resolved">("pending");
@@ -25,21 +48,38 @@ export default function Approvals() {
     onData: setRows,
   });
 
+  const pendingCount = rows.filter(r => r.status === "pending").length;
+
   return (
-    <div>
-      <PageHeader title="Aprovações" description="Documentos pendentes de aprovação entre sectores" />
-      {error && <div className="mb-4 rounded-lg border border-docid-error/30 bg-docid-error/10 p-3 text-sm text-docid-error">{error}</div>}
+    <div className="space-y-6">
+      <PageHeader
+        title="Aprovações"
+        description="Documentos pendentes de aprovação entre sectores"
+        actions={
+          <div className="flex gap-2">
+            <button onClick={() => setTab("pending")} className={`rounded-lg px-4 py-2 text-sm font-medium transition ${tab === "pending" ? "bg-docid-primary text-white" : "border border-docid-border text-docid-muted hover:bg-docid-surface-high"}`}>
+              Pendentes {pendingCount > 0 && <span className="ml-2 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-docid-error px-1 text-[10px] font-bold text-white">{pendingCount}</span>}
+            </button>
+            <button onClick={() => setTab("resolved")} className={`rounded-lg px-4 py-2 text-sm font-medium transition ${tab === "resolved" ? "bg-docid-primary text-white" : "border border-docid-border text-docid-muted hover:bg-docid-surface-high"}`}>
+              Histórico
+            </button>
+          </div>
+        }
+      />
+      {error && <div className="rounded-lg border border-docid-error/30 bg-docid-error/10 px-4 py-3 text-sm text-docid-error">{error}</div>}
       {isStale && <OfflineNotice cachedAt={cachedAt} onRetry={refresh} />}
-      <div className="mb-4 flex gap-2">
-        <button onClick={() => setTab("pending")} className={`rounded-lg px-4 py-2 text-sm font-medium transition ${tab === "pending" ? "bg-docid-primary text-white" : "border border-docid-border text-docid-muted hover:bg-docid-surface-high"}`}>Pendentes</button>
-        <button onClick={() => setTab("resolved")} className={`rounded-lg px-4 py-2 text-sm font-medium transition ${tab === "resolved" ? "bg-docid-primary text-white" : "border border-docid-border text-docid-muted hover:bg-docid-surface-high"}`}>Histórico</button>
-      </div>
       <div className="space-y-3">
         {loading ? (
-          <div className="flex items-center justify-center py-16 text-sm text-docid-muted">A carregar...</div>
+          <div className="grid grid-cols-1 gap-3 p-6">
+            {[...Array(3)].map((_, index) => <SkeletonApproval key={index} />)}
+          </div>
         ) : rows.length === 0 ? (
           <EmptyState>{tab === "pending" ? "Nenhuma aprovação pendente." : "Nenhum histórico de aprovações."}</EmptyState>
-        ) : rows.map(row => <ApprovalCard key={row.id} row={row} onResolved={refresh} />)}
+        ) : (
+          <>
+            {rows.map(row => <ApprovalCard key={row.id} row={row} onResolved={refresh} />)}
+          </>
+        )}
       </div>
     </div>
   );
@@ -64,13 +104,15 @@ function ApprovalCard({ row, onResolved }: { row: ApprovalRow; onResolved: () =>
   const label = row.type === "access_request" ? "Pedido de Acesso" : row.type === "cross_sector" ? "Partilha Cross-Sector" : "Aprovação";
   const docId = row.document?.identifier?.identifier || row.document?.id?.slice(0, 8) || "-";
 
+  const statusTone = row.status === "pending" ? "warning" as const : row.status === "approved" ? "success" as const : "error" as const;
+
   return (
     <div className="docid-panel p-5">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 mb-1">
             <span className="font-mono text-sm font-semibold">{docId}</span>
-            <StatusChip tone={row.status === "pending" ? "warning" : row.status === "approved" ? "success" : "error"}>
+            <StatusChip tone={statusTone}>
               {row.status === "pending" ? "Pendente" : row.status === "approved" ? "Aprovado" : "Rejeitado"}
             </StatusChip>
           </div>
@@ -79,13 +121,15 @@ function ApprovalCard({ row, onResolved }: { row: ApprovalRow; onResolved: () =>
             {row.sector && <span> · Sector: {row.sector.name}</span>}
             {row.supervisor && <span> · Supervisor: {row.supervisor.fullName}</span>}
           </p>
-          <p className="text-xs text-docid-muted mt-1">Pedido: {new Date(row.requestedAt).toLocaleString("pt-AO")}{row.resolvedAt && ` · Resolvido: ${new Date(row.resolvedAt).toLocaleString("pt-AO")}`}</p>
+          <p className="text-xs text-docid-muted mt-1">
+            Pedido: {new Date(row.requestedAt).toLocaleString("pt-AO")}{row.resolvedAt && ` · Resolvido: ${new Date(row.resolvedAt).toLocaleString("pt-AO")}`}
+          </p>
           {row.notes && <p className="mt-2 text-sm text-docid-muted italic">"{row.notes}"</p>}
         </div>
         {row.status === "pending" && !showResolve && (
           <div className="flex gap-2 shrink-0">
-            <button onClick={() => { setAction("approved"); setShowResolve(true); }} className="docid-button-primary bg-docid-secondary"><ThumbsUp className="h-4 w-4" /> Aprovar</button>
-            <button onClick={() => { setAction("rejected"); setShowResolve(true); }} className="docid-button-secondary text-docid-error"><ThumbsDown className="h-4 w-4" /> Rejeitar</button>
+            <button onClick={() => { setAction("approved"); setShowResolve(true); }} className="flex items-center gap-2 rounded-lg bg-docid-secondary px-3 py-2 text-sm font-medium text-white transition hover:brightness-110"><ThumbsUp className="h-4 w-4" /> Aprovar</button>
+            <button onClick={() => { setAction("rejected"); setShowResolve(true); }} className="flex items-center gap-2 rounded-lg border border-docid-border px-3 py-2 text-sm font-medium text-docid-text transition hover:bg-docid-surface-high"><ThumbsDown className="h-4 w-4" /> Rejeitar</button>
           </div>
         )}
       </div>
