@@ -37,10 +37,21 @@ async function ensureConsistency(client: postgres.Sql) {
   if (!hasTags) missing.push("documents.tags (migration 0016)");
 
   if (missing.length > 0) {
-    console.log(`[DB CHECK] Schema inconsistente — objetos faltando: ${missing.join(", ")}`);
-    console.log("[DB CHECK] Limpando migrações marcadas como aplicadas para re-executar...");
-    await client`DELETE FROM drizzle.__drizzle_migrations`;
-    console.log("[DB CHECK] Tracker limpo. Todas as migrações serão re-aplicadas.");
+    // Numa base vazia o tracker ainda não existe — é o próprio drizzle que o cria.
+    const [{ trackerExists }] = await client`
+      SELECT EXISTS(
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'drizzle' AND table_name = '__drizzle_migrations'
+      ) as "trackerExists"`;
+
+    if (trackerExists) {
+      console.log(`[DB CHECK] Schema inconsistente — objetos faltando: ${missing.join(", ")}`);
+      console.log("[DB CHECK] Limpando migrações marcadas como aplicadas para re-executar...");
+      await client`DELETE FROM drizzle.__drizzle_migrations`;
+      console.log("[DB CHECK] Tracker limpo. Todas as migrações serão re-aplicadas.");
+    } else {
+      console.log("[DB CHECK] Base vazia — tracker ainda não existe; nada a limpar.");
+    }
   }
 }
 

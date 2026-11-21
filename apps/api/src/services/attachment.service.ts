@@ -8,6 +8,7 @@ import { verifyDocumentContainsIdentifier } from "./document.service";
 import { getSharedDocIds } from "./identifier.service";
 import type { AuthPayload } from "../middleware/auth";
 import { getFreshRoles } from "../middleware/auth";
+import { isTenantAdmin } from "./access-decision.service";
 import { tryEnqueueThumbnail } from "../jobs/queues";
 import { withIdempotency } from "../lib/idempotency";
 
@@ -465,15 +466,18 @@ export async function attachAttachment(
   });
 }
 
-export async function canAccessDocument(tx: DB, auth: AuthPayload, sectorId: string | null, visibility: string | null, docId: string | null, uploadedBy: string | null = null): Promise<{ allowed: boolean; restricted: boolean }> {
+export async function canAccessDocument(tx: DB, auth: AuthPayload, sectorId: string | null, visibility: string | null, docId: string | null, uploadedBy: string | null = null, roleNames?: string[]): Promise<{ allowed: boolean; restricted: boolean }> {
   const v = visibility ?? "public";
 
   if (v === "public") return { allowed: true, restricted: false };
 
+  const roles = roleNames ?? await getFreshRoles(auth.userId, auth.tenantId, tx);
+  // ORG_ADMIN tem poder total sobre os dados do seu tenant, incluindo documentos
+  // sector_only de outros sectores. O tenant já foi imposto pela query do chamador.
+  if (isTenantAdmin(roles)) return { allowed: true, restricted: false };
+
   // sector_only: o autor do upload mantém acesso de cortesia apenas quando o
-  // documento pertence ao seu sector (ou não tem sector atribuído). Um documento
-  // sector_only noutro sector continua a exigir share/pedido de acesso — tal
-  // como qualquer outro utilizador, incluindo ORG_ADMIN.
+  // documento pertence ao seu sector (ou não tem sector atribuído).
   if (uploadedBy && auth.userId === uploadedBy && (sectorId == null || sectorId === auth.sectorId)) {
     return { allowed: true, restricted: false };
   }
@@ -632,7 +636,7 @@ export async function updateDocumentTags(
 export async function listDocumentsForApi(
   tx: DB,
   auth: AuthPayload,
-  opts: { tenantId: string; identifierId?: string; page: number; limit: number },
+  opts: { tenantId: string; identifierId?: string; page: number; limit: number; roleNames?: string[] },
 ) {
   const conditions = [eq(documents.tenantId, opts.tenantId)];
   if (opts.identifierId) conditions.push(eq(documents.identifierId, opts.identifierId));
@@ -649,8 +653,13 @@ export async function listDocumentsForApi(
     orderBy: [desc(documents.createdAt)],
   });
 
-  const sharedDocIds = await getSharedDocIds(tx, auth);
+  const roles = opts.roleNames ?? (allRows.some((d) => (d.identifier?.visibility ?? "public") !== "public")
+    ? await getFreshRoles(auth.userId, auth.tenantId, tx)
+    : []);
+  const isAdmin = isTenantAdmin(roles);
+  const sharedDocIds = isAdmin ? new Set<string>() : await getSharedDocIds(tx, auth);
   const visibleRows = allRows.filter((d) => {
+    if (isAdmin) return true;
     const visibility = d.identifier?.visibility ?? "public";
     if (d.uploadedBy === auth.userId) return true;
     if (visibility === "public") return true;

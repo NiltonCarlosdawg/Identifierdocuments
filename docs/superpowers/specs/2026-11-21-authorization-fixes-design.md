@@ -153,3 +153,15 @@ de auditoria. O objetivo é corrigir apenas esses três, mantendo os fluxos leg�
 - Se `clientIp` é lido do ctx ou dos headers no `PATCH /approvals/:id` (o handler já
   desestrutura `headers`).
 - Como lidar com `notes` no metadata (presente só quando rejeitado).
+
+## Estado final (2026-11-21)
+
+Implementado no branch `fix/authorization-fixes` (commits `734575b..ee20177`), com quatro
+correções e 15 testes unitários locais a passar, mais `bunx tsc --noEmit` limpo.
+Revisão final: sem achados Critical/Important; três minors diferidos (corrida concorrente
+na criação de partilha, filtragem em memória da listagem de aprovações, ausência de teste
+com `fake tx` para o `syncCounterpart`/auditoria).
+
+Risco em aberto do produto: num tenant com um único admin/supervisor, se essa pessoa for o
+requerente, o pedido fica pendente por não poder auto-aprovar. Não há via de escape
+implementada — decisão pendente do dono do produto.
