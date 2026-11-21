@@ -2,13 +2,13 @@ import Elysia from "elysia";
 import { Type as t } from "@sinclair/typebox";
 import { db } from "../db";
 import { approvals, documents, documentShares, auditLogs, users } from "../db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
 import { withTenant } from "../db/withTenant";
 import { requireAuth, getFreshRoles } from "../middleware/auth";
 import { notify } from "../services/notification.service";
 import { safeError } from "../lib/errors";
 import { withIdempotency } from "../lib/idempotency";
-import { approvalAuditEntry, canResolveApproval, canSeeApproval } from "../services/access-decision.service";
+import { approvalAuditEntry, canResolveApproval, canSeeApproval, shouldCreateShare, syncCounterpart } from "../services/access-decision.service";
 
 export const approvalsModule = new (Elysia as any)({ prefix: "/approvals" })
   .use(requireAuth())
@@ -130,18 +130,28 @@ export const approvalsModule = new (Elysia as any)({ prefix: "/approvals" })
             }
 
             if (existing.type === "access_request" && existing.requesterId) {
-              await tx.insert(documentShares).values({
-                documentId: approval.documentId,
-                sharedWithUserId: existing.requesterId,
-                sharedBy: auth!.userId,
-                status: "active",
+              const existingShare = await tx.query.documentShares.findFirst({
+                where: and(
+                  eq(documentShares.documentId, approval.documentId),
+                  eq(documentShares.sharedWithUserId, existing.requesterId),
+                  eq(documentShares.status, "active"),
+                  isNull(documentShares.revokedAt),
+                ),
               });
-              await notify(tx, {
-                type: "document:shared",
-                userId: existing.requesterId,
-                tenantId,
-                payload: { documentId: approval.documentId, identifier: identifierStr },
-              });
+              if (shouldCreateShare(existingShare)) {
+                await tx.insert(documentShares).values({
+                  documentId: approval.documentId,
+                  sharedWithUserId: existing.requesterId,
+                  sharedBy: auth!.userId,
+                  status: "active",
+                });
+                await notify(tx, {
+                  type: "document:shared",
+                  userId: existing.requesterId,
+                  tenantId,
+                  payload: { documentId: approval.documentId, identifier: identifierStr },
+                });
+              }
             }
           }
 
@@ -177,6 +187,16 @@ export const approvalsModule = new (Elysia as any)({ prefix: "/approvals" })
                 notes: body.notes,
                 status: body.status,
               },
+            });
+          }
+
+          if (existing.type === "access_request" && existing.requesterId) {
+            await syncCounterpart(tx, {
+              documentId: approval.documentId,
+              requesterId: existing.requesterId,
+              status: body.status === "approved" ? "approved" : "denied",
+              resolvedBy: auth!.userId,
+              resolvedAt: now,
             });
           }
 

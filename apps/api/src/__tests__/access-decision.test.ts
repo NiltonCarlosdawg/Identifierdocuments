@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { approvalAuditEntry, canResolveApproval, canSeeApproval, isTenantAdmin } from "../services/access-decision.service";
+import { approvalAuditEntry, canResolveApproval, canSeeApproval, counterpartStatuses, isTenantAdmin, shouldCreateShare } from "../services/access-decision.service";
 
 describe("isTenantAdmin", () => {
   test("admin do tenant tem poder total", () => {
@@ -47,5 +47,21 @@ describe("approvalAuditEntry", () => {
     expect(denied.resource).toBe("approvals");
     expect(denied.resourceId).toBe("a1");
     expect(JSON.parse(denied.metadata).notes).toBe("motivo");
+  });
+});
+
+describe("counterpartStatuses", () => {
+  test("aprovado actualiza as duas tabelas", () => {
+    expect(counterpartStatuses("approved")).toEqual({ accessRequestStatus: "approved", approvalStatus: "approved" });
+  });
+  test("rejeitado usa os estados de cada tabela", () => {
+    expect(counterpartStatuses("denied")).toEqual({ accessRequestStatus: "denied", approvalStatus: "rejected" });
+  });
+});
+
+describe("shouldCreateShare", () => {
+  test("não cria partilha duplicada", () => {
+    expect(shouldCreateShare(null)).toBe(true);
+    expect(shouldCreateShare({ id: "share-1" })).toBe(false);
   });
 });
