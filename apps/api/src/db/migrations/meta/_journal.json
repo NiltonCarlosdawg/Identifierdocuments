@@ -141,6 +141,13 @@
       "when": 1794993643979,
       "tag": "0019_auth_lookup",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1795330000000,
+      "tag": "0020_auth_lookup_rls",
+      "breakpoints": true
     }
   ]
 }
