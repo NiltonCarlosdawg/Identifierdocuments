@@ -69,7 +69,14 @@ async function checkoutToken(): Promise<string> {
   return res.body.token;
 }
 
-function orderBody(planId = paidPlanId): AnyBody {
+type OrderFields = {
+  planId: string;
+  paymentMethod: "multicaixa" | "transfer" | "send_order";
+  phone: string;
+  contactEmail: string;
+};
+
+function orderBody(planId = paidPlanId): OrderFields {
   return {
     planId,
     paymentMethod: "multicaixa",
@@ -315,10 +322,29 @@ describe("criação de pedidos", () => {
     }
   });
 
+  test("sem telefone ou email de contacto: 422 VALIDATION_ERROR e nenhum pedido criado", async () => {
+    const countSql = sql<number>`count(*)::int`;
+    const [before] = await db.select({ n: countSql }).from(orders).where(eq(orders.tenantId, tenantId));
+
+    for (const campo of ["phone", "contactEmail"]) {
+      const body: AnyBody = { ...orderBody(), tenantSlug: SLUG };
+      delete body[campo];
+      const res = await api<any>("/orders", { method: "POST", body: JSON.stringify(body) });
+      expect(res.status).toBe(422);
+      expect(res.body.error).toEqual({
+        code: "VALIDATION_ERROR",
+        message: "Dados inválidos.",
+      });
+    }
+
+    const [after] = await db.select({ n: countSql }).from(orders).where(eq(orders.tenantId, tenantId));
+    expect(after.n).toBe(before.n);
+  });
+
   test("sem SMTP, createOrder não lança e devolve log", async () => {
     // Import dinâmico: o serviço é testável sem HTTP.
     const { createOrder } = await import("../services/order.service");
-    const result = await createOrder({ ...orderBody(), tenantSlug: SLUG } as any);
+    const result = await createOrder({ ...orderBody(), tenantSlug: SLUG });
     expect(result.status).toBe("pending");
     expect(result.orderId).toBeTruthy();
 

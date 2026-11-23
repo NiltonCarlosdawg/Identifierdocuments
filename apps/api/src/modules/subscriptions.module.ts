@@ -13,6 +13,15 @@ const LANDING_URL = (process.env.LANDING_URL || "http://localhost:5173").replace
 
 export const subscriptionsModule = new (Elysia as any)()
 
+  // O onError global do index é ignorado por erros de validação de body
+  // (Elysia chama handleError com skipGlobal=true), daí o shape idêntico aqui.
+  .onError(({ code, set }: any) => {
+    if (code === "VALIDATION") {
+      set.status = 422;
+      return { error: { code: "VALIDATION_ERROR", message: "Dados inválidos." } };
+    }
+  })
+
   .get("/subscriptions/checkout", async ({ query, set }: any) => {
     let claims: { tenantId: string; jti: string };
     try {
@@ -61,8 +70,8 @@ export const subscriptionsModule = new (Elysia as any)()
         t.Literal("transfer"),
         t.Literal("send_order"),
       ]),
-      phone: t.Optional(t.String()),
-      contactEmail: t.Optional(t.String({ format: "email" })),
+      phone: t.String(),
+      contactEmail: t.String({ format: "email" }),
     }),
     detail: { summary: "Criar pedido de subscrição (público)", tags: ["Subscrições"] },
   })

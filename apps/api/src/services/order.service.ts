@@ -51,8 +51,8 @@ export interface CreateOrderInput {
   tenantEmail?: string;
   planId: string;
   paymentMethod: PaymentMethod;
-  phone?: string;
-  contactEmail?: string;
+  phone: string;
+  contactEmail: string;
 }
 
 export async function createOrder(input: CreateOrderInput): Promise<{ orderId: string; status: "pending" }> {
@@ -96,8 +96,8 @@ export async function createOrder(input: CreateOrderInput): Promise<{ orderId: s
       tenantId,
       planId: plan.id,
       paymentMethod: input.paymentMethod,
-      phone: input.phone ?? null,
-      contactEmail: input.contactEmail ?? null,
+      phone: input.phone,
+      contactEmail: input.contactEmail,
       checkoutJti: jti,
     }).returning();
   } catch (err) {
