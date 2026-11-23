@@ -1,0 +1,87 @@
+import { and, eq, inArray, isNotNull, lt, sql } from "drizzle-orm";
+import { db } from "../db";
+import { organizations } from "../db/schema";
+import { logger } from "../lib/logger";
+import { sendProviderExpiryAlertEmail, sendRenewalReminderEmail } from "../services/mailer.service";
+import { getTenantContactEmail } from "../services/subscription.service";
+
+interface ExpiringTenant {
+  tenantId: string;
+  name: string;
+  daysLeft: number;
+  contactEmail: string | null;
+  expiresAt: Date;
+}
+
+const daysLeft = (now: Date) => {
+  const dia = now.toISOString(); // postgres-js não aceita Date directamente em parâmetro SQL cru
+  return sql<number>`(date_trunc('day', ${organizations.subscriptionExpiresAt})::date - date_trunc('day', ${dia}::timestamptz)::date)::int`;
+};
+
+async function findByDaysLeft(now: Date, days: number[], dueOnly = false): Promise<ExpiringTenant[]> {
+  const filters = [
+    eq(organizations.subscriptionStatus, "paid"),
+    isNotNull(organizations.subscriptionExpiresAt),
+    inArray(daysLeft(now), days),
+  ];
+  if (dueOnly) filters.push(lt(organizations.subscriptionExpiresAt, now));
+  const rows = await db.select({
+    tenantId: organizations.id,
+    name: organizations.name,
+    daysLeft: daysLeft(now),
+    expiresAt: organizations.subscriptionExpiresAt,
+  }).from(organizations).where(and(...filters));
+
+  return Promise.all(rows.map(async (row) => ({
+    ...row,
+    contactEmail: await getTenantContactEmail(row.tenantId),
+  })));
+}
+
+export function findExpiringTenants(now: Date): Promise<ExpiringTenant[]> {
+  return findByDaysLeft(now, [30, 14, 2]);
+}
+
+export async function flipExpiredTenants(now: Date): Promise<number> {
+  const rows = await db.update(organizations)
+    .set({ subscriptionStatus: "expired" })
+    .where(and(
+      eq(organizations.subscriptionStatus, "paid"),
+      isNotNull(organizations.subscriptionExpiresAt),
+      lt(organizations.subscriptionExpiresAt, now),
+    ))
+    .returning({ id: organizations.id });
+  return rows.length;
+}
+
+export async function runRenewalSweep(now: Date): Promise<{ reminded: number; expired: number }> {
+  // Capturar antes do flip: depois dele estas organizações deixam de ser "paid".
+  const dueToday = await findByDaysLeft(now, [0], true);
+  const expiring = await findByDaysLeft(now, [30, 14, 2]);
+  const expired = await flipExpiredTenants(now);
+
+  let reminded = 0;
+  for (const org of expiring) {
+    if (!org.contactEmail) continue;
+    try {
+      await sendRenewalReminderEmail(org.contactEmail, {
+        tenantName: org.name, expiresAt: org.expiresAt!, daysLeft: org.daysLeft,
+      });
+      reminded++;
+    } catch (err) {
+      logger.warn({ err, tenantId: org.tenantId }, "[SWEEP] Falha ao enviar lembrete de renovação.");
+    }
+  }
+
+  for (const org of dueToday) {
+    try {
+      await sendProviderExpiryAlertEmail(process.env.PROVIDER_NOTIFY_EMAIL || "", {
+        tenantId: org.tenantId, tenantName: org.name, contactEmail: org.contactEmail,
+      });
+    } catch (err) {
+      logger.warn({ err, tenantId: org.tenantId }, "[SWEEP] Falha ao alertar a provedora.");
+    }
+  }
+
+  return { reminded, expired };
+}

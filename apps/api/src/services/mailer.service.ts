@@ -165,6 +165,66 @@ export async function sendOrderRejectedEmail(to: string, info: OrderRejectedInfo
   return true;
 }
 
+const datePT = (d: Date) => new Intl.DateTimeFormat("pt-PT", {
+  timeZone: "UTC", day: "numeric", month: "long", year: "numeric",
+}).format(d);
+
+export interface RenewalReminderInfo {
+  tenantName: string;
+  expiresAt: Date;
+  daysLeft: number;
+}
+
+export async function sendRenewalReminderEmail(to: string, info: RenewalReminderInfo): Promise<boolean> {
+  const t = getTransporter();
+  const data = datePT(info.expiresAt);
+  const bodyText = `Olá,\n\nA subscrição da organização "${info.tenantName}" no DocID renova a ${data} ` +
+    `(faltam ${info.daysLeft} dias).\n\nConfirme os seus dados de pagamento para não perder o acesso.\n`;
+  if (!t) {
+    logger.warn({ to }, "SMTP não configurado — lembrete de renovação não enviado por email.");
+    if (!IS_PROD) logger.info(`Lembrete de renovação para ${to}: ${info.tenantName} renova a ${data}`);
+    return false;
+  }
+  await t.sendMail({
+    from: SMTP_FROM,
+    to,
+    subject: `DocID — A sua subscrição renova a ${data}`,
+    text: bodyText,
+    html: `<p>Olá,</p><p>A subscrição da organização <strong>${info.tenantName}</strong> no DocID renova a <strong>${data}</strong> (faltam ${info.daysLeft} dias).</p>` +
+      `<p>Confirme os seus dados de pagamento para não perder o acesso.</p>`,
+  });
+  return true;
+}
+
+export interface ProviderExpiryAlertInfo {
+  tenantId: string;
+  tenantName: string;
+  contactEmail: string | null;
+}
+
+export async function sendProviderExpiryAlertEmail(to: string, info: ProviderExpiryAlertInfo): Promise<boolean> {
+  const t = getTransporter();
+  const data = datePT(new Date());
+  const bodyText = `Olá,\n\nA subscrição da organização "${info.tenantName}" no DocID expirou hoje (${data}).\n\n` +
+    `ID da organização: ${info.tenantId}\n` +
+    `Email de contacto: ${info.contactEmail || "não indicado"}\n`;
+  if (!t || !to) {
+    logger.warn({ to: to || "(não configurado)" }, "SMTP/provedora sem configuração — alerta de expiração não enviado.");
+    if (!IS_PROD) logger.info(`Alerta à provedora: subscrição de ${info.tenantName} expirada (${info.tenantId}) — contacto ${info.contactEmail || "não indicado"}`);
+    return false;
+  }
+  await t.sendMail({
+    from: SMTP_FROM,
+    to,
+    subject: `DocID — Subscrição expirada: ${info.tenantName}`,
+    text: bodyText,
+    html: `<p>Olá,</p><p>A subscrição da organização <strong>${info.tenantName}</strong> no DocID expirou hoje (<strong>${data}</strong>).</p>` +
+      `<p>ID da organização: <strong>${info.tenantId}</strong><br/>` +
+      `Email de contacto: ${info.contactEmail || "não indicado"}</p>`,
+  });
+  return true;
+}
+
 export async function sendResetPasswordEmail(to: string, token: string): Promise<void> {
   const t = getTransporter();
   if (!t) {
