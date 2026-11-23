@@ -8,6 +8,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "bun src/db/migrate.ts",
     "db:seed": "bun src/db/seed.ts",
+    "provider:create": "bun src/db/create-provider-user.ts",
     "db:studio": "drizzle-kit studio",
     "test": "bun test"
   },

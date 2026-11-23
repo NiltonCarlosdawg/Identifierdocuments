@@ -78,6 +78,57 @@ export function requireAuth() {
     });
 }
 
+export interface ProviderPayload {
+  id: string;
+  email: string;
+}
+
+const PROVIDER_JWT_VERIFY_OPTS = { issuer: "docid-api", audience: "docid-provider" };
+
+export function signProviderToken(payload: ProviderPayload): Promise<string> {
+  return new SignJWT({ ...payload, scope: "provider" })
+    .setProtectedHeader({ alg: "HS256" })
+    .setIssuedAt()
+    .setIssuer("docid-api")
+    .setAudience("docid-provider")
+    .setExpirationTime("8h")
+    .sign(JWT_SECRET);
+}
+
+function validateProviderPayload(raw: unknown): ProviderPayload {
+  const p = raw as Record<string, unknown>;
+  if (p.scope !== "provider" || typeof p.id !== "string" || !p.id || typeof p.email !== "string" || !p.email) {
+    throw new Error("Invalid provider token");
+  }
+  return { id: p.id, email: p.email };
+}
+
+const providerMiddleware = new (Elysia as any)()
+  .derive({ as: "scoped" }, async (ctx: any): Promise<{ provider: ProviderPayload | null }> => {
+    const authHeader = ctx.headers?.authorization;
+    if (!authHeader?.startsWith("Bearer ")) return { provider: null };
+    try {
+      const { payload } = await jwtVerify(authHeader.slice(7), JWT_SECRET, PROVIDER_JWT_VERIFY_OPTS);
+      return { provider: validateProviderPayload(payload) };
+    } catch (err) {
+      console.warn("[AUTH] Provider token verification failed:", err instanceof Error ? err.message : err);
+      return { provider: null };
+    }
+  });
+
+export function requireProvider() {
+  return (app: any) => app
+    .use(providerMiddleware)
+    .guard({
+      beforeHandle: (ctx: any) => {
+        if (!ctx.provider) {
+          ctx.set.status = 401;
+          return { error: { code: "UNAUTHORIZED", message: "Autenticação necessária." } };
+        }
+      },
+    });
+}
+
 /** Papéis frescos do utilizador.
  *
  * `executor` permite correr dentro de uma transacção aberta passando o `tx`:
