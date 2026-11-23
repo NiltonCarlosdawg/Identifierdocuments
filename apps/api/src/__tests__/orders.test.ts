@@ -12,7 +12,7 @@ import { decodeJwt, SignJWT } from "jose";
 
 import { db } from "../db";
 import { withTenant } from "../db/withTenant";
-import { auditLogs, documents, identifiers, orders, organizations, plans, providerUsers, roles, sectors, userRoles, users } from "../db/schema";
+import { auditLogs, documents, identifiers, orders, organizations, plans, providerUsers, roles, sectors, userRoles, users , licenses } from "../db/schema";
 import { hashPassword } from "../lib/password";
 import { signProviderToken } from "../middleware/auth";
 import { checkUploadLimit } from "../services/subscription.service";
@@ -179,6 +179,7 @@ beforeAll(async () => {
   });
   expect(created.status).toBe(200);
   tenantId = created.body.data.id;
+  await db.delete(licenses).where(eq(licenses.tenantId, tenantId));
 
   const login = await api<any>("/auth/login", {
     method: "POST",
@@ -529,6 +530,7 @@ describe("suspensão e reativação de tenants (painel)", () => {
   }
 
   test("GET /provider/tenants: status derivado (lazy), planName e userCount", async () => {
+    await db.delete(licenses).where(eq(licenses.tenantId, tenantId));
     await setOrg({
       planId: paidPlanId, subscriptionStatus: "paid",
       subscriptionExpiresAt: new Date(Date.now() - DAY_MS), // paid vencido => expired

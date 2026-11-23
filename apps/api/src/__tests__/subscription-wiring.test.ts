@@ -9,7 +9,7 @@ import { eq, sql } from "drizzle-orm";
 
 import { db } from "../db";
 import { withTenant } from "../db/withTenant";
-import { auditLogs, documents, documentVersions, identifiers, organizations, plans, roles, rolePermissions, sectors, users, userRoles } from "../db/schema";
+import { auditLogs, documents, documentVersions, identifiers, organizations, plans, roles, rolePermissions, sectors, users, userRoles , licenses } from "../db/schema";
 
 const API_ROOT = join(import.meta.dir, "..", "..");
 const TEST_PORT = process.env.SUBSCRIPTION_WIRING_PORT || "3104";
@@ -77,6 +77,7 @@ beforeAll(async () => {
   });
   expect(created.status).toBe(200);
   tenantId = created.body.data.id;
+  await db.delete(licenses).where(eq(licenses.tenantId, tenantId));
   adminUserId = created.body.data.admin.id;
 
   const login = await api<any>("/auth/login", {

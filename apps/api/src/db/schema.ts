@@ -55,6 +55,22 @@ export const orders = pgTable("orders", {
   uniqueIndex("orders_checkout_jti_uidx").on(t.checkoutJti),
 ] }) );
 
+export const licenses = pgTable("licenses", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  tenantId: uuid("tenant_id").notNull().references(() => organizations.id).unique(),
+  licenseNumber: text("license_number").notNull().unique(),
+  planId: uuid("plan_id").references(() => plans.id),
+  maxUsers: integer("max_users"),
+  status: text("status", { enum: ["trial", "active", "expired", "suspended"] }).notNull().default("trial"),
+  validUntil: timestamp("valid_until", { withTimezone: true }),
+  issuedAt: timestamp("issued_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedBy: uuid("updated_by").references(() => providerUsers.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({ indexes: [
+  index("licenses_status_idx").on(t.status),
+] }) );
+
 export const sectors = pgTable("sectors", {
   id: uuid("id").primaryKey().defaultRandom(),
   tenantId: uuid("tenant_id").notNull().references(() => organizations.id),

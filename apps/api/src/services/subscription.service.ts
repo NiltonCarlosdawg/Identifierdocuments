@@ -3,6 +3,7 @@ import { db } from "../db";
 import { withTenant } from "../db/withTenant";
 import { documents, documentVersions, identifiers, organizations, plans, users } from "../db/schema";
 import { and, eq, gte, sql } from "drizzle-orm";
+import { getLicenseContext } from "./license.service";
 
 export type LimitError = { code: string; message: string };
 
@@ -39,6 +40,23 @@ export async function getSubscriptionContext(
       .limit(1);
     if (!row) throw new Error("Organização não encontrada.");
 
+    const license = await getLicenseContext(tenantId, t);
+    if (license.license) {
+      const status: "free" | "paid" | "expired" | "suspended" =
+        license.state === "read_only" || license.state === "grace"
+          ? "expired"
+          : license.state === "suspended"
+            ? "suspended"
+            : license.state === "trial" ? "free" : license.state === "active" ? "paid" : "expired";
+      const org = {
+        ...row.org,
+        planId: license.planId ?? row.org.planId,
+        subscriptionStatus: status,
+        subscriptionExpiresAt: license.validUntil ?? row.org.subscriptionExpiresAt,
+      };
+      return { org, plan: license.plan ?? row.plan, status };
+    }
+
     const status = row.org.subscriptionStatus === "paid"
       && row.org.subscriptionExpiresAt != null
       && row.org.subscriptionExpiresAt < new Date()
@@ -60,10 +78,12 @@ export async function checkUserLimit(tenantId: string, executor?: DB): Promise<L
   return inTenant(tenantId, executor, async (t) => {
     const { plan, status } = await getSubscriptionContext(tenantId, t);
     if (status === "expired" || status === "suspended") return SUBSCRIPTION_RESTRICTED;
+    const license = await getLicenseContext(tenantId, t);
+    const maxUsers = license.maxUsers ?? plan.maxUsers;
     const [row] = await t.select({ n: sql<number>`count(*)::int` })
       .from(users)
       .where(eq(users.tenantId, tenantId));
-    return row.n >= plan.maxUsers
+    return row.n >= maxUsers
       ? {
         code: "SUBSCRIPTION_USER_LIMIT",
         message: "O limite de utilizadores do seu plano foi atingido. Faça upgrade para convidar mais.",
