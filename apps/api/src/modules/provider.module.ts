@@ -1,13 +1,40 @@
 import Elysia from "elysia";
 import { Type as t } from "@sinclair/typebox";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import { db } from "../db";
-import { organizations, orders, plans, providerUsers } from "../db/schema";
+import { withTenant } from "../db/withTenant";
+import { auditLogs, organizations, orders, plans, providerUsers, users } from "../db/schema";
 import { verifyPassword } from "../lib/password";
 import { signProviderToken, requireProvider } from "../middleware/auth";
 import { checkRateLimit } from "../middleware/rateLimit";
 import { getClientIp } from "../lib/ip";
 import { approveOrder, OrderError, rejectOrder } from "../services/order.service";
+import { getSubscriptionContext } from "../services/subscription.service";
+
+/** Estado manual do tenant (audit incluída) — espelha o padrão de approveOrder. */
+async function changeTenantStatus(
+  tenantId: string,
+  status: "free" | "paid" | "expired" | "suspended",
+  action: "tenant.suspend" | "tenant.reactivate",
+  providerUserId: string,
+  ip?: string | null,
+) {
+  await withTenant(tenantId, async (tx) => {
+    await tx.update(organizations)
+      .set({ subscriptionStatus: status })
+      .where(eq(organizations.id, tenantId));
+    await tx.insert(auditLogs).values({
+      tenantId,
+      userId: null,
+      action,
+      resource: "organizations",
+      resourceId: tenantId,
+      metadata: JSON.stringify({ providerUserId }),
+      ip: ip ?? null,
+    });
+  });
+  return { id: tenantId, status };
+}
 
 const planFields = {
   name: t.String({ minLength: 1 }),
@@ -136,4 +163,59 @@ export const providerModule = new (Elysia as any)({ prefix: "/provider" })
     params: t.Object({ id: t.String() }),
     body: t.Object({ reason: t.String({ minLength: 1 }) }),
     detail: { summary: "Rejeitar pedido", tags: ["Painel"] },
+  })
+
+  .get("/tenants", async () => {
+    // organizations/plans são tabelas globais; users é contada por tenant (superuser lê cross-tenant).
+    const rows = await db.select({
+      id: organizations.id,
+      name: organizations.name,
+      slug: organizations.slug,
+      planName: plans.name,
+      expiresAt: organizations.subscriptionExpiresAt,
+      userCount: sql<number>`(select count(*)::int from ${users} where ${users.tenantId} = ${organizations.id})`,
+    }).from(organizations)
+      .innerJoin(plans, eq(organizations.planId, plans.id))
+      .orderBy(desc(organizations.createdAt));
+
+    // getSubscriptionContext devolve o status derivado (paid vencido => expired).
+    return Promise.all(rows.map(async (row) => {
+      const { status } = await getSubscriptionContext(row.id);
+      return { ...row, status };
+    }));
+  }, { detail: { summary: "Listar tenants", tags: ["Painel"] } })
+
+  .post("/tenants/:id/suspend", async (ctx: any) => {
+    const tenantId = ctx.params.id;
+    const [org] = await db.select({ id: organizations.id }).from(organizations)
+      .where(eq(organizations.id, tenantId)).limit(1);
+    if (!org) {
+      ctx.set.status = 404;
+      return { error: { code: "NOT_FOUND", message: "Organização não encontrada." } };
+    }
+    return changeTenantStatus(tenantId, "suspended", "tenant.suspend", ctx.provider.id, getClientIp(ctx.request));
+  }, {
+    params: t.Object({ id: t.String() }),
+    detail: { summary: "Suspender tenant", tags: ["Painel"] },
+  })
+
+  .post("/tenants/:id/reactivate", async (ctx: any) => {
+    const tenantId = ctx.params.id;
+    const [row] = await db.select({ org: organizations, plan: plans })
+      .from(organizations)
+      .innerJoin(plans, eq(organizations.planId, plans.id))
+      .where(eq(organizations.id, tenantId)).limit(1);
+    if (!row) {
+      ctx.set.status = 404;
+      return { error: { code: "NOT_FOUND", message: "Organização não encontrada." } };
+    }
+    const status = row.plan.isFree
+      ? "free"
+      : row.org.subscriptionExpiresAt && row.org.subscriptionExpiresAt > new Date()
+        ? "paid"
+        : "expired";
+    return changeTenantStatus(tenantId, status, "tenant.reactivate", ctx.provider.id, getClientIp(ctx.request));
+  }, {
+    params: t.Object({ id: t.String() }),
+    detail: { summary: "Reativar tenant", tags: ["Painel"] },
   });

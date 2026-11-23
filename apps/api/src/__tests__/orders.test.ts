@@ -7,14 +7,15 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { spawn, type Subprocess } from "bun";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { decodeJwt, SignJWT } from "jose";
 
 import { db } from "../db";
 import { withTenant } from "../db/withTenant";
-import { auditLogs, identifiers, orders, organizations, plans, providerUsers, roles, sectors, userRoles, users } from "../db/schema";
+import { auditLogs, documents, identifiers, orders, organizations, plans, providerUsers, roles, sectors, userRoles, users } from "../db/schema";
 import { hashPassword } from "../lib/password";
 import { signProviderToken } from "../middleware/auth";
+import { checkUploadLimit } from "../services/subscription.service";
 
 const API_ROOT = join(import.meta.dir, "..", "..");
 const TEST_PORT = process.env.ORDERS_TEST_PORT || "3110";
@@ -29,6 +30,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 let serverProc: Subprocess | null = null;
 let adminToken = "";
+let adminUserId = "";
 let providerToken = "";
 let providerUserId = "";
 let tenantId = "";
@@ -185,6 +187,9 @@ beforeAll(async () => {
   expect(login.status).toBe(200);
   adminToken = login.body.data.token;
   expect(login.body.data.user.roles).toContain("ORG_ADMIN");
+  const [adminUser] = await db.select({ id: users.id }).from(users)
+    .where(eq(users.email, ADMIN_EMAIL)).limit(1);
+  adminUserId = adminUser.id;
 }, 45000);
 
 afterAll(async () => {
@@ -194,6 +199,7 @@ afterAll(async () => {
     await db.delete(orders).where(eq(orders.tenantId, tenantId));
     await withTenant(tenantId, async (tx) => {
       await tx.delete(auditLogs).where(eq(auditLogs.tenantId, tenantId));
+      await tx.delete(documents).where(eq(documents.tenantId, tenantId));
       await tx.delete(identifiers).where(eq(identifiers.tenantId, tenantId));
       await tx.delete(userRoles).where(
         sql`${userRoles.userId} IN (SELECT ${users.id} FROM ${users} WHERE ${users.tenantId} = ${tenantId})`,
@@ -497,5 +503,124 @@ describe("aprovação e rejeição de pedidos (painel)", () => {
     const dias = (org.subscriptionExpiresAt!.getTime() - antes) / DAY_MS;
     expect(dias).toBeGreaterThan(364.9);
     expect(dias).toBeLessThan(365.1);
+  });
+});
+
+describe("suspensão e reativação de tenants (painel)", () => {
+  function setOrg(fields: Record<string, unknown>) {
+    // Tabela global: SEM withTenant.
+    return db.update(organizations).set(fields).where(eq(organizations.id, tenantId));
+  }
+
+  async function currentOrg() {
+    const [row] = await db.select().from(organizations).where(eq(organizations.id, tenantId)).limit(1);
+    return row;
+  }
+
+  async function seedUploadToday() {
+    await withTenant(tenantId, async (tx) => {
+      const [sec] = await tx.insert(sectors).values({ tenantId, name: "Suspensao", code: "SUS" }).returning();
+      const [ident] = await tx.insert(identifiers).values({
+        tenantId, sectorId: sec.id, categoryId: "PROP", createdBy: adminUserId,
+        identifier: `susp-${RUN_ID}`, sequence: 1,
+      }).returning();
+      await tx.insert(documents).values({ tenantId, identifierId: ident.id, uploadedBy: adminUserId });
+    });
+  }
+
+  test("GET /provider/tenants: status derivado (lazy), planName e userCount", async () => {
+    await setOrg({
+      planId: paidPlanId, subscriptionStatus: "paid",
+      subscriptionExpiresAt: new Date(Date.now() - DAY_MS), // paid vencido => expired
+    });
+    const res = await api<any>("/provider/tenants", { token: providerToken });
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body)).toBe(true);
+    const row = res.body.find((r: any) => r.id === tenantId);
+    expect(row).toMatchObject({
+      id: tenantId,
+      name: TENANT_NAME,
+      slug: SLUG,
+      status: "expired",
+      planName: `Pedidos pago ${RUN_ID}`,
+    });
+    expect(row.expiresAt).toBeTruthy();
+    expect(row.userCount).toBeGreaterThanOrEqual(1);
+  });
+
+  test("suspender: status suspended, checkUploadLimit ativo (1/dia) e auditoria tenant.suspend", async () => {
+    await setOrg({
+      planId: paidPlanId, subscriptionStatus: "paid",
+      subscriptionExpiresAt: new Date(Date.now() + DAY_MS),
+    });
+    await seedUploadToday();
+    expect(await checkUploadLimit(tenantId, adminUserId)).toBeNull(); // ativo: sem limite
+
+    const res = await api<any>(`/provider/tenants/${tenantId}/suspend`, {
+      method: "POST", token: providerToken,
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("suspended");
+
+    expect((await currentOrg()).subscriptionStatus).toBe("suspended");
+    expect(await checkUploadLimit(tenantId, adminUserId)).toMatchObject({ code: "UPLOAD_LIMIT_REACHED" });
+
+    const [audit] = await db.select().from(auditLogs)
+      .where(and(eq(auditLogs.tenantId, tenantId), eq(auditLogs.action, "tenant.suspend")))
+      .limit(1);
+    expect(audit).toBeTruthy();
+    expect(audit.userId).toBeNull();
+    expect(JSON.parse(audit.metadata!).providerUserId).toBe(providerUserId);
+  });
+
+  test("reativar com expiresAt futuro: paid e auditoria tenant.reactivate", async () => {
+    await setOrg({
+      planId: paidPlanId, subscriptionStatus: "suspended",
+      subscriptionExpiresAt: new Date(Date.now() + 30 * DAY_MS),
+    });
+    const res = await api<any>(`/provider/tenants/${tenantId}/reactivate`, {
+      method: "POST", token: providerToken,
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("paid");
+    expect((await currentOrg()).subscriptionStatus).toBe("paid");
+
+    const [audit] = await db.select().from(auditLogs)
+      .where(and(eq(auditLogs.tenantId, tenantId), eq(auditLogs.action, "tenant.reactivate")))
+      .limit(1);
+    expect(audit).toBeTruthy();
+    expect(audit.userId).toBeNull();
+    expect(JSON.parse(audit.metadata!).providerUserId).toBe(providerUserId);
+  });
+
+  test("reativar com expiresAt passado: expired", async () => {
+    await setOrg({
+      planId: paidPlanId, subscriptionStatus: "suspended",
+      subscriptionExpiresAt: new Date(Date.now() - DAY_MS),
+    });
+    const res = await api<any>(`/provider/tenants/${tenantId}/reactivate`, {
+      method: "POST", token: providerToken,
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("expired");
+    expect((await currentOrg()).subscriptionStatus).toBe("expired");
+  });
+
+  test("reativar tenant free: free", async () => {
+    await setOrg({
+      planId: freePlanId, subscriptionStatus: "suspended", subscriptionExpiresAt: null,
+    });
+    const res = await api<any>(`/provider/tenants/${tenantId}/reactivate`, {
+      method: "POST", token: providerToken,
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("free");
+    expect((await currentOrg()).subscriptionStatus).toBe("free");
+  });
+
+  test("rotas exigem token de provedor (401 UNAUTHORIZED)", async () => {
+    const noAuth = await api<any>(`/provider/tenants/${tenantId}/suspend`, { method: "POST" });
+    expect(noAuth.status).toBe(401);
+    expect(noAuth.body.error?.code).toBe("UNAUTHORIZED");
   });
 });
