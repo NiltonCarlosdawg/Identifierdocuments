@@ -9,7 +9,7 @@ import { eq, sql } from "drizzle-orm";
 
 import { db } from "../db";
 import { withTenant } from "../db/withTenant";
-import { organizations, roles, rolePermissions, sectors, users, userRoles } from "../db/schema";
+import { organizations, plans, roles, rolePermissions, sectors, users, userRoles } from "../db/schema";
 
 const API_ROOT = join(import.meta.dir, "..", "..");
 const TEST_PORT = process.env.SUBSCRIPTION_WIRING_PORT || "3104";
@@ -20,6 +20,7 @@ let serverProc: Subprocess | null = null;
 let adminToken = "";
 let tenantId = "";
 let adminUserId = "";
+let importPlanId = "";
 
 async function api<T>(
   path: string,
@@ -106,6 +107,7 @@ afterAll(async () => {
       await tx.delete(organizations).where(eq(organizations.id, tenantId));
     });
   }
+  if (importPlanId) await db.delete(plans).where(eq(plans.id, importPlanId));
 });
 
 describe("limite de utilizadores no wiring dos endpoints", () => {
@@ -135,5 +137,44 @@ describe("limite de utilizadores no wiring dos endpoints", () => {
     expect(after.status).toBe(200);
     expect(after.body.data.length).toBe(1); // nada foi apagado
     expect(after.body.data[0].id).toBe(before.body.data[0].id);
+  });
+
+  test("import CSV com headroom insuficiente: excesso responde 403 e deixa exatamente maxUsers", async () => {
+    // Plano só deste teste: maxUsers=3 → admin + 2 linhas importadas cabem, a 3.ª não.
+    const [plan] = await db.insert(plans).values({
+      name: `wiring-import-${RUN_ID}`,
+      price: 100000,
+      maxUsers: 3,
+      monthlyOnlineIdentifiers: 100,
+      offlineBudgetPerMachine: 100,
+    }).returning();
+    importPlanId = plan.id;
+    await db.update(organizations).set({ planId: plan.id }).where(eq(organizations.id, tenantId));
+
+    const csv = [
+      "email,full_name",
+      ...[1, 2, 3, 4].map(i => `import-${i}-${RUN_ID}@test.docid,Importado ${i}`),
+    ].join("\n");
+
+    const res = await api<any>("/users/import", {
+      method: "POST",
+      token: adminToken,
+      body: JSON.stringify({ csv }),
+    });
+
+    expect(res.status).toBe(403);
+    expect(res.body.error?.code).toBe("SUBSCRIPTION_USER_LIMIT");
+    expect(res.body.error?.message).toBe(
+      "O limite de utilizadores do seu plano foi atingido. Faça upgrade para convidar mais.",
+    );
+
+    const list = await api<any>("/users/", { token: adminToken });
+    expect(list.status).toBe(200);
+    expect(list.body.data.length).toBe(3); // admin + 2 importados — exatamente maxUsers
+    expect(list.body.data.map((u: any) => u.email).sort()).toEqual([
+      `wiring-admin-${RUN_ID}@test.docid`,
+      `import-1-${RUN_ID}@test.docid`,
+      `import-2-${RUN_ID}@test.docid`,
+    ].sort());
   });
 });

@@ -488,6 +488,10 @@ export const usersModule = new (Elysia as any)({ prefix: "/users" })
                 if (!roleId) { errors.push({ row: rowNum, reason: `role não encontrado: ${roleRef}` }); continue; }
               }
 
+              // Reavalia o teto por linha: as inserções anteriores deste CSV já contam.
+              const rowLimit = await checkUserLimit(tenantId, tx);
+              if (rowLimit) { set.status = 403; return { error: rowLimit }; }
+
               const password = randomPassword();
               const passwordHash = await hashPassword(password);
               const [user] = await tx.insert(users).values({
