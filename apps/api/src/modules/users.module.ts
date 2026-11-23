@@ -10,6 +10,7 @@ import { getClientIp } from "../lib/ip";
 import { checkRateLimit } from "../middleware/rateLimit";
 import { randomBytes } from "node:crypto";
 import { enqueueInviteEmail } from "../jobs/queues";
+import { checkUserLimit } from "../services/subscription.service";
 
 function parseCsv(text: string): string[][] {
   const rows: string[][] = [];
@@ -118,6 +119,9 @@ export const usersModule = new (Elysia as any)({ prefix: "/users" })
             set.status = 403; return { error: { code: "FORBIDDEN", message: "Sem permissão para criar utilizadores." } };
           }
 
+          const limit = await checkUserLimit(tenantId, tx);
+          if (limit) { set.status = 403; return { error: limit }; }
+
           let sectorId = body.sectorId;
           if (isSupervisor && !isAdmin) {
             const supervisorUser = await tx.query.users.findFirst({
@@ -186,6 +190,9 @@ export const usersModule = new (Elysia as any)({ prefix: "/users" })
           if (!isAdmin && !isSupervisor) {
             set.status = 403; return { error: { code: "FORBIDDEN", message: "Sem permissão para convidar utilizadores." } };
           }
+
+          const limit = await checkUserLimit(tenantId, tx);
+          if (limit) { set.status = 403; return { error: limit }; }
 
           const email = body.email.trim().toLowerCase();
           if (!EMAIL_RE.test(email)) {
@@ -420,6 +427,10 @@ export const usersModule = new (Elysia as any)({ prefix: "/users" })
       try {
         return await withTenant(tenantId, async (tx) => {
           try {
+            // Gate de roles do import está no .guard() acima; o limite entra aqui dentro do tenant.
+            const limit = await checkUserLimit(tenantId, tx);
+            if (limit) { set.status = 403; return { error: limit }; }
+
             const csvRows = parseCsv(body.csv);
             const header = (csvRows[0] || []).map(h => h.trim().toLowerCase());
             const emailIdx = header.indexOf("email");
