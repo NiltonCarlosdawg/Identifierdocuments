@@ -52,6 +52,9 @@ jobs:
         uses: tauri-apps/tauri-action@v1
         with:
           projectPath: apps/desktop
+          tagName: ${{ github.ref_name }}
+          releaseName: DocID ${{ github.ref_name }}
+          generateReleaseNotes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
