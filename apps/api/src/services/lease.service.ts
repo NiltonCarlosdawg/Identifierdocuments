@@ -47,8 +47,9 @@ export async function leaseIdentifiers(
     throw new Error("Sem permissão para reservar sequências noutro sector.");
   }
 
-  const org = await tx.query.organizations.findFirst({ where: eq(organizations.id, auth.tenantId) });
-  const batchSize = org?.identifierLeaseBatchSize ?? 50;
+  // shortcut: identifier_lease_batch_size foi removido (task subscriptions-1); batch fixo
+  // em 50 até a task 6 substituir pelo orçamento offline por máquina (10 no plano free).
+  const batchSize = 50;
 
   const [lease] = await tx.transaction(async (tx2) => {
     // CORREÇÃO (Fix 4): Usar dois inteiros de 32 bits para reduzir colisões de hash

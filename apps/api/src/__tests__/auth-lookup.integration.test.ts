@@ -17,7 +17,7 @@ beforeAll(async () => {
   await admin.unsafe(`GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO ${role}`);
 
   await admin`SELECT set_config('app.current_tenant', ${orgId}, false)`;
-  await admin`INSERT INTO organizations (id, name, slug) VALUES (${orgId}, 'Auth lookup', 'auth-lookup-test') ON CONFLICT DO NOTHING`;
+  await admin`INSERT INTO organizations (id, name, slug, plan_id) VALUES (${orgId}, 'Auth lookup', 'auth-lookup-test', (SELECT id FROM plans WHERE is_free LIMIT 1)) ON CONFLICT DO NOTHING`;
   await admin`INSERT INTO users (id, tenant_id, email, password_hash, full_name) VALUES (${userId}, ${orgId}, ${email}, '$2b$fake', 'Lookup User') ON CONFLICT DO NOTHING`;
 });
 

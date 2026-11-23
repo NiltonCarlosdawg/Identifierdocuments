@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { db } from "../db";
 import { withTenant } from "../db/withTenant";
-import { organizations, sectors, users, identifiers, notifications, categories, roles, userRoles } from "../db/schema";
+import { organizations, sectors, users, identifiers, notifications, categories, roles, userRoles, plans } from "../db/schema";
 import { and, eq, sql } from "drizzle-orm";
 
 const rng = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -23,12 +23,16 @@ describe("withTenant — isolamento entre tenants", () => {
       id: catId, name: "Test Category", group: "Test", prefix: catId,
     });
 
+    const [freePlan] = await db.select({ id: plans.id }).from(plans).where(eq(plans.isFree, true));
+
     const [orgA] = await db.insert(organizations).values({
       name: `Tenant A ${tagA}`, slug: `tenant-a-${tagA}`,
+      planId: freePlan.id,
     }).returning({ id: organizations.id });
 
     const [orgB] = await db.insert(organizations).values({
       name: `Tenant B ${tagB}`, slug: `tenant-b-${tagB}`,
+      planId: freePlan.id,
     }).returning({ id: organizations.id });
 
     orgAId = orgA.id;

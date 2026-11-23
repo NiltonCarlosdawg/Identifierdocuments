@@ -1,14 +1,16 @@
 import { describe, expect, test } from "bun:test";
 import { notify } from "../services/notification.service";
 import { db } from "../db";
-import { notifications, organizations, users, sectors } from "../db/schema";
+import { notifications, organizations, users, sectors, plans } from "../db/schema";
 import { eq } from "drizzle-orm";
 
 describe("notification.service", () => {
   test("notify persiste na base de dados", async () => {
+    const [freePlan] = await db.select({ id: plans.id }).from(plans).where(eq(plans.isFree, true));
     const [org] = await db.insert(organizations).values({
       name: "Test Org Notify",
       slug: `test-notify-${Date.now()}`,
+      planId: freePlan.id,
     }).returning({ id: organizations.id });
 
     const [sector] = await db.insert(sectors).values({

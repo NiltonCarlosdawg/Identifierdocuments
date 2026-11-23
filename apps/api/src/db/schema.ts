@@ -1,18 +1,59 @@
 import { pgTable, uuid, text, integer, boolean, timestamp, jsonb, uniqueIndex, index, primaryKey } from "drizzle-orm/pg-core";
 import { relations, sql } from "drizzle-orm";
 
+export const plans = pgTable("plans", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  price: integer("price").notNull(),
+  maxUsers: integer("max_users").notNull(),
+  monthlyOnlineIdentifiers: integer("monthly_online_identifiers").notNull(),
+  offlineBudgetPerMachine: integer("offline_budget_per_machine").notNull(),
+  isFree: boolean("is_free").notNull().default(false),
+  active: boolean("active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 export const organizations = pgTable("organizations", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
   slug: text("slug").notNull().unique(),
   identifierPrefix: text("identifier_prefix").notNull().default("VL"),
-  identifierLeaseBatchSize: integer("identifier_lease_batch_size").notNull().default(50),
-  plan: text("plan").notNull().default("starter"),
+  planId: uuid("plan_id").notNull().references(() => plans.id),
+  subscriptionStatus: text("subscription_status", { enum: ["free","paid","expired","suspended"] }).notNull().default("free"),
+  subscriptionExpiresAt: timestamp("subscription_expires_at", { withTimezone: true }),
   isActive: boolean("is_active").notNull().default(true),
   termsAccepted: boolean("terms_accepted").notNull().default(false),
   termsAcceptedAt: timestamp("terms_accepted_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
+
+export const providerUsers = pgTable("provider_users", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  email: text("email").notNull().unique(),
+  passwordHash: text("password_hash").notNull(),
+  name: text("name").notNull(),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const orders = pgTable("orders", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  tenantId: uuid("tenant_id").notNull().references(() => organizations.id),
+  planId: uuid("plan_id").notNull().references(() => plans.id),
+  paymentMethod: text("payment_method", { enum: ["multicaixa", "transfer", "send_order"] }).notNull(),
+  phone: text("phone"),
+  contactEmail: text("contact_email"),
+  status: text("status", { enum: ["pending", "approved", "rejected"] }).notNull().default("pending"),
+  rejectReason: text("reject_reason"),
+  checkoutJti: text("checkout_jti").notNull(),
+  decidedAt: timestamp("decided_at"),
+  decidedBy: uuid("decided_by").references(() => providerUsers.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => ({ indexes: [
+  index("orders_tenant_idx").on(t.tenantId),
+  index("orders_status_idx").on(t.status),
+  uniqueIndex("orders_checkout_jti_uidx").on(t.checkoutJti),
+] }) );
 
 export const sectors = pgTable("sectors", {
   id: uuid("id").primaryKey().defaultRandom(),

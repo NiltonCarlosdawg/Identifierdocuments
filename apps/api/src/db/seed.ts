@@ -1,5 +1,5 @@
-import { db } from "./index";
-import { categories, roles, rolePermissions } from "./schema";
+import { db, queryClient } from "./index";
+import { categories, roles, rolePermissions, plans } from "./schema";
 import { eq, and, isNull } from "drizzle-orm";
 
 const CATEGORIES: Array<{ id: string; name: string; group: string; prefix: string; defaultVisibility: "public" | "sector_only" }> = [
@@ -84,7 +84,19 @@ async function seed() {
     }
   }
 
-  console.log("Seed completo: categorias + roles de sistema.");
+  // Plano free único e idempotente (a migração 0021 também o garante via backfill).
+  const existingFree = await db.select({ id: plans.id }).from(plans).where(eq(plans.isFree, true)).limit(1);
+  if (existingFree.length === 0) {
+    await db.insert(plans).values({
+      name: "Free", price: 0, maxUsers: 1, monthlyOnlineIdentifiers: 10,
+      offlineBudgetPerMachine: 10, isFree: true, active: true,
+    });
+  }
+
+  console.log("Seed completo: categorias + roles de sistema + plano free.");
 }
 
-seed().catch(console.error);
+// Fecha o pool: sem isto o processo fica com o socket postgres aberto e nunca termina.
+seed()
+  .catch((err) => { console.error(err); process.exitCode = 1; })
+  .finally(() => queryClient.end());

@@ -1,0 +1,2315 @@
+{
+  "id": "b55f973f-8b0d-4805-aa7f-827a410310bf",
+  "prevId": "7d14eadc-f58c-481e-a7e2-0fd38db76dbf",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.approvals": {
+      "name": "approvals",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "document_id": {
+          "name": "document_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "share_id": {
+          "name": "share_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sector_id": {
+          "name": "sector_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "supervisor_id": {
+          "name": "supervisor_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "requester_id": {
+          "name": "requester_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "type": {
+          "name": "type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'cross_sector'"
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "notes": {
+          "name": "notes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "requested_at": {
+          "name": "requested_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "resolved_at": {
+          "name": "resolved_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "approvals_tenant_id_organizations_id_fk": {
+          "name": "approvals_tenant_id_organizations_id_fk",
+          "tableFrom": "approvals",
+          "tableTo": "organizations",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "approvals_document_id_documents_id_fk": {
+          "name": "approvals_document_id_documents_id_fk",
+          "tableFrom": "approvals",
+          "tableTo": "documents",
+          "columnsFrom": [
+            "document_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "approvals_share_id_document_shares_id_fk": {
+          "name": "approvals_share_id_document_shares_id_fk",
+          "tableFrom": "approvals",
+          "tableTo": "document_shares",
+          "columnsFrom": [
+            "share_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "approvals_sector_id_sectors_id_fk": {
+          "name": "approvals_sector_id_sectors_id_fk",
+          "tableFrom": "approvals",
+          "tableTo": "sectors",
+          "columnsFrom": [
+            "sector_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "approvals_supervisor_id_users_id_fk": {
+          "name": "approvals_supervisor_id_users_id_fk",
+          "tableFrom": "approvals",
+          "tableTo": "users",
+          "columnsFrom": [
+            "supervisor_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "approvals_requester_id_users_id_fk": {
+          "name": "approvals_requester_id_users_id_fk",
+          "tableFrom": "approvals",
+          "tableTo": "users",
+          "columnsFrom": [
+            "requester_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
+    },
+    "public.audit_logs": {
+      "name": "audit_logs",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "action": {
+          "name": "action",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "resource": {
+          "name": "resource",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "resource_id": {
+          "name": "resource_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "metadata": {
+          "name": "metadata",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ip": {
+          "name": "ip",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "audit_logs_tenant_id_organizations_id_fk": {
+          "name": "audit_logs_tenant_id_organizations_id_fk",
+          "tableFrom": "audit_logs",
+          "tableTo": "organizations",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "audit_logs_user_id_users_id_fk": {
+          "name": "audit_logs_user_id_users_id_fk",
+          "tableFrom": "audit_logs",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
+    },
+    "public.categories": {
+      "name": "categories",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "group": {
+          "name": "group",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "prefix": {
+          "name": "prefix",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "default_visibility": {
+          "name": "default_visibility",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'public'"
+        },
+        "requires_sequential": {
+          "name": "requires_sequential",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "categories_prefix_unique": {
+          "name": "categories_prefix_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "prefix"
+          ]
+        }
+      }
+    },
+    "public.classifier_feedback": {
+      "name": "classifier_feedback",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "document_id": {
+          "name": "document_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "suggested_category_id": {
+          "name": "suggested_category_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "chosen_category_id": {
+          "name": "chosen_category_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "accepted": {
+          "name": "accepted",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "classifier_feedback_tenant_id_organizations_id_fk": {
+          "name": "classifier_feedback_tenant_id_organizations_id_fk",
+          "tableFrom": "classifier_feedback",
+          "tableTo": "organizations",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "classifier_feedback_document_id_documents_id_fk": {
+          "name": "classifier_feedback_document_id_documents_id_fk",
+          "tableFrom": "classifier_feedback",
+          "tableTo": "documents",
+          "columnsFrom": [
+            "document_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
+    },
+    "public.devices": {
+      "name": "devices",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sector_id": {
+          "name": "sector_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "registered_by_user_id": {
+          "name": "registered_by_user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'active'"
+        },
+        "last_seen_at": {
+          "name": "last_seen_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deactivated_at": {
+          "name": "deactivated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deactivated_by": {
+          "name": "deactivated_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "devices_tenant_id_organizations_id_fk": {
+          "name": "devices_tenant_id_organizations_id_fk",
+          "tableFrom": "devices",
+          "tableTo": "organizations",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "devices_sector_id_sectors_id_fk": {
+          "name": "devices_sector_id_sectors_id_fk",
+          "tableFrom": "devices",
+          "tableTo": "sectors",
+          "columnsFrom": [
+            "sector_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "devices_registered_by_user_id_users_id_fk": {
+          "name": "devices_registered_by_user_id_users_id_fk",
+          "tableFrom": "devices",
+          "tableTo": "users",
+          "columnsFrom": [
+            "registered_by_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "devices_deactivated_by_users_id_fk": {
+          "name": "devices_deactivated_by_users_id_fk",
+          "tableFrom": "devices",
+          "tableTo": "users",
+          "columnsFrom": [
+            "deactivated_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
+    },
+    "public.document_access_requests": {
+      "name": "document_access_requests",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "document_id": {
+          "name": "document_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "requester_id": {
+          "name": "requester_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "resolved_by": {
+          "name": "resolved_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "resolved_at": {
+          "name": "resolved_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "document_access_requests_tenant_id_organizations_id_fk": {
+          "name": "document_access_requests_tenant_id_organizations_id_fk",
+          "tableFrom": "document_access_requests",
+          "tableTo": "organizations",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "document_access_requests_document_id_documents_id_fk": {
+          "name": "document_access_requests_document_id_documents_id_fk",
+          "tableFrom": "document_access_requests",
+          "tableTo": "documents",
+          "columnsFrom": [
+            "document_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "document_access_requests_requester_id_users_id_fk": {
+          "name": "document_access_requests_requester_id_users_id_fk",
+          "tableFrom": "document_access_requests",
+          "tableTo": "users",
+          "columnsFrom": [
+            "requester_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "document_access_requests_resolved_by_users_id_fk": {
+          "name": "document_access_requests_resolved_by_users_id_fk",
+          "tableFrom": "document_access_requests",
+          "tableTo": "users",
+          "columnsFrom": [
+            "resolved_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
+    },
+    "public.document_shares": {
+      "name": "document_shares",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "document_id": {
+          "name": "document_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "shared_by": {
+          "name": "shared_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "shared_with_sector_id": {
+          "name": "shared_with_sector_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "shared_with_user_id": {
+          "name": "shared_with_user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "source_request_id": {
+          "name": "source_request_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'active'"
+        },
+        "revoked_at": {
+          "name": "revoked_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "document_shares_document_id_documents_id_fk": {
+          "name": "document_shares_document_id_documents_id_fk",
+          "tableFrom": "document_shares",
+          "tableTo": "documents",
+          "columnsFrom": [
+            "document_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "document_shares_shared_by_users_id_fk": {
+          "name": "document_shares_shared_by_users_id_fk",
+          "tableFrom": "document_shares",
+          "tableTo": "users",
+          "columnsFrom": [
+            "shared_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "document_shares_shared_with_sector_id_sectors_id_fk": {
+          "name": "document_shares_shared_with_sector_id_sectors_id_fk",
+          "tableFrom": "document_shares",
+          "tableTo": "sectors",
+          "columnsFrom": [
+            "shared_with_sector_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "document_shares_shared_with_user_id_users_id_fk": {
+          "name": "document_shares_shared_with_user_id_users_id_fk",
+          "tableFrom": "document_shares",
+          "tableTo": "users",
+          "columnsFrom": [
+            "shared_with_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "document_shares_source_request_id_document_access_requests_id_fk": {
+          "name": "document_shares_source_request_id_document_access_requests_id_fk",
+          "tableFrom": "document_shares",
+          "tableTo": "document_access_requests",
+          "columnsFrom": [
+            "source_request_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
+    },
+    "public.document_versions": {
+      "name": "document_versions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "document_id": {
+          "name": "document_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "filename": {
+          "name": "filename",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "mime_type": {
+          "name": "mime_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "file_path": {
+          "name": "file_path",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "file_size": {
+          "name": "file_size",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "extracted_text": {
+          "name": "extracted_text",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "uploaded_by": {
+          "name": "uploaded_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "upload_source": {
+          "name": "upload_source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'manual'"
+        },
+        "is_current": {
+          "name": "is_current",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "document_versions_tenant_id_organizations_id_fk": {
+          "name": "document_versions_tenant_id_organizations_id_fk",
+          "tableFrom": "document_versions",
+          "tableTo": "organizations",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "document_versions_document_id_documents_id_fk": {
+          "name": "document_versions_document_id_documents_id_fk",
+          "tableFrom": "document_versions",
+          "tableTo": "documents",
+          "columnsFrom": [
+            "document_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "document_versions_uploaded_by_users_id_fk": {
+          "name": "document_versions_uploaded_by_users_id_fk",
+          "tableFrom": "document_versions",
+          "tableTo": "users",
+          "columnsFrom": [
+            "uploaded_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
+    },
+    "public.documents": {
+      "name": "documents",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "identifier_id": {
+          "name": "identifier_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'primary'"
+        },
+        "label": {
+          "name": "label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "tags": {
+          "name": "tags",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'"
+        },
+        "uploaded_by": {
+          "name": "uploaded_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "documents_tenant_id_organizations_id_fk": {
+          "name": "documents_tenant_id_organizations_id_fk",
+          "tableFrom": "documents",
+          "tableTo": "organizations",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "documents_identifier_id_identifiers_id_fk": {
+          "name": "documents_identifier_id_identifiers_id_fk",
+          "tableFrom": "documents",
+          "tableTo": "identifiers",
+          "columnsFrom": [
+            "identifier_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "documents_uploaded_by_users_id_fk": {
+          "name": "documents_uploaded_by_users_id_fk",
+          "tableFrom": "documents",
+          "tableTo": "users",
+          "columnsFrom": [
+            "uploaded_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
+    },
+    "public.idempotency_records": {
+      "name": "idempotency_records",
+      "schema": "",
+      "columns": {
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "idempotency_key": {
+          "name": "idempotency_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "result": {
+          "name": "result",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "idempotency_records_tenant_id_organizations_id_fk": {
+          "name": "idempotency_records_tenant_id_organizations_id_fk",
+          "tableFrom": "idempotency_records",
+          "tableTo": "organizations",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "idempotency_records_tenant_id_idempotency_key_pk": {
+          "name": "idempotency_records_tenant_id_idempotency_key_pk",
+          "columns": [
+            "tenant_id",
+            "idempotency_key"
+          ]
+        }
+      },
+      "uniqueConstraints": {}
+    },
+    "public.identifier_leases": {
+      "name": "identifier_leases",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "category_id": {
+          "name": "category_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sector_id": {
+          "name": "sector_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "device_id": {
+          "name": "device_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "start_seq": {
+          "name": "start_seq",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "end_seq": {
+          "name": "end_seq",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "used_up_to": {
+          "name": "used_up_to",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'active'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "released_at": {
+          "name": "released_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "identifier_leases_tenant_id_organizations_id_fk": {
+          "name": "identifier_leases_tenant_id_organizations_id_fk",
+          "tableFrom": "identifier_leases",
+          "tableTo": "organizations",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "identifier_leases_category_id_categories_id_fk": {
+          "name": "identifier_leases_category_id_categories_id_fk",
+          "tableFrom": "identifier_leases",
+          "tableTo": "categories",
+          "columnsFrom": [
+            "category_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "identifier_leases_sector_id_sectors_id_fk": {
+          "name": "identifier_leases_sector_id_sectors_id_fk",
+          "tableFrom": "identifier_leases",
+          "tableTo": "sectors",
+          "columnsFrom": [
+            "sector_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "identifier_leases_device_id_devices_id_fk": {
+          "name": "identifier_leases_device_id_devices_id_fk",
+          "tableFrom": "identifier_leases",
+          "tableTo": "devices",
+          "columnsFrom": [
+            "device_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
+    },
+    "public.identifier_release_pool": {
+      "name": "identifier_release_pool",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "category_id": {
+          "name": "category_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sector_id": {
+          "name": "sector_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "range_start": {
+          "name": "range_start",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "range_end": {
+          "name": "range_end",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "identifier_release_pool_tenant_id_organizations_id_fk": {
+          "name": "identifier_release_pool_tenant_id_organizations_id_fk",
+          "tableFrom": "identifier_release_pool",
+          "tableTo": "organizations",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "identifier_release_pool_category_id_categories_id_fk": {
+          "name": "identifier_release_pool_category_id_categories_id_fk",
+          "tableFrom": "identifier_release_pool",
+          "tableTo": "categories",
+          "columnsFrom": [
+            "category_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "identifier_release_pool_sector_id_sectors_id_fk": {
+          "name": "identifier_release_pool_sector_id_sectors_id_fk",
+          "tableFrom": "identifier_release_pool",
+          "tableTo": "sectors",
+          "columnsFrom": [
+            "sector_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
+    },
+    "public.identifiers": {
+      "name": "identifiers",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sector_id": {
+          "name": "sector_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "category_id": {
+          "name": "category_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "identifier": {
+          "name": "identifier",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sequence": {
+          "name": "sequence",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "issued_to": {
+          "name": "issued_to",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "visibility": {
+          "name": "visibility",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'public'"
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'draft'"
+        },
+        "origin": {
+          "name": "origin",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'digital'"
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "identifiers_tenant_id_organizations_id_fk": {
+          "name": "identifiers_tenant_id_organizations_id_fk",
+          "tableFrom": "identifiers",
+          "tableTo": "organizations",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "identifiers_sector_id_sectors_id_fk": {
+          "name": "identifiers_sector_id_sectors_id_fk",
+          "tableFrom": "identifiers",
+          "tableTo": "sectors",
+          "columnsFrom": [
+            "sector_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "identifiers_category_id_categories_id_fk": {
+          "name": "identifiers_category_id_categories_id_fk",
+          "tableFrom": "identifiers",
+          "tableTo": "categories",
+          "columnsFrom": [
+            "category_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "identifiers_created_by_users_id_fk": {
+          "name": "identifiers_created_by_users_id_fk",
+          "tableFrom": "identifiers",
+          "tableTo": "users",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
+    },
+    "public.notifications": {
+      "name": "notifications",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "type": {
+          "name": "type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payload": {
+          "name": "payload",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "is_read": {
+          "name": "is_read",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "notifications_tenant_id_organizations_id_fk": {
+          "name": "notifications_tenant_id_organizations_id_fk",
+          "tableFrom": "notifications",
+          "tableTo": "organizations",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "notifications_user_id_users_id_fk": {
+          "name": "notifications_user_id_users_id_fk",
+          "tableFrom": "notifications",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
+    },
+    "public.orders": {
+      "name": "orders",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "plan_id": {
+          "name": "plan_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payment_method": {
+          "name": "payment_method",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "phone": {
+          "name": "phone",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "contact_email": {
+          "name": "contact_email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "reject_reason": {
+          "name": "reject_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "checkout_jti": {
+          "name": "checkout_jti",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "decided_at": {
+          "name": "decided_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "decided_by": {
+          "name": "decided_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "orders_tenant_id_organizations_id_fk": {
+          "name": "orders_tenant_id_organizations_id_fk",
+          "tableFrom": "orders",
+          "tableTo": "organizations",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "orders_plan_id_plans_id_fk": {
+          "name": "orders_plan_id_plans_id_fk",
+          "tableFrom": "orders",
+          "tableTo": "plans",
+          "columnsFrom": [
+            "plan_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "orders_decided_by_provider_users_id_fk": {
+          "name": "orders_decided_by_provider_users_id_fk",
+          "tableFrom": "orders",
+          "tableTo": "provider_users",
+          "columnsFrom": [
+            "decided_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
+    },
+    "public.organizations": {
+      "name": "organizations",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "slug": {
+          "name": "slug",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "identifier_prefix": {
+          "name": "identifier_prefix",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'VL'"
+        },
+        "plan_id": {
+          "name": "plan_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "subscription_status": {
+          "name": "subscription_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'free'"
+        },
+        "subscription_expires_at": {
+          "name": "subscription_expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "is_active": {
+          "name": "is_active",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "terms_accepted": {
+          "name": "terms_accepted",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "terms_accepted_at": {
+          "name": "terms_accepted_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "organizations_plan_id_plans_id_fk": {
+          "name": "organizations_plan_id_plans_id_fk",
+          "tableFrom": "organizations",
+          "tableTo": "plans",
+          "columnsFrom": [
+            "plan_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "organizations_slug_unique": {
+          "name": "organizations_slug_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "slug"
+          ]
+        }
+      }
+    },
+    "public.password_reset_tokens": {
+      "name": "password_reset_tokens",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "token_hash": {
+          "name": "token_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "used_at": {
+          "name": "used_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "password_reset_tokens_user_id_users_id_fk": {
+          "name": "password_reset_tokens_user_id_users_id_fk",
+          "tableFrom": "password_reset_tokens",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
+    },
+    "public.plans": {
+      "name": "plans",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "price": {
+          "name": "price",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "max_users": {
+          "name": "max_users",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "monthly_online_identifiers": {
+          "name": "monthly_online_identifiers",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "offline_budget_per_machine": {
+          "name": "offline_budget_per_machine",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "is_free": {
+          "name": "is_free",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "active": {
+          "name": "active",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
+    },
+    "public.provider_users": {
+      "name": "provider_users",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "email": {
+          "name": "email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "password_hash": {
+          "name": "password_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "is_active": {
+          "name": "is_active",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "provider_users_email_unique": {
+          "name": "provider_users_email_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "email"
+          ]
+        }
+      }
+    },
+    "public.role_permissions": {
+      "name": "role_permissions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "role_id": {
+          "name": "role_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "resource": {
+          "name": "resource",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "action": {
+          "name": "action",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "role_permissions_role_id_roles_id_fk": {
+          "name": "role_permissions_role_id_roles_id_fk",
+          "tableFrom": "role_permissions",
+          "tableTo": "roles",
+          "columnsFrom": [
+            "role_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
+    },
+    "public.roles": {
+      "name": "roles",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "is_system": {
+          "name": "is_system",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "roles_tenant_id_organizations_id_fk": {
+          "name": "roles_tenant_id_organizations_id_fk",
+          "tableFrom": "roles",
+          "tableTo": "organizations",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
+    },
+    "public.sectors": {
+      "name": "sectors",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "code": {
+          "name": "code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "supervisor_id": {
+          "name": "supervisor_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "sectors_tenant_id_organizations_id_fk": {
+          "name": "sectors_tenant_id_organizations_id_fk",
+          "tableFrom": "sectors",
+          "tableTo": "organizations",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
+    },
+    "public.user_roles": {
+      "name": "user_roles",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "role_id": {
+          "name": "role_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sector_id": {
+          "name": "sector_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "granted_by": {
+          "name": "granted_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "user_roles_user_id_users_id_fk": {
+          "name": "user_roles_user_id_users_id_fk",
+          "tableFrom": "user_roles",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "user_roles_role_id_roles_id_fk": {
+          "name": "user_roles_role_id_roles_id_fk",
+          "tableFrom": "user_roles",
+          "tableTo": "roles",
+          "columnsFrom": [
+            "role_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "user_roles_sector_id_sectors_id_fk": {
+          "name": "user_roles_sector_id_sectors_id_fk",
+          "tableFrom": "user_roles",
+          "tableTo": "sectors",
+          "columnsFrom": [
+            "sector_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "user_roles_granted_by_users_id_fk": {
+          "name": "user_roles_granted_by_users_id_fk",
+          "tableFrom": "user_roles",
+          "tableTo": "users",
+          "columnsFrom": [
+            "granted_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
+    },
+    "public.users": {
+      "name": "users",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sector_id": {
+          "name": "sector_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "email": {
+          "name": "email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "password_hash": {
+          "name": "password_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "full_name": {
+          "name": "full_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "is_active": {
+          "name": "is_active",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "notification_preferences": {
+          "name": "notification_preferences",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "users_tenant_id_organizations_id_fk": {
+          "name": "users_tenant_id_organizations_id_fk",
+          "tableFrom": "users",
+          "tableTo": "organizations",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "users_sector_id_sectors_id_fk": {
+          "name": "users_sector_id_sectors_id_fk",
+          "tableFrom": "users",
+          "tableTo": "sectors",
+          "columnsFrom": [
+            "sector_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
+    }
+  },
+  "enums": {},
+  "schemas": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

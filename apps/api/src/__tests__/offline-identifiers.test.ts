@@ -3,12 +3,16 @@ import { db } from "../db";
 import { withTenant } from "../db/withTenant";
 import { getFreshRoles } from "../middleware/auth";
 import { eq, and, sql } from "drizzle-orm";
-import { organizations, sectors, users, roles, userRoles, categories, devices, identifierLeases, identifierReleasePool, identifiers, auditLogs, idempotencyRecords } from "../db/schema";
+import { organizations, sectors, users, roles, userRoles, categories, devices, identifierLeases, identifierReleasePool, identifiers, auditLogs, idempotencyRecords, plans } from "../db/schema";
 import { generateIdentifier } from "../services/identifier.service";
 import { leaseIdentifiers, releaseLease, forceReleaseLease, registerOfflineIdentifiers } from "../services/lease.service";
 
 const rng = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 const tag = rng();
+
+const freePlanId = async () =>
+  (await db.select({ id: plans.id }).from(plans).where(eq(plans.isFree, true)))[0].id;
+
 const catSeqId = `TST-SEQ-${tag}`;
 const catNoSeqId = `TST-NOSEQ-${tag}`;
 
@@ -39,6 +43,7 @@ describe("M2 — Offline Identifiers (lease/release/force-release/register-offli
 
     const [org] = await db.insert(organizations).values({
       name: `M2 Test ${tag}`, slug: `m2-test-${tag}`,
+      planId: await freePlanId(),
     }).returning({ id: organizations.id });
     orgId = org.id;
 
@@ -503,6 +508,7 @@ describe("M2 — Offline Identifiers (lease/release/force-release/register-offli
     beforeAll(async () => {
       const [orgB] = await db.insert(organizations).values({
         name: `M2 TenantB ${tag}`, slug: `m2-tenantb-${tag}`,
+        planId: await freePlanId(),
       }).returning({ id: organizations.id });
       orgBId = orgB.id;
 

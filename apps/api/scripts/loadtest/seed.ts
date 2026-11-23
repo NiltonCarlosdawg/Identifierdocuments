@@ -1,5 +1,5 @@
 import { db } from "../../src/db";
-import { organizations, sectors, users, identifiers, notifications, categories } from "../../src/db/schema";
+import { organizations, sectors, users, identifiers, notifications, categories, plans } from "../../src/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { signToken } from "../../src/middleware/auth";
 
@@ -17,6 +17,9 @@ export async function seedTenants(): Promise<TenantSeed[]> {
   if (cats.length === 0) throw new Error("Nenhuma categoria encontrada — seed necessário primeiro");
   const catId = cats[0].id;
 
+  const [freePlan] = await db.select({ id: plans.id }).from(plans).where(eq(plans.isFree, true)).limit(1);
+  if (!freePlan) throw new Error("Nenhum plano free encontrado — seed necessário primeiro");
+
   const tenants: TenantSeed[] = [];
 
   for (const letter of ["a", "b", "c"]) {
@@ -25,6 +28,7 @@ export async function seedTenants(): Promise<TenantSeed[]> {
     const [org] = await db.insert(organizations).values({
       name: `LoadTest Org ${letter} ${TAG}`,
       slug: `loadtest-${letter}-${TAG}`,
+      planId: freePlan.id,
     }).returning({ id: organizations.id, slug: organizations.slug });
 
     const [sector] = await db.insert(sectors).values({

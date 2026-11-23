@@ -11,7 +11,7 @@ import { eq, and, sql } from "drizzle-orm";
 import {
   organizations, sectors, users, roles, userRoles,
   categories, devices, identifierLeases, identifiers,
-  auditLogs, idempotencyRecords, notifications,
+  auditLogs, idempotencyRecords, notifications, plans,
 } from "../db/schema";
 import { generateIdentifier } from "../services/identifier.service";
 import { leaseIdentifiers, releaseLease } from "../services/lease.service";
@@ -20,6 +20,9 @@ const rng = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 
 const tag = rng();
 const catSeqId = `CF-SEQ-${tag}`;
 const catNoSeqId = `CF-NOSEQ-${tag}`;
+
+const freePlanId = async () =>
+  (await db.select({ id: plans.id }).from(plans).where(eq(plans.isFree, true)))[0].id;
 
 let orgId: string;
 let sectorId: string;
@@ -39,6 +42,7 @@ describe("Fluxos Críticos — Auth, Identificadores, RBAC, Sync", () => {
 
     const [org] = await db.insert(organizations).values({
       name: `CF Test ${tag}`, slug: `cf-test-${tag}`, identifierPrefix: "CF",
+      planId: await freePlanId(),
     }).returning({ id: organizations.id });
     orgId = org.id;
 
@@ -106,6 +110,7 @@ describe("Fluxos Críticos — Auth, Identificadores, RBAC, Sync", () => {
     const otherTag = rng();
     const [otherOrg] = await db.insert(organizations).values({
       name: `CF Other ${otherTag}`, slug: `cf-other-${otherTag}`,
+      planId: await freePlanId(),
     }).returning({ id: organizations.id });
 
     await withTenant(otherOrg.id, async (tx) => {
@@ -322,6 +327,7 @@ describe("Fluxos Críticos — Auth, Identificadores, RBAC, Sync", () => {
     const otherTag = rng();
     const [otherOrg] = await db.insert(organizations).values({
       name: `CF Isolation ${otherTag}`, slug: `cf-iso-${otherTag}`,
+      planId: await freePlanId(),
     }).returning({ id: organizations.id });
 
     await withTenant(otherOrg.id, async (tx) => {

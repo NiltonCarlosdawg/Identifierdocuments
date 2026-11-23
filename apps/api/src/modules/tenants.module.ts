@@ -5,7 +5,7 @@ import { Type as t } from "@sinclair/typebox";
 import { db } from "../db";
 import { withTenant } from "../db/withTenant";
 import { sql } from "drizzle-orm";
-import { organizations, sectors, users, roles, userRoles } from "../db/schema";
+import { organizations, sectors, users, roles, userRoles, plans } from "../db/schema";
 import { eq, and, isNull } from "drizzle-orm";
 import { requireAuth, requireRole } from "../middleware/auth";
 import { checkRateLimit } from "../middleware/rateLimit";
@@ -43,6 +43,9 @@ export const tenantsModule = new (Elysia as any)({ prefix: "/tenants" })
         return { error: { code: "SLUG_TAKEN", message: "Este slug já está em uso." } };
       }
 
+      const [freePlan] = await db.select({ id: plans.id }).from(plans).where(eq(plans.isFree, true)).limit(1);
+      if (!freePlan) throw new Error("Plano free não encontrado. Corra o seed primeiro.");
+
       const orgId = randomUUID();
       const result = await withTenant(orgId, async (tx) => {
         const [org] = await tx
@@ -52,6 +55,7 @@ export const tenantsModule = new (Elysia as any)({ prefix: "/tenants" })
             name: body.name,
             slug,
             identifierPrefix: body.identifierPrefix ?? slug.toUpperCase().slice(0, 4),
+            planId: freePlan.id,
             termsAccepted: true,
             termsAcceptedAt: new Date(),
           })
@@ -134,12 +138,7 @@ export const tenantsModule = new (Elysia as any)({ prefix: "/tenants" })
       set.status = 404;
       return { error: { code: "NOT_FOUND", message: "Organização não encontrada." } };
     }
-    return {
-      data: {
-        ...org,
-        identifierLeaseBatchSize: org.identifierLeaseBatchSize,
-      },
-    };
+    return { data: org };
   }, {
     detail: { summary: "Dados da organização", tags: ["Organizações"] },
   })
@@ -163,7 +162,6 @@ export const tenantsModule = new (Elysia as any)({ prefix: "/tenants" })
       const updates: Record<string, unknown> = {};
       if (body.name !== undefined) updates.name = body.name;
       if (body.identifierPrefix !== undefined) updates.identifierPrefix = body.identifierPrefix;
-      if (body.identifierLeaseBatchSize !== undefined) updates.identifierLeaseBatchSize = body.identifierLeaseBatchSize;
 
       const [org] = await db
         .update(organizations)
@@ -179,7 +177,6 @@ export const tenantsModule = new (Elysia as any)({ prefix: "/tenants" })
     body: t.Object({
       name: t.Optional(t.String()),
       identifierPrefix: t.Optional(t.String({ maxLength: 6 })),
-      identifierLeaseBatchSize: t.Optional(t.Integer({ minimum: 10, maximum: 500 })),
     }),
     detail: { summary: "Actualizar organização", tags: ["Organizações"] },
   });
