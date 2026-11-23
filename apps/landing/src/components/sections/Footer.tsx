@@ -45,6 +45,7 @@ export function Footer() {
             { label: "Produto", href: "#produto" },
             { label: "Funcionalidades", href: "#funcionalidades" },
             { label: "Segurança", href: "#seguranca" },
+            { label: "Planos", href: "#planos" },
             { label: "Perguntas", href: "#perguntas" },
           ],
         },

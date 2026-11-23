@@ -6,6 +6,7 @@ import { HowItWorks } from "@/components/sections/HowItWorks";
 import { Security } from "@/components/sections/Security";
 import { Faq } from "@/components/sections/Faq";
 import { DownloadSection } from "@/components/ui/download-section";
+import { Checkout } from "@/components/sections/Checkout";
 import { Footer } from "@/components/sections/Footer";
 
 export default function App() {
@@ -21,6 +22,7 @@ export default function App() {
         <Features />
         <HowItWorks />
         <Security />
+        <Checkout />
         <Faq />
         <DownloadSection />
       </main>
