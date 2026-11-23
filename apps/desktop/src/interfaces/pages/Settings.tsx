@@ -160,11 +160,27 @@ function AppearanceTab() {
   );
 }
 
+type LicenseView = {
+  licenseNumber: string | null;
+  state: string;
+  status: string | null;
+  planName: string | null;
+  maxUsers: number | null;
+  validUntil: string | null;
+};
+
+type OrgView = {
+  name: string;
+  slug: string;
+  identifierPrefix: string;
+  subscription: { status: string; planName: string; price: number; expiresAt: string | null };
+};
+
 function OrganizationTab() {
-  const [org, setOrg] = useState<{ name: string; slug: string; identifierPrefix: string; plan: string; identifierLeaseBatchSize: number | null } | null>(null);
+  const [org, setOrg] = useState<OrgView | null>(null);
+  const [license, setLicense] = useState<LicenseView | null>(null);
   const [name, setName] = useState("");
   const [prefix, setPrefix] = useState("");
-  const [batchSize, setBatchSize] = useState(50);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
@@ -172,28 +188,34 @@ function OrganizationTab() {
   const [exportingStats, setExportingStats] = useState(false);
   const [exportError, setExportError] = useState("");
 
-  const { loading, error: loadError, isStale, cachedAt, refresh } = useOfflineCache<{ name: string; slug: string; identifierPrefix: string; plan: string; identifierLeaseBatchSize: number | null }>({
+  const { loading, error: loadError, isStale, cachedAt, refresh } = useOfflineCache<OrgView>({
     endpoint: "/tenants/me",
     fetcher: async () => {
-      const res = await api.get<{ data: { name: string; slug: string; identifierPrefix: string; plan: string; identifierLeaseBatchSize: number | null } }>("/tenants/me");
+      const res = await api.get<{ data: OrgView }>("/tenants/me");
       return res.data;
     },
     onData: data => {
       setOrg(data);
       setName(data.name);
       setPrefix(data.identifierPrefix);
-      setBatchSize(data.identifierLeaseBatchSize ?? 50);
     },
   });
+
+  useEffect(() => {
+    let alive = true;
+    api.get<{ data: LicenseView }>("/tenants/me/license")
+      .then(res => { if (alive) setLicense(res.data); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
 
   const handleSave = async () => {
     setSaving(true);
     setError("");
     try {
-      const res = await api.patch<{ data: { name: string; identifierPrefix: string; identifierLeaseBatchSize: number } }>("/tenants/me", {
+      const res = await api.patch<{ data: OrgView }>("/tenants/me", {
         name,
         identifierPrefix: prefix,
-        identifierLeaseBatchSize: batchSize,
       });
       setOrg(o => o ? { ...o, ...res.data } : null);
       setSaved(true);
@@ -250,17 +272,15 @@ function OrganizationTab() {
           <label className="mb-1.5 block text-xs font-semibold text-docid-muted">Slug</label>
           <input value={org?.slug ?? ""} readOnly className="docid-input w-full font-mono bg-docid-surface-low text-docid-muted cursor-not-allowed" />
         </div>
-        <div>
-          <label className="mb-1.5 block text-xs font-semibold text-docid-muted">Tamanho do lote de identificadores</label>
-          <div className="flex items-center gap-3">
-            <input type="number" value={batchSize} onChange={e => setBatchSize(Math.max(10, Math.min(500, parseInt(e.target.value) || 50)))} min={10} max={500} className="docid-input w-32 font-mono" />
-            <span className="text-xs text-docid-muted">(10–500) Números reservados por lease em cada dispositivo</span>
-          </div>
-          <p className="mt-1 text-xs text-docid-muted">Valores mais altos reduzem a frequência de renovações mas aumentam o desperdício se o dispositivo for perdido.</p>
-        </div>
-        <div>
-          <label className="mb-1.5 block text-xs font-semibold text-docid-muted">Plano</label>
-          <input value={org?.plan ?? ""} readOnly className="docid-input w-full bg-docid-surface-low text-docid-muted cursor-not-allowed" />
+        <div className="rounded-lg border border-docid-border bg-docid-surface-low p-4 space-y-1.5" data-testid="license-details">
+          <p className="text-xs font-semibold uppercase tracking-wider text-docid-muted">Licença</p>
+          <p className="font-mono text-sm text-docid-text">{license?.licenseNumber ?? "—"}</p>
+          <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+            <dt className="text-docid-muted">Plano</dt><dd className="text-docid-text">{license?.planName ?? org?.subscription.planName ?? "—"}</dd>
+            <dt className="text-docid-muted">Estado</dt><dd className="text-docid-text">{license?.state ?? org?.subscription.status ?? "—"}</dd>
+            <dt className="text-docid-muted">Validade</dt><dd className="text-docid-text">{license?.validUntil ? new Date(license.validUntil).toLocaleDateString("pt-AO") : "Sem prazo"}</dd>
+            <dt className="text-docid-muted">Utilizadores</dt><dd className="text-docid-text">{license?.maxUsers ?? "Sem limite"}</dd>
+          </dl>
         </div>
         <div className="flex items-center gap-3">
           <button onClick={handleSave} disabled={saving || !name.trim()} className="docid-button-primary"><Save className="h-4 w-4" /> {saving ? "A guardar..." : "Guardar"}</button>

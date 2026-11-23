@@ -156,8 +156,6 @@ export const tenantsModule = new (Elysia as any)({ prefix: "/tenants" })
     detail: { summary: "Dados da organização", tags: ["Organizações"] },
   })
 
-  .use(requireRole("ORG_ADMIN"))
-
   .get("/me/license", async ({ auth }) => {
     const ctx = await getLicenseContext(auth!.tenantId);
     return {
@@ -171,6 +169,8 @@ export const tenantsModule = new (Elysia as any)({ prefix: "/tenants" })
       },
     };
   }, { detail: { summary: "Licença da organização", tags: ["Organizações"] } })
+
+  .use(requireRole("ORG_ADMIN"))
 
   .get("/me/stats", async ({ auth, set }) => {
     try {

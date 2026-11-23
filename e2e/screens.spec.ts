@@ -6,10 +6,11 @@ const password = "testpass123";
 
 test.describe("Ecrãs da aplicação", () => {
   test.beforeEach(async ({ page }) => {
-    await page.addInitScript(() => {
+    const apiBaseUrl = process.env.E2E_API_URL || "http://127.0.0.1:3002";
+    await page.addInitScript((base) => {
       localStorage.setItem("docid-config", JSON.stringify({
         state: {
-          apiBaseUrl: "http://127.0.0.1:3002",
+          apiBaseUrl: base,
           theme: "dark",
           avatar: null,
           defaultScanner: null,
@@ -18,7 +19,7 @@ test.describe("Ecrãs da aplicação", () => {
         },
         version: 0,
       }));
-    });
+    }, apiBaseUrl);
   });
 
   test("onboarding, login, navegação e geração de identificador", async ({ page }) => {
@@ -57,6 +58,11 @@ test.describe("Ecrãs da aplicação", () => {
       await page.getByRole("link", { name: label }).click();
       await expect(page).toHaveURL(new RegExp(label === "Identificadores" ? "identificadores" : label === "Documentos" ? "documentos" : label === "Aprovações" ? "aprovacoes" : label === "Sectores" ? "sectores" : label === "Utilizadores" ? "utilizadores" : label === "Auditoria" ? "auditoria" : "configuracoes"));
     }
+
+    await page.getByRole("link", { name: "Configurações" }).click();
+    await page.getByRole("button", { name: "Organização" }).click();
+    await expect(page.getByTestId("license-details")).toBeVisible();
+    await expect(page.getByTestId("license-details")).toContainText(/DOCID-\d{4}-/);
 
     await page.getByRole("link", { name: "Identificadores" }).click();
     await page.getByRole("button", { name: /Gerar identificador/ }).click();

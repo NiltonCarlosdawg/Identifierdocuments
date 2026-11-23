@@ -7,6 +7,7 @@ import OfflineQueuePanel, { OfflineQueueBadge } from "./OfflineQueuePanel";
 import WriteQueuePanel, { WriteQueueBadge } from "./WriteQueuePanel";
 import NotificationBell from "./NotificationBell";
 import NativeNotificationsBridge from "./NativeNotificationsBridge";
+import LicenseBanner from "./LicenseBanner";
 
 const navItems = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -83,6 +84,7 @@ export default function Layout() {
             </div>
           </div>
         </header>
+        <LicenseBanner />
         <main className="flex-1 overflow-y-auto bg-docid-background"><div className="mx-auto max-w-7xl px-6 py-7"><Outlet /></div></main>
       </div>
       <OfflineQueuePanel />
