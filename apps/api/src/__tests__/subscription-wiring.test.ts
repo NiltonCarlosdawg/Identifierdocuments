@@ -24,6 +24,7 @@ let importPlanId = "";
 let memberRoleId = "";
 let quotaPlanId = "";
 let uploadPlanId = "";
+let registeredTenantId = "";
 
 async function api<T>(
   path: string,
@@ -95,26 +96,29 @@ beforeAll(async () => {
   memberRoleId = memberRole.body.data.id;
 }, 45000);
 
+async function cleanupTenant(id: string) {
+  await withTenant(id, async (tx) => {
+    await tx.delete(documentVersions).where(eq(documentVersions.tenantId, id));
+    await tx.delete(documents).where(eq(documents.tenantId, id));
+    await tx.delete(auditLogs).where(eq(auditLogs.tenantId, id));
+    await tx.delete(identifiers).where(eq(identifiers.tenantId, id));
+    await tx.delete(userRoles).where(
+      sql`${userRoles.userId} IN (SELECT ${users.id} FROM ${users} WHERE ${users.tenantId} = ${id})`,
+    );
+    await tx.delete(users).where(eq(users.tenantId, id));
+    await tx.delete(rolePermissions).where(
+      sql`${rolePermissions.roleId} IN (SELECT ${roles.id} FROM ${roles} WHERE ${roles.tenantId} = ${id})`,
+    );
+    await tx.delete(roles).where(eq(roles.tenantId, id));
+    await tx.delete(sectors).where(eq(sectors.tenantId, id));
+    await tx.delete(organizations).where(eq(organizations.id, id));
+  });
+}
+
 afterAll(async () => {
   serverProc?.kill(9);
-  if (tenantId) {
-    await withTenant(tenantId, async (tx) => {
-      await tx.delete(documentVersions).where(eq(documentVersions.tenantId, tenantId));
-      await tx.delete(documents).where(eq(documents.tenantId, tenantId));
-      await tx.delete(auditLogs).where(eq(auditLogs.tenantId, tenantId));
-      await tx.delete(identifiers).where(eq(identifiers.tenantId, tenantId));
-      await tx.delete(userRoles).where(
-        sql`${userRoles.userId} IN (SELECT ${users.id} FROM ${users} WHERE ${users.tenantId} = ${tenantId})`,
-      );
-      await tx.delete(users).where(eq(users.tenantId, tenantId));
-      await tx.delete(rolePermissions).where(
-        sql`${rolePermissions.roleId} IN (SELECT ${roles.id} FROM ${roles} WHERE ${roles.tenantId} = ${tenantId})`,
-      );
-      await tx.delete(roles).where(eq(roles.tenantId, tenantId));
-      await tx.delete(sectors).where(eq(sectors.tenantId, tenantId));
-      await tx.delete(organizations).where(eq(organizations.id, tenantId));
-    });
-  }
+  if (tenantId) await cleanupTenant(tenantId);
+  if (registeredTenantId) await cleanupTenant(registeredTenantId);
   if (importPlanId) await db.delete(plans).where(eq(plans.id, importPlanId));
   if (quotaPlanId) await db.delete(plans).where(eq(plans.id, quotaPlanId));
   if (uploadPlanId) await db.delete(plans).where(eq(plans.id, uploadPlanId));
@@ -379,5 +383,48 @@ describe("limite de 1 upload/dia na expiração", () => {
     expect((await post("/documents/attach", docForm(await newIdentifier(), "manual"))).status).toBe(200);
     expect((await post("/documents/attachments", docForm(primaryIdentifier, "manual"))).status).toBe(200);
     expect((await post(`/documents/${documentId}/versions`, versionForm(primaryIdentifier, "manual"))).status).toBe(200);
+  });
+});
+
+describe("registo com plano free e estado de subscrição", () => {
+  test("registo público cria tenant no plano free; /tenants/me devolve a subscrição", async () => {
+    const email = `wiring-registered-${RUN_ID}@test.docid`;
+    const created = await api<any>("/tenants", {
+      method: "POST",
+      body: JSON.stringify({
+        name: `Wiring Registered ${RUN_ID}`,
+        slug: `wiring-registered-${RUN_ID}`,
+        adminEmail: email,
+        adminPassword: "testpass123",
+        identifierPrefix: "REG",
+        termsAccepted: true,
+      }),
+    });
+    expect(created.status).toBe(200);
+    registeredTenantId = created.body.data.id;
+
+    const login = await api<any>("/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email, password: "testpass123" }),
+    });
+    expect(login.status).toBe(200);
+
+    const me = await api<any>("/tenants/me", { token: login.body.data.token });
+    expect(me.status).toBe(200);
+    expect(me.body.data.subscription).toEqual({
+      status: "free",
+      planName: "Free",
+      price: 0,
+      expiresAt: null,
+    });
+  });
+
+  test("PATCH /tenants/me ignora identifierLeaseBatchSize enviado pelo desktop atual", async () => {
+    const res = await api<any>("/tenants/me", {
+      method: "PATCH",
+      token: adminToken,
+      body: JSON.stringify({ identifierPrefix: "WIR", identifierLeaseBatchSize: 50 }),
+    });
+    expect(res.status).toBe(200);
   });
 });

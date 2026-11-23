@@ -47,7 +47,7 @@ export async function getFreePlan(executor?: DB): Promise<typeof plans.$inferSel
   const [plan] = await (executor ?? db).select().from(plans)
     .where(eq(plans.isFree, true))
     .limit(1);
-  if (!plan) throw new Error("Plano gratuito não encontrado.");
+  if (!plan) throw new Error("Plano free não encontrado. Corra o seed primeiro.");
   return plan;
 }
 

@@ -5,13 +5,14 @@ import { Type as t } from "@sinclair/typebox";
 import { db } from "../db";
 import { withTenant } from "../db/withTenant";
 import { sql } from "drizzle-orm";
-import { organizations, sectors, users, roles, userRoles, plans } from "../db/schema";
+import { organizations, sectors, users, roles, userRoles } from "../db/schema";
 import { eq, and, isNull } from "drizzle-orm";
 import { requireAuth, requireRole } from "../middleware/auth";
 import { checkRateLimit } from "../middleware/rateLimit";
 import { collectStats } from "./stats.module";
 import { safeError } from "../lib/errors";
 import { getClientIp } from "../lib/ip";
+import { getFreePlan, getSubscriptionContext } from "../services/subscription.service";
 
 export const tenantsModule = new (Elysia as any)({ prefix: "/tenants" })
 
@@ -43,11 +44,9 @@ export const tenantsModule = new (Elysia as any)({ prefix: "/tenants" })
         return { error: { code: "SLUG_TAKEN", message: "Este slug já está em uso." } };
       }
 
-      const [freePlan] = await db.select({ id: plans.id }).from(plans).where(eq(plans.isFree, true)).limit(1);
-      if (!freePlan) throw new Error("Plano free não encontrado. Corra o seed primeiro.");
-
       const orgId = randomUUID();
       const result = await withTenant(orgId, async (tx) => {
+        const freePlan = await getFreePlan(tx);
         const [org] = await tx
           .insert(organizations)
           .values({
@@ -138,7 +137,18 @@ export const tenantsModule = new (Elysia as any)({ prefix: "/tenants" })
       set.status = 404;
       return { error: { code: "NOT_FOUND", message: "Organização não encontrada." } };
     }
-    return { data: org };
+    const { plan, status } = await getSubscriptionContext(auth!.tenantId);
+    return {
+      data: {
+        ...org,
+        subscription: {
+          status,
+          planName: plan.name,
+          price: plan.price,
+          expiresAt: org.subscriptionExpiresAt?.toISOString() ?? null,
+        },
+      },
+    };
   }, {
     detail: { summary: "Dados da organização", tags: ["Organizações"] },
   })
