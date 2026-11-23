@@ -22,9 +22,10 @@ async function findByDaysLeft(now: Date, days: number[], dueOnly = false): Promi
   const filters = [
     eq(organizations.subscriptionStatus, "paid"),
     isNotNull(organizations.subscriptionExpiresAt),
-    inArray(daysLeft(now), days),
   ];
+  // dueOnly = todas as vencidas, qualquer que seja o bucket de dias.
   if (dueOnly) filters.push(lt(organizations.subscriptionExpiresAt, now));
+  else filters.push(inArray(daysLeft(now), days));
   const rows = await db.select({
     tenantId: organizations.id,
     name: organizations.name,
@@ -56,7 +57,7 @@ export async function flipExpiredTenants(now: Date): Promise<number> {
 
 export async function runRenewalSweep(now: Date): Promise<{ reminded: number; expired: number }> {
   // Capturar antes do flip: depois dele estas organizações deixam de ser "paid".
-  const dueToday = await findByDaysLeft(now, [0], true);
+  const overdue = await findByDaysLeft(now, [], true);
   const expiring = await findByDaysLeft(now, [30, 14, 2]);
   const expired = await flipExpiredTenants(now);
 
@@ -73,7 +74,7 @@ export async function runRenewalSweep(now: Date): Promise<{ reminded: number; ex
     }
   }
 
-  for (const org of dueToday) {
+  for (const org of overdue) {
     try {
       await sendProviderExpiryAlertEmail(process.env.PROVIDER_NOTIFY_EMAIL || "", {
         tenantId: org.tenantId, tenantName: org.name, contactEmail: org.contactEmail,

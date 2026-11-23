@@ -78,7 +78,7 @@ describe("lembretes de renovação", () => {
     expect(futureRow.status).toBe("paid");
   });
 
-  test("runRenewalSweep sem SMTP não lança, conta lembretes/expirações e alerta a provedora no dia 0", async () => {
+  test("runRenewalSweep sem SMTP não lança, conta lembretes/expirações e alerta a provedora", async () => {
     await mkOrg("sw30", 30);
     await mkOrg("sw14", 14);
     await mkOrg("sw2", 2);
@@ -100,8 +100,8 @@ describe("lembretes de renovação", () => {
     let alerted = false;
     try {
       result = await runRenewalSweep(now);
-      // Prova que o alerta à provedora foi gerado para a org expirada hoje,
-      // mesmo depois do flip a "expired".
+      // Prova que o alerta à provedora foi gerado para a org vencida,
+      // capturada antes do flip a "expired".
       alerted = infoSpy.mock.calls.some((args) =>
         args.some((a) => typeof a === "string" && a.includes(today.id)));
     } finally {
@@ -111,5 +111,40 @@ describe("lembretes de renovação", () => {
     expect(result.reminded).toBe(expectedReminded);
     expect(result.expired).toBeGreaterThanOrEqual(expectedDue);
     expect(alerted).toBe(true);
+  });
+
+  test("alerta a provedora na execução seguinte mesmo quando o dia UTC já virou", async () => {
+    const later = await mkOrg("swlater", 10 / 24); // expira às 18:00 UTC do mesmo dia
+    const laterNow = new Date(now.getTime() + 24 * 60 * 60 * 1000); // próxima execução 08:00: daysLeft = -1
+
+    const spyBefore = spyOn(logger, "info");
+    let alertedBefore = false;
+    try {
+      await runRenewalSweep(now); // 08:00: ainda não venceu
+      alertedBefore = spyBefore.mock.calls.some((args) =>
+        args.some((a) => typeof a === "string" && a.includes(later.id)));
+    } finally {
+      spyBefore.mockRestore();
+    }
+    expect(alertedBefore).toBe(false);
+    const [rowBefore] = await db.select({ status: organizations.subscriptionStatus })
+      .from(organizations).where(eq(organizations.id, later.id));
+    expect(rowBefore.status).toBe("paid");
+
+    const spyAfter = spyOn(logger, "info");
+    let alertedAfter = false;
+    let sweep: { reminded: number; expired: number };
+    try {
+      sweep = await runRenewalSweep(laterNow); // dia seguinte: venceu às 18:00 de ontem
+      alertedAfter = spyAfter.mock.calls.some((args) =>
+        args.some((a) => typeof a === "string" && a.includes(later.id)));
+    } finally {
+      spyAfter.mockRestore();
+    }
+    expect(alertedAfter).toBe(true);
+    expect(sweep.expired).toBeGreaterThanOrEqual(1);
+    const [rowAfter] = await db.select({ status: organizations.subscriptionStatus })
+      .from(organizations).where(eq(organizations.id, later.id));
+    expect(rowAfter.status).toBe("expired");
   });
 });
