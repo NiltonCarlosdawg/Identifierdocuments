@@ -45,6 +45,21 @@ jobs:
           scp -i /tmp/deploy_key -o StrictHostKeyChecking=no /tmp/api.tgz /tmp/landing.tgz /tmp/admin.tgz milvendas@135.181.34.42:/tmp/docid-deploy/
           echo "upload ok"
 
+      - name: Download installer 1.2.2
+        run: |
+          curl -fsSL --retry 3 --max-time 900 \
+            -o /tmp/installer.exe \
+            https://github.com/NiltonCarlosdawg/Identifierdocuments/releases/download/desktop-v1.2.2/DocID_1.2.2_x64-setup.exe
+          sha256sum /tmp/installer.exe | cut -d' ' -f1 > /tmp/installer.sha
+
+      - name: Upload installer
+        run: |
+          SSH="ssh -i /tmp/deploy_key -o StrictHostKeyChecking=no milvendas@135.181.34.42"
+          $SSH 'mkdir -p /mnt/homer2/milvendas/docid.milvendas.ao/downloads'
+          scp -i /tmp/deploy_key -o StrictHostKeyChecking=no /tmp/installer.exe milvendas@135.181.34.42:/mnt/homer2/milvendas/docid.milvendas.ao/downloads/DocID_1.2.2_x64-setup.exe
+          HASH=$(cat /tmp/installer.sha)
+          $SSH "cd /mnt/homer2/milvendas/docid.milvendas.ao/downloads && printf '%s  DocID_1.2.2_x64-setup.exe\\n' '$HASH' > SHA256SUMS && sha256sum -c SHA256SUMS"
+
       - name: Deploy API
         run: |
           SSH="ssh -i /tmp/deploy_key -o StrictHostKeyChecking=no milvendas@135.181.34.42"
