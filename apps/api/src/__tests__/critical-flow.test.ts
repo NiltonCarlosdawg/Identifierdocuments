@@ -25,6 +25,7 @@ const freePlanId = async () =>
   (await db.select({ id: plans.id }).from(plans).where(eq(plans.isFree, true)))[0].id;
 
 let orgId: string;
+let paidCfPlanId: string;
 let sectorId: string;
 let userId: string;
 let adminUserId: string;
@@ -40,9 +41,16 @@ describe("Fluxos Críticos — Auth, Identificadores, RBAC, Sync", () => {
       { id: catNoSeqId, name: "CF Non-Sequential", group: "Test", prefix: catNoSeqId, requiresSequential: false },
     ]);
 
+    // O teste 3 faz dois leases no mesmo dispositivo; o free só dá 10 por máquina.
+    const [paid] = await db.insert(plans).values({
+      name: `cf-paid-${tag}`, price: 100000, maxUsers: 50,
+      monthlyOnlineIdentifiers: 100000, offlineBudgetPerMachine: 100000,
+    }).returning({ id: plans.id });
+    paidCfPlanId = paid.id;
+
     const [org] = await db.insert(organizations).values({
       name: `CF Test ${tag}`, slug: `cf-test-${tag}`, identifierPrefix: "CF",
-      planId: await freePlanId(),
+      planId: paidCfPlanId, subscriptionStatus: "paid",
     }).returning({ id: organizations.id });
     orgId = org.id;
 
@@ -91,6 +99,7 @@ describe("Fluxos Críticos — Auth, Identificadores, RBAC, Sync", () => {
     await db.delete(sectors).where(eq(sectors.tenantId, orgId));
     await db.delete(organizations).where(eq(organizations.id, orgId));
     await db.delete(categories).where(sql`${categories.id} IN (${catSeqId}, ${catNoSeqId})`);
+    await db.delete(plans).where(eq(plans.id, paidCfPlanId));
   });
 
   // ============================================================

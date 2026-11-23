@@ -17,6 +17,7 @@ const catSeqId = `TST-SEQ-${tag}`;
 const catNoSeqId = `TST-NOSEQ-${tag}`;
 
 let orgId: string;
+let paidOfflinePlanId: string;
 let sectorId: string;
 let userId: string;
 let adminUserId: string;
@@ -41,9 +42,17 @@ describe("M2 — Offline Identifiers (lease/release/force-release/register-offli
       { id: catNoSeqId, name: "Test Non-Sequential", group: "Test", prefix: catNoSeqId, requiresSequential: false },
     ]);
 
+    // Estes testes reservam lotes de 50 (e vários leases por dispositivo): o plano
+    // free dá só 10 por máquina, por isso a fixture usa um plano pago com orçamento alto.
+    const [paid] = await db.insert(plans).values({
+      name: `m2-paid-${tag}`, price: 100000, maxUsers: 50,
+      monthlyOnlineIdentifiers: 100000, offlineBudgetPerMachine: 100000,
+    }).returning({ id: plans.id });
+    paidOfflinePlanId = paid.id;
+
     const [org] = await db.insert(organizations).values({
       name: `M2 Test ${tag}`, slug: `m2-test-${tag}`,
-      planId: await freePlanId(),
+      planId: paidOfflinePlanId, subscriptionStatus: "paid",
     }).returning({ id: organizations.id });
     orgId = org.id;
 
@@ -101,6 +110,7 @@ describe("M2 — Offline Identifiers (lease/release/force-release/register-offli
       }
     }
     await db.execute(sql`DELETE FROM organizations WHERE slug LIKE ${`m2-%-${tag}`}`);
+    await db.execute(sql`DELETE FROM plans WHERE id = ${paidOfflinePlanId}`);
     await db.execute(sql`DELETE FROM categories WHERE id IN (${catSeqId}, ${catNoSeqId})`);
   });
 

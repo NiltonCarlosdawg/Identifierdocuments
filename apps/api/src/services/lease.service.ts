@@ -1,8 +1,12 @@
 import type { DB } from "../db";
 import { identifiers, categories, organizations, devices, identifierLeases, identifierReleasePool, auditLogs, idempotencyRecords } from "../db/schema";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, gte, sql } from "drizzle-orm";
 import type { AuthPayload } from "../middleware/auth";
 import { getFreshRoles } from "../middleware/auth";
+import { getSubscriptionContext, SubscriptionError } from "./subscription.service";
+import { isTenantAdmin } from "./access-decision.service";
+
+export const DEFAULT_LEASE_BATCH_SIZE = 50;
 
 /** Dispositivo utilizável: registado pelo user, mesmo sector, ou ORG_ADMIN.
  *
@@ -47,9 +51,28 @@ export async function leaseIdentifiers(
     throw new Error("Sem permissão para reservar sequências noutro sector.");
   }
 
-  // shortcut: identifier_lease_batch_size foi removido (task subscriptions-1); batch fixo
-  // em 50 até a task 6 substituir pelo orçamento offline por máquina (10 no plano free).
-  const batchSize = 50;
+  const { plan, status } = await getSubscriptionContext(auth.tenantId, tx);
+  if (status === "expired" || status === "suspended") {
+    throw new SubscriptionError("SUBSCRIPTION_RESTRICTED", "Subscrição expirada ou suspensa. Não é possível reservar novas sequências.");
+  }
+  const isAdmin = isTenantAdmin(roles);
+  if (status === "free" && !isAdmin) {
+    throw new SubscriptionError("OFFLINE_ADMIN_ONLY", "Geração offline disponível apenas para o administrador no plano Free.");
+  }
+
+  // No free o orçamento nunca repõe (todas as leases contam); no paid só as do mês corrente.
+  const [used] = await tx.select({ n: sql<number>`COALESCE(SUM(end_seq - start_seq + 1), 0)::int` })
+    .from(identifierLeases)
+    .where(and(
+      eq(identifierLeases.tenantId, auth.tenantId),
+      eq(identifierLeases.deviceId, opts.deviceId),
+      status === "paid" ? gte(identifierLeases.createdAt, sql`date_trunc('month', now())`) : undefined,
+    ));
+  const remaining = plan.offlineBudgetPerMachine - Number(used.n);
+  if (remaining <= 0) {
+    throw new SubscriptionError("LEASE_BUDGET_EXCEEDED", "Orçamento offline da máquina esgotado. Contacte o administrador.");
+  }
+  const batchSize = Math.min(DEFAULT_LEASE_BATCH_SIZE, remaining);
 
   const [lease] = await tx.transaction(async (tx2) => {
     // CORREÇÃO (Fix 4): Usar dois inteiros de 32 bits para reduzir colisões de hash

@@ -11,7 +11,7 @@ import { categories, devices } from "../db/schema";
 import { safeError } from "../lib/errors";
 import { getClientIp } from "../lib/ip";
 import { isTenantAdmin } from "../services/access-decision.service";
-import { checkIdentifierQuota } from "../services/subscription.service";
+import { checkIdentifierQuota, SubscriptionError } from "../services/subscription.service";
 
 export const identifiersModule = new (Elysia as any)({ prefix: "/identifiers" })
   .use(requireAuth())
@@ -33,6 +33,10 @@ export const identifiersModule = new (Elysia as any)({ prefix: "/identifiers" })
         }
       });
     } catch (err: any) {
+      if (err instanceof SubscriptionError) {
+        set.status = 403;
+        return { error: { code: err.code, message: err.message } };
+      }
       set.status = 400;
       return { error: { code: "LEASE_ERROR", message: safeError(err) } };
     }
