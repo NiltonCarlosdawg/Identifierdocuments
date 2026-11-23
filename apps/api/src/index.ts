@@ -38,10 +38,12 @@ const app = new (Elysia as any)(isBun ? {} : { adapter: node() })
   .use(cors({
     origin: [
       "http://localhost:1420", "http://127.0.0.1:1420", "tauri://localhost", "https://tauri.localhost",
+      ...(process.env.ADMIN_ORIGIN ? [process.env.ADMIN_ORIGIN] : []),
       //Origens do frontend em modo browser (dev/e2e); em produção não são aceites.
       ...(process.env.NODE_ENV === "production" ? [] : [
         "http://localhost:4173", "http://127.0.0.1:4173",
         "http://localhost:5173", "http://127.0.0.1:5173",
+        "http://localhost:5174", "http://127.0.0.1:5174",
       ]),
     ],
     credentials: true,
