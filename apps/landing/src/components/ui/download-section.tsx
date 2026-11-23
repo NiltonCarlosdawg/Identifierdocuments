@@ -7,9 +7,9 @@ const ALL_RELEASES = "https://github.com/NiltonCarlosdawg/Identifierdocuments/re
 
 export const DOWNLOADS = {
   installer: {
-    href: "/downloads/DocID_1.1.6_x64-setup-WebView2.exe",
-    size: "223 MB",
-    sha256: "87076c74a2f2b8b5c83e35b08c50a7ef24f712133edf17d5e4642214662badd9",
+    href: "/downloads/DocID_1.2.2_x64-setup.exe",
+    size: "290 MB",
+    sha256: "a05d6aa282bc87f9df2b6b96a99c85df2e05305eaa8cbd7aada29f9a34fb9556",
   },
 } as const;
 
@@ -80,7 +80,7 @@ export function DownloadSection() {
             Instale o DocID no Windows
           </h2>
           <p className="mx-auto mt-5 max-w-xl text-base leading-relaxed text-docid-muted">
-            Versão 1.1.6 para Windows 10 e 11, 64 bits. A conta é criada pela sua organização; depois de instalar,
+            Versão 1.2.2 para Windows 10 e 11, 64 bits. A conta é criada pela sua organização; depois de instalar,
             entre com as credenciais que recebeu.
           </p>
         </Reveal>
