@@ -24,6 +24,7 @@ let importPlanId = "";
 let memberRoleId = "";
 let quotaPlanId = "";
 let uploadPlanId = "";
+let statusPlanId = "";
 let registeredTenantId = "";
 
 async function api<T>(
@@ -122,6 +123,7 @@ afterAll(async () => {
   if (importPlanId) await db.delete(plans).where(eq(plans.id, importPlanId));
   if (quotaPlanId) await db.delete(plans).where(eq(plans.id, quotaPlanId));
   if (uploadPlanId) await db.delete(plans).where(eq(plans.id, uploadPlanId));
+  if (statusPlanId) await db.delete(plans).where(eq(plans.id, statusPlanId));
 });
 
 describe("limite de utilizadores no wiring dos endpoints", () => {
@@ -190,6 +192,65 @@ describe("limite de utilizadores no wiring dos endpoints", () => {
       `import-1-${RUN_ID}@test.docid`,
       `import-2-${RUN_ID}@test.docid`,
     ].sort());
+  });
+});
+
+describe("estado da subscrição ao adicionar utilizadores", () => {
+  let sectorId = "";
+
+  beforeAll(async () => {
+    const [plan] = await db.insert(plans).values({
+      name: `wiring-status-${RUN_ID}`,
+      price: 100000,
+      maxUsers: 10,
+      monthlyOnlineIdentifiers: 100,
+      offlineBudgetPerMachine: 100,
+    }).returning();
+    statusPlanId = plan.id;
+    await db.update(organizations).set({
+      planId: plan.id,
+      subscriptionStatus: "paid",
+      subscriptionExpiresAt: null,
+    }).where(eq(organizations.id, tenantId));
+    const list = await api<any>("/sectors", { token: adminToken });
+    sectorId = list.body.data[0].id;
+  });
+
+  function invite(suffix: string) {
+    return api<any>("/users/invite", {
+      method: "POST",
+      token: adminToken,
+      body: JSON.stringify({
+        email: `wiring-${suffix}-${RUN_ID}@test.docid`,
+        fullName: "Convidado",
+        sectorId,
+        role: "MEMBER",
+      }),
+    });
+  }
+
+  test("paid ativo com headroom: invite permitido", async () => {
+    const res = await invite("status-active");
+    expect(res.status).toBe(200);
+    expect(res.body.data.id).toBeDefined();
+  });
+
+  test("expirado com headroom: invite 403 SUBSCRIPTION_RESTRICTED", async () => {
+    await db.update(organizations).set({ subscriptionStatus: "expired" })
+      .where(eq(organizations.id, tenantId));
+    const res = await invite("status-expired");
+    expect(res.status).toBe(403);
+    expect(res.body.error?.code).toBe("SUBSCRIPTION_RESTRICTED");
+    expect(res.body.error?.message).toBe("Subscrição expirada. Contacte o administrador.");
+  });
+
+  test("suspenso com headroom: invite 403 SUBSCRIPTION_RESTRICTED", async () => {
+    await db.update(organizations).set({ subscriptionStatus: "suspended" })
+      .where(eq(organizations.id, tenantId));
+    const res = await invite("status-suspended");
+    expect(res.status).toBe(403);
+    expect(res.body.error?.code).toBe("SUBSCRIPTION_RESTRICTED");
+    expect(res.body.error?.message).toBe("Subscrição expirada. Contacte o administrador.");
   });
 });
 

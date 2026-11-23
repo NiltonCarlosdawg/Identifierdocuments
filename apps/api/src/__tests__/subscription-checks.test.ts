@@ -104,6 +104,27 @@ describe("subscription.service", () => {
     });
   });
 
+  test("identificadores físicos não consomem a quota mensal online", async () => {
+    const id = await mkOrg("physical", { planId: paidPlan.id, status: "paid",
+      expiresAt: new Date(Date.now() + 86400000) }); // monthlyOnlineIdentifiers: 2
+    await withTenant(id, async (tx) => {
+      const [sec] = await tx.insert(sectors).values({ tenantId: id, name: "S", code: "SP" }).returning();
+      // 3 físicos acima do teto, mas nenhum digital: quota online intacta.
+      for (let i = 0; i < 3; i++) await tx.insert(identifiers).values({
+        tenantId: id, sectorId: sec.id, categoryId: "PROP", createdBy: null,
+        identifier: `${tag}-phys${i}`, sequence: i + 1, origin: "physical",
+      });
+      expect(await checkIdentifierQuota(id, tx)).toBeNull();
+
+      // Só os digitais contam: 2 digitais atingem o teto.
+      for (let i = 0; i < 2; i++) await tx.insert(identifiers).values({
+        tenantId: id, sectorId: sec.id, categoryId: "PROP", createdBy: null,
+        identifier: `${tag}-dig${i}`, sequence: i + 10, origin: "digital",
+      });
+      expect(await checkIdentifierQuota(id, tx)).toMatchObject({ code: "IDENTIFIER_QUOTA_EXCEEDED" });
+    });
+  });
+
   test("upload: 0 hoje permite, 1 hoje bloqueia (só em expired/suspended)", async () => {
     const uid = crypto.randomUUID();
     const active = await mkOrg("up", { planId: paidPlan.id, status: "paid",

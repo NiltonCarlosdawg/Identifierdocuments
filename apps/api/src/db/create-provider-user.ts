@@ -8,6 +8,10 @@ if (!email || !password) {
   console.error("Uso: bun run provider:create -- <email> <password> [name]");
   process.exit(1);
 }
+if (password.length < 6) {
+  console.error("A senha deve ter pelo menos 6 caracteres (mesmo requisito do login).");
+  process.exit(1);
+}
 
 const passwordHash = await hashPassword(password);
 const [user] = await db.insert(providerUsers).values({

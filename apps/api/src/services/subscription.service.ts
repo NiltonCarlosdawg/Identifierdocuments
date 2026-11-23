@@ -6,6 +6,11 @@ import { and, eq, gte, sql } from "drizzle-orm";
 
 export type LimitError = { code: string; message: string };
 
+const SUBSCRIPTION_RESTRICTED: LimitError = {
+  code: "SUBSCRIPTION_RESTRICTED",
+  message: "Subscrição expirada. Contacte o administrador.",
+};
+
 export class SubscriptionError extends Error {
   constructor(public code: string, message: string) {
     super(message);
@@ -53,7 +58,8 @@ export async function getFreePlan(executor?: DB): Promise<typeof plans.$inferSel
 
 export async function checkUserLimit(tenantId: string, executor?: DB): Promise<LimitError | null> {
   return inTenant(tenantId, executor, async (t) => {
-    const { plan } = await getSubscriptionContext(tenantId, t);
+    const { plan, status } = await getSubscriptionContext(tenantId, t);
+    if (status === "expired" || status === "suspended") return SUBSCRIPTION_RESTRICTED;
     const [row] = await t.select({ n: sql<number>`count(*)::int` })
       .from(users)
       .where(eq(users.tenantId, tenantId));
@@ -70,16 +76,12 @@ export async function checkIdentifierQuota(tenantId: string, executor?: DB, isAd
   return inTenant(tenantId, executor, async (t) => {
     const { plan, status } = await getSubscriptionContext(tenantId, t);
     // Admin pode continuar em tenant expirado; só o teto mensal se aplica.
-    if (!isAdmin && (status === "expired" || status === "suspended")) {
-      return {
-        code: "SUBSCRIPTION_RESTRICTED",
-        message: "Subscrição expirada. Contacte o administrador.",
-      };
-    }
+    if (!isAdmin && (status === "expired" || status === "suspended")) return SUBSCRIPTION_RESTRICTED;
     const [row] = await t.select({ n: sql<number>`count(*)::int` })
       .from(identifiers)
       .where(and(
         eq(identifiers.tenantId, tenantId),
+        eq(identifiers.origin, "digital"),
         gte(identifiers.createdAt, sql`date_trunc('month', now())`),
       ));
     return row.n >= plan.monthlyOnlineIdentifiers
