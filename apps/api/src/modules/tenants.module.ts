@@ -13,6 +13,7 @@ import { collectStats } from "./stats.module";
 import { safeError } from "../lib/errors";
 import { getClientIp } from "../lib/ip";
 import { getFreePlan, getSubscriptionContext } from "../services/subscription.service";
+import { getLicenseContext, issueLicense, trialLicenseInput } from "../services/license.service";
 
 export const tenantsModule = new (Elysia as any)({ prefix: "/tenants" })
 
@@ -59,6 +60,8 @@ export const tenantsModule = new (Elysia as any)({ prefix: "/tenants" })
             termsAcceptedAt: new Date(),
           })
           .returning();
+
+        await issueLicense(tx, trialLicenseInput(org.id, freePlan));
 
         const [sector] = await tx
           .insert(sectors)
@@ -154,6 +157,20 @@ export const tenantsModule = new (Elysia as any)({ prefix: "/tenants" })
   })
 
   .use(requireRole("ORG_ADMIN"))
+
+  .get("/me/license", async ({ auth }) => {
+    const ctx = await getLicenseContext(auth!.tenantId);
+    return {
+      data: {
+        licenseNumber: ctx.license?.licenseNumber ?? null,
+        state: ctx.state,
+        status: ctx.license?.status ?? null,
+        planName: ctx.plan?.name ?? null,
+        maxUsers: ctx.maxUsers,
+        validUntil: ctx.validUntil?.toISOString() ?? null,
+      },
+    };
+  }, { detail: { summary: "Licença da organização", tags: ["Organizações"] } })
 
   .get("/me/stats", async ({ auth, set }) => {
     try {

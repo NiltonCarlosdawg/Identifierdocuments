@@ -155,6 +155,13 @@
       "when": 1795425300768,
       "tag": "0021_subscriptions",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1795480000000,
+      "tag": "0022_license",
+      "breakpoints": true
     }
   ]
 }

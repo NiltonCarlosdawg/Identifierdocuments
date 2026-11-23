@@ -3,13 +3,14 @@ import { Type as t } from "@sinclair/typebox";
 import { desc, eq, sql } from "drizzle-orm";
 import { db } from "../db";
 import { withTenant } from "../db/withTenant";
-import { auditLogs, organizations, orders, plans, providerUsers, users } from "../db/schema";
+import { auditLogs, licenses, organizations, orders, plans, providerUsers, users } from "../db/schema";
 import { verifyPassword } from "../lib/password";
 import { signProviderToken, requireProvider } from "../middleware/auth";
 import { checkRateLimit } from "../middleware/rateLimit";
 import { getClientIp } from "../lib/ip";
 import { approveOrder, OrderError, rejectOrder } from "../services/order.service";
 import { getSubscriptionContext } from "../services/subscription.service";
+import { getLicenseContext } from "../services/license.service";
 
 /** Estado manual do tenant (audit incluída) — espelha o padrão de approveOrder. */
 async function changeTenantStatus(
@@ -23,6 +24,13 @@ async function changeTenantStatus(
     await tx.update(organizations)
       .set({ subscriptionStatus: status })
       .where(eq(organizations.id, tenantId));
+    await tx.update(licenses)
+      .set({
+        status: status === "suspended" ? "suspended" : "active",
+        updatedAt: new Date(),
+        updatedBy: providerUserId,
+      })
+      .where(eq(licenses.tenantId, tenantId));
     await tx.insert(auditLogs).values({
       tenantId,
       userId: null,
@@ -184,6 +192,73 @@ export const providerModule = new (Elysia as any)({ prefix: "/provider" })
       return { ...row, status };
     }));
   }, { detail: { summary: "Listar tenants", tags: ["Painel"] } })
+
+  .get("/licenses", async () => {
+    const orgs = await db.select({ id: organizations.id, name: organizations.name }).from(organizations);
+    return Promise.all(orgs.map(async (org) => {
+      const ctx = await getLicenseContext(org.id);
+      const activeRows = await db.execute(sql`select count(*)::int as n from users where tenant_id = ${org.id} and is_active = true`);
+      const n = activeRows[0]?.n ?? 0;
+      return {
+        tenantId: org.id,
+        tenantName: org.name,
+        licenseNumber: ctx.license?.licenseNumber ?? null,
+        state: ctx.state,
+        status: ctx.license?.status ?? null,
+        maxUsers: ctx.maxUsers,
+        validUntil: ctx.validUntil,
+        planName: ctx.plan?.name ?? null,
+        activeUsers: n,
+      };
+    }));
+  }, { detail: { summary: "Listar licenças", tags: ["Painel"] } })
+
+  .patch("/licenses/:number", async (ctx: any) => {
+    const orgs = await db.select({ id: organizations.id }).from(organizations);
+    let found: { tenantId: string; licenseId: string } | null = null;
+    for (const org of orgs) {
+      const lic = await getLicenseContext(org.id);
+      if (lic.license?.licenseNumber === ctx.params.number) {
+        found = { tenantId: org.id, licenseId: lic.license.id };
+        break;
+      }
+    }
+    if (!found) {
+      ctx.set.status = 404;
+      return { error: { code: "NOT_FOUND", message: "Licença não encontrada." } };
+    }
+
+    await withTenant(found.tenantId, async (tx) => {
+      const patch: Record<string, unknown> = { updatedAt: new Date(), updatedBy: ctx.provider.id };
+      if (ctx.body.status) patch.status = ctx.body.status;
+      if (ctx.body.maxUsers !== undefined) patch.maxUsers = ctx.body.maxUsers;
+      if (ctx.body.validUntil !== undefined) patch.validUntil = ctx.body.validUntil ? new Date(ctx.body.validUntil) : null;
+      if (ctx.body.extendDays) {
+        const current = ctx.body.validUntil ? new Date(ctx.body.validUntil) : new Date();
+        patch.validUntil = new Date(current.getTime() + ctx.body.extendDays * 86_400_000);
+      }
+      await tx.update(licenses).set(patch).where(eq(licenses.id, found!.licenseId));
+      await tx.insert(auditLogs).values({
+        tenantId: found!.tenantId,
+        userId: null,
+        action: "LICENSE_UPDATED",
+        resource: "licenses",
+        resourceId: found!.licenseId,
+        metadata: JSON.stringify({ providerUserId: ctx.provider.id, changes: ctx.body }),
+        ip: getClientIp(ctx.request),
+      });
+    });
+    return { updated: true };
+  }, {
+    params: t.Object({ number: t.String() }),
+    body: t.Object({
+      status: t.Optional(t.Union([t.Literal("trial"), t.Literal("active"), t.Literal("expired"), t.Literal("suspended")])),
+      maxUsers: t.Optional(t.Union([t.Integer({ minimum: 1 }), t.Null()])),
+      validUntil: t.Optional(t.Union([t.String({ format: "date-time" }), t.Null()])),
+      extendDays: t.Optional(t.Integer({ minimum: 1 })),
+    }),
+    detail: { summary: "Gerir licença", tags: ["Painel"] },
+  })
 
   .post("/tenants/:id/suspend", async (ctx: any) => {
     const tenantId = ctx.params.id;

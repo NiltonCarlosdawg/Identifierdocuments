@@ -7,6 +7,7 @@ import { withTenant } from "../db/withTenant";
 import { logger } from "../lib/logger";
 import { sendOrderReceivedEmail, sendOrderRejectedEmail, sendSubscriptionActiveEmail } from "./mailer.service";
 import { getSubscriptionContext, getTenantContactEmail } from "./subscription.service";
+import { issueLicense } from "./license.service";
 
 const rawSecret = process.env.JWT_SECRET;
 if (!rawSecret) throw new Error("JWT_SECRET environment variable is required");
@@ -130,6 +131,23 @@ export async function createOrder(input: CreateOrderInput): Promise<{ orderId: s
 const DAY_MS = 24 * 60 * 60 * 1000;
 const SUBSCRIPTION_DAYS = 365;
 
+/** A aprovação do pedido emite uma licença anual com os limites do plano aprovado. */
+export function licenseInputFromOrder(
+  order: { tenantId: string; planId: string },
+  plan: { maxUsers: number },
+  decidedAt: Date,
+  providerUserId: string,
+) {
+  return {
+    tenantId: order.tenantId,
+    planId: order.planId,
+    maxUsers: plan.maxUsers,
+    status: "active" as const,
+    validUntil: new Date(decidedAt.getTime() + SUBSCRIPTION_DAYS * DAY_MS),
+    providerUserId,
+  };
+}
+
 async function pendingOrderWithNames(orderId: string) {
   const [row] = await db.select({
     order: orders,
@@ -161,10 +179,15 @@ export async function approveOrder(
     }).where(and(eq(orders.id, orderId), eq(orders.status, "pending"))).returning();
     if (!updated) throw new OrderError("ORDER_NOT_PENDING", "Este pedido já foi decidido.", 409);
 
+    const [approvedPlan] = await tx.select().from(plans).where(eq(plans.id, order.planId)).limit(1);
+    if (!approvedPlan) throw new OrderError("PLAN_NOT_FOUND", "Plano do pedido não encontrado.", 404);
+
+    const license = await issueLicense(tx, licenseInputFromOrder(order, approvedPlan, decidedAt, providerUserId));
+
     await tx.update(organizations).set({
       planId: order.planId,
       subscriptionStatus: "paid",
-      subscriptionExpiresAt: expiresAt,
+      subscriptionExpiresAt: license.validUntil ?? expiresAt,
     }).where(eq(organizations.id, order.tenantId));
 
     // Verificação runtime: confirma a ativação antes de notificar o cliente.
