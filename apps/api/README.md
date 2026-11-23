@@ -35,6 +35,8 @@ bun dev
 bun start
 ```
 
+Painel do provedor: `bun run provider:create -- <email> <password> [name]` (password com mínimo 6 caracteres). Em produção configure `PROVIDER_NOTIFY_EMAIL` (alertas de subscrição e emails de encomendas) e `LANDING_URL` (base do link de checkout).
+
 A API fica disponível em `http://localhost:3000`
 Swagger UI: `http://localhost:3000/docs`
 
