@@ -35,10 +35,21 @@ async function decrypt(data: string): Promise<string> {
   } catch { throw new Error("Falha ao descodificar dados seguros."); }
 }
 
+const browserKey = (name: string) => `browser_${name}`;
+
 export const secureStorageInner: ISecureStorage = {
-  getItem: async name => { if (!isTauri()) return null; try { const store = await getStore(); const raw = await store.get<string>(`enc_${name}`); return raw ? decrypt(raw) : null; } catch { return null; } },
-  setItem: async (name, value) => { if (!isTauri()) return; try { const store = await getStore(); await store.set(`enc_${name}`, await encrypt(value)); await store.save(); } catch {} },
-  removeItem: async name => { if (!isTauri()) return; try { const store = await getStore(); await store.delete(`enc_${name}`); await store.save(); } catch {} },
+  getItem: async name => {
+    if (!isTauri()) return typeof localStorage === "undefined" ? null : localStorage.getItem(browserKey(name));
+    try { const store = await getStore(); const raw = await store.get<string>(`enc_${name}`); return raw ? decrypt(raw) : null; } catch { return null; }
+  },
+  setItem: async (name, value) => {
+    if (!isTauri()) { if (typeof localStorage !== "undefined") localStorage.setItem(browserKey(name), value); return; }
+    try { const store = await getStore(); await store.set(`enc_${name}`, await encrypt(value)); await store.save(); } catch {}
+  },
+  removeItem: async name => {
+    if (!isTauri()) { if (typeof localStorage !== "undefined") localStorage.removeItem(browserKey(name)); return; }
+    try { const store = await getStore(); await store.delete(`enc_${name}`); await store.save(); } catch {}
+  },
 };
 
 export const secureJsonStorage = createJSONStorage(() => ({

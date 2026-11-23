@@ -10,4 +10,11 @@ const tauriStorage: StateStorage = {
   removeItem: async name => { if (!isTauri()) return; try { const store = await getStore(); await store.delete(name); await store.save(); } catch {} },
 };
 
-export const tauriJsonStorage = createJSONStorage(() => tauriStorage);
+/** Modo browser (dev/e2e): o plugin-store não existe, mas localStorage serve. */
+const browserStorage: StateStorage = {
+  getItem: name => typeof localStorage === "undefined" ? null : localStorage.getItem(name),
+  setItem: (name, value) => { if (typeof localStorage !== "undefined") localStorage.setItem(name, value); },
+  removeItem: name => { if (typeof localStorage !== "undefined") localStorage.removeItem(name); },
+};
+
+export const tauriJsonStorage = createJSONStorage(() => isTauri() ? tauriStorage : browserStorage);

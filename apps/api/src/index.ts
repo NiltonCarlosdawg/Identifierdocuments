@@ -36,7 +36,14 @@ const isBun = typeof (globalThis as { Bun?: unknown }).Bun !== "undefined";
 
 const app = new (Elysia as any)(isBun ? {} : { adapter: node() })
   .use(cors({
-    origin: ["http://localhost:1420", "tauri://localhost", "https://tauri.localhost"],
+    origin: [
+      "http://localhost:1420", "tauri://localhost", "https://tauri.localhost",
+      //Origens do frontend em modo browser (dev/e2e); em produção não são aceites.
+      ...(process.env.NODE_ENV === "production" ? [] : [
+        "http://localhost:4173", "http://127.0.0.1:4173",
+        "http://localhost:5173", "http://127.0.0.1:5173",
+      ]),
+    ],
     credentials: true,
   }));
 
