@@ -59,6 +59,49 @@ export async function sendInviteEmail(to: string, fullName: string, orgName: str
   return true;
 }
 
+export interface OrderNotification {
+  id: string;
+  tenantName: string;
+  planName: string;
+  paymentMethod: string;
+  phone: string | null;
+  contactEmail: string | null;
+  status: string;
+}
+
+export async function sendOrderReceivedEmail(toProvider: string, order: OrderNotification): Promise<boolean> {
+  const t = getTransporter();
+  const linhas = [
+    `Pedido de subscrição recebido (${order.id}).`,
+    `Organização: ${order.tenantName}`,
+    `Plano: ${order.planName}`,
+    `Forma de pagamento: ${order.paymentMethod}`,
+    `Telefone: ${order.phone || "não indicado"}`,
+    `Email de contacto: ${order.contactEmail || "não indicado"}`,
+    `Estado: ${order.status}`,
+  ];
+  const bodyText = `Olá,\n\n${linhas.join("\n")}\n`;
+  if (!t) {
+    logger.warn({ to: toProvider }, "SMTP não configurado — pedido não notificado por email.");
+    if (!IS_PROD) logger.info(linhas.join(" | "));
+    return false;
+  }
+  await t.sendMail({
+    from: SMTP_FROM,
+    to: toProvider,
+    subject: `DocID — Novo pedido de subscrição: ${order.tenantName}`,
+    text: bodyText,
+    html: `<p>Olá,</p><p>Pedido de subscrição recebido (<strong>${order.id}</strong>).</p>` +
+      `<p>Organização: <strong>${order.tenantName}</strong><br/>` +
+      `Plano: <strong>${order.planName}</strong><br/>` +
+      `Forma de pagamento: <strong>${order.paymentMethod}</strong><br/>` +
+      `Telefone: ${order.phone || "não indicado"}<br/>` +
+      `Email de contacto: ${order.contactEmail || "não indicado"}<br/>` +
+      `Estado: <strong>${order.status}</strong></p>`,
+  });
+  return true;
+}
+
 export async function sendResetPasswordEmail(to: string, token: string): Promise<void> {
   const t = getTransporter();
   if (!t) {
