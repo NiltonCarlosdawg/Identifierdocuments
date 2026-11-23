@@ -57,7 +57,7 @@ export async function checkUserLimit(tenantId: string, executor?: DB): Promise<L
     const [row] = await t.select({ n: sql<number>`count(*)::int` })
       .from(users)
       .where(eq(users.tenantId, tenantId));
-    return row.n > plan.maxUsers
+    return row.n >= plan.maxUsers
       ? {
         code: "SUBSCRIPTION_USER_LIMIT",
         message: "O limite de utilizadores do seu plano foi atingido. Faça upgrade para convidar mais.",

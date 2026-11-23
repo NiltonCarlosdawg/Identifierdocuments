@@ -69,6 +69,17 @@ describe("subscription.service", () => {
     });
   });
 
+  test("checkUserLimit bloqueia exatamente no limite", async () => {
+    const id = await mkOrg("exact", { planId: paidPlan.id }); // maxUsers: 2
+    await withTenant(id, async (tx) => {
+      const [sec] = await tx.insert(sectors).values({ tenantId: id, name: "S", code: "SE" }).returning();
+      for (let i = 0; i < 2; i++) await tx.insert(users).values({
+        tenantId: id, sectorId: sec.id, email: `e${i}-${tag}@t.io`, passwordHash: "x", fullName: `E${i}`,
+      });
+      expect(await checkUserLimit(id, tx)).toMatchObject({ code: "SUBSCRIPTION_USER_LIMIT" });
+    });
+  });
+
   test("checkUserLimit permite abaixo do limite", async () => {
     const id = await mkOrg("under", { planId: paidPlan.id }); // 1 user de 2
     await withTenant(id, async (tx) => {
