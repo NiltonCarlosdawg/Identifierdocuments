@@ -16,6 +16,7 @@ import { notify } from "../services/notification.service";
 import { withTenant } from "../db/withTenant";
 import { safeError } from "../lib/errors";
 import { isTenantAdmin, shouldCreateShare, syncCounterpart } from "../services/access-decision.service";
+import { checkUploadLimit } from "../services/subscription.service";
 
 
 async function resolveIdentifierPrimary(tx: any, tenantId: string, code: string, extraWith: Record<string, boolean> = {}) {
@@ -44,6 +45,10 @@ export const documentsModule = new (Elysia as any)({ prefix: "/documents" })
     try {
       return await withTenant(tenantId, async (tx) => {
         try {
+          if (body.uploadSource !== "sync") { // itens da fila offline sobem sempre
+            const limit = await checkUploadLimit(tenantId, auth!.userId, tx);
+            if (limit) { set.status = 403; return { error: limit }; }
+          }
           const result = await attachDocument(tx, auth!, {
             identifier: body.identifier, file: body.file,
             uploadSource: body.uploadSource,
@@ -72,6 +77,10 @@ export const documentsModule = new (Elysia as any)({ prefix: "/documents" })
     try {
       return await withTenant(tenantId, async (tx) => {
         try {
+          if (body.uploadSource !== "sync") { // itens da fila offline sobem sempre
+            const limit = await checkUploadLimit(tenantId, auth!.userId, tx);
+            if (limit) { set.status = 403; return { error: limit }; }
+          }
           const result = await attachAttachment(tx, auth!, {
             identifier: body.identifier,
             file: body.file,
@@ -300,6 +309,10 @@ export const documentsModule = new (Elysia as any)({ prefix: "/documents" })
     try {
       return await withTenant(tenantId, async (tx) => {
         try {
+          if (body.uploadSource !== "sync") { // itens da fila offline sobem sempre
+            const limit = await checkUploadLimit(tenantId, auth!.userId, tx);
+            if (limit) { set.status = 403; return { error: limit }; }
+          }
           const result = await createDocumentVersion(tx, auth!, {
             documentId: params.param,
             file: body.file,

@@ -9,7 +9,7 @@ import { eq, sql } from "drizzle-orm";
 
 import { db } from "../db";
 import { withTenant } from "../db/withTenant";
-import { auditLogs, identifiers, organizations, plans, roles, rolePermissions, sectors, users, userRoles } from "../db/schema";
+import { auditLogs, documents, documentVersions, identifiers, organizations, plans, roles, rolePermissions, sectors, users, userRoles } from "../db/schema";
 
 const API_ROOT = join(import.meta.dir, "..", "..");
 const TEST_PORT = process.env.SUBSCRIPTION_WIRING_PORT || "3104";
@@ -23,6 +23,7 @@ let adminUserId = "";
 let importPlanId = "";
 let memberRoleId = "";
 let quotaPlanId = "";
+let uploadPlanId = "";
 
 async function api<T>(
   path: string,
@@ -98,6 +99,8 @@ afterAll(async () => {
   serverProc?.kill(9);
   if (tenantId) {
     await withTenant(tenantId, async (tx) => {
+      await tx.delete(documentVersions).where(eq(documentVersions.tenantId, tenantId));
+      await tx.delete(documents).where(eq(documents.tenantId, tenantId));
       await tx.delete(auditLogs).where(eq(auditLogs.tenantId, tenantId));
       await tx.delete(identifiers).where(eq(identifiers.tenantId, tenantId));
       await tx.delete(userRoles).where(
@@ -114,6 +117,7 @@ afterAll(async () => {
   }
   if (importPlanId) await db.delete(plans).where(eq(plans.id, importPlanId));
   if (quotaPlanId) await db.delete(plans).where(eq(plans.id, quotaPlanId));
+  if (uploadPlanId) await db.delete(plans).where(eq(plans.id, uploadPlanId));
 });
 
 describe("limite de utilizadores no wiring dos endpoints", () => {
@@ -270,5 +274,110 @@ describe("quota mensal de identificadores no wiring", () => {
     const ok = await generate(adminToken);
     expect(ok.status).toBe(200);
     expect(ok.body.data.identifier).toBeDefined();
+  });
+});
+
+describe("limite de 1 upload/dia na expiração", () => {
+  let primaryIdentifier = "";
+  let documentId = "";
+
+  const EXPECTED_ERROR = {
+    code: "UPLOAD_LIMIT_REACHED",
+    message: "Subscrição expirada: limite de 1 upload por dia.",
+  };
+
+  async function newIdentifier(): Promise<string> {
+    const gen = await api<any>("/identifiers/generate", {
+      method: "POST",
+      token: adminToken,
+      body: JSON.stringify({ categoryId: "PROP", origin: "digital" }),
+    });
+    expect(gen.status).toBe(200);
+    return gen.body.data.identifier;
+  }
+
+  function docForm(identifier: string, source?: "manual" | "sync") {
+    const form = new FormData();
+    form.append("identifier", identifier);
+    form.append("file", new File([`Contrato ${identifier}\n`], "contrato.txt", { type: "text/plain" }));
+    if (source) form.append("uploadSource", source);
+    return form;
+  }
+
+  function versionForm(identifier: string, source?: "manual" | "sync") {
+    const form = new FormData();
+    form.append("file", new File([`Nova versão ${identifier}\n`], "versao.txt", { type: "text/plain" }));
+    if (source) form.append("uploadSource", source);
+    return form;
+  }
+
+  async function post(path: string, form: FormData) {
+    const res = await fetch(`${BASE}${path}`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${adminToken}` },
+      body: form,
+    });
+    return { status: res.status, body: await res.json() };
+  }
+
+  beforeAll(async () => {
+    const [plan] = await db.insert(plans).values({
+      name: `wiring-upload-${RUN_ID}`,
+      price: 100000,
+      maxUsers: 10,
+      monthlyOnlineIdentifiers: 1000,
+      offlineBudgetPerMachine: 100,
+    }).returning();
+    uploadPlanId = plan.id;
+    await db.update(organizations).set({
+      planId: plan.id,
+      subscriptionStatus: "suspended",
+      subscriptionExpiresAt: null,
+    }).where(eq(organizations.id, tenantId));
+  });
+
+  test("suspenso: 1.º upload passa, 2.º manual é 403 nos 3 handlers; fila 'sync' continua", async () => {
+    await db.update(organizations).set({ subscriptionStatus: "suspended" })
+      .where(eq(organizations.id, tenantId));
+
+    primaryIdentifier = await newIdentifier();
+    const first = await post("/documents/attach", docForm(primaryIdentifier, "manual"));
+    expect(first.status).toBe(200);
+    expect(first.body.success).toBe(true);
+    documentId = first.body.document.id;
+
+    const second = await post("/documents/attach", docForm(await newIdentifier(), "manual"));
+    expect(second.status).toBe(403);
+    expect(second.body.error).toEqual(EXPECTED_ERROR);
+
+    const attachment = await post("/documents/attachments", docForm(primaryIdentifier, "manual"));
+    expect(attachment.status).toBe(403);
+    expect(attachment.body.error).toEqual(EXPECTED_ERROR);
+
+    const version = await post(`/documents/${documentId}/versions`, versionForm(primaryIdentifier, "manual"));
+    expect(version.status).toBe(403);
+    expect(version.body.error).toEqual(EXPECTED_ERROR);
+
+    const syncAttach = await post("/documents/attach", docForm(await newIdentifier(), "sync"));
+    expect(syncAttach.status).toBe(200);
+    expect(syncAttach.body.document.uploadSource).toBe("sync");
+
+    const syncAttachment = await post("/documents/attachments", docForm(primaryIdentifier, "sync"));
+    expect(syncAttachment.status).toBe(200);
+
+    const syncVersion = await post(`/documents/${documentId}/versions`, versionForm(primaryIdentifier, "sync"));
+    expect(syncVersion.status).toBe(200);
+  });
+
+  test("tenant paid ativo: uploads manuais ilimitados nos 3 handlers", async () => {
+    await db.update(organizations).set({
+      subscriptionStatus: "paid",
+      subscriptionExpiresAt: null,
+    }).where(eq(organizations.id, tenantId));
+
+    expect((await post("/documents/attach", docForm(await newIdentifier(), "manual"))).status).toBe(200);
+    expect((await post("/documents/attach", docForm(await newIdentifier(), "manual"))).status).toBe(200);
+    expect((await post("/documents/attachments", docForm(primaryIdentifier, "manual"))).status).toBe(200);
+    expect((await post(`/documents/${documentId}/versions`, versionForm(primaryIdentifier, "manual"))).status).toBe(200);
   });
 });
