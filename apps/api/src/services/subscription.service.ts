@@ -66,11 +66,11 @@ export async function checkUserLimit(tenantId: string, executor?: DB): Promise<L
   });
 }
 
-export async function checkIdentifierQuota(tenantId: string, executor?: DB): Promise<LimitError | null> {
+export async function checkIdentifierQuota(tenantId: string, executor?: DB, isAdmin = false): Promise<LimitError | null> {
   return inTenant(tenantId, executor, async (t) => {
     const { plan, status } = await getSubscriptionContext(tenantId, t);
-    // O caller decide admin antes de chamar: aqui só importa o estado do tenant.
-    if (status === "expired" || status === "suspended") {
+    // Admin pode continuar em tenant expirado; só o teto mensal se aplica.
+    if (!isAdmin && (status === "expired" || status === "suspended")) {
       return {
         code: "SUBSCRIPTION_RESTRICTED",
         message: "Subscrição expirada. Contacte o administrador.",

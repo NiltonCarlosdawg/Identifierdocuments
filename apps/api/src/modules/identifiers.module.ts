@@ -10,6 +10,8 @@ import { eq, and } from "drizzle-orm";
 import { categories, devices } from "../db/schema";
 import { safeError } from "../lib/errors";
 import { getClientIp } from "../lib/ip";
+import { isTenantAdmin } from "../services/access-decision.service";
+import { checkIdentifierQuota } from "../services/subscription.service";
 
 export const identifiersModule = new (Elysia as any)({ prefix: "/identifiers" })
   .use(requireAuth())
@@ -189,9 +191,12 @@ export const identifiersModule = new (Elysia as any)({ prefix: "/identifiers" })
           if (!targetSectorId) {
             set.status = 422; return { error: { code: "VALIDATION_ERROR", message: "Sector não definido." } };
           }
-          if (targetSectorId !== auth!.sectorId && !(await getFreshRoles(auth!.userId, auth!.tenantId)).includes("ORG_ADMIN")) {
+          const isAdmin = isTenantAdmin(await getFreshRoles(auth!.userId, auth!.tenantId));
+          if (targetSectorId !== auth!.sectorId && !isAdmin) {
             set.status = 403; return { error: { code: "FORBIDDEN", message: "Não pode gerar identificadores para outro sector." } };
           }
+          const limit = await checkIdentifierQuota(tenantId, tx, isAdmin);
+          if (limit) { set.status = 403; return { error: limit }; }
           const result = await generateIdentifier(tx, auth!, {
             categoryId: body.categoryId, issuedTo: body.issuedTo,
             description: body.description, origin: body.origin,

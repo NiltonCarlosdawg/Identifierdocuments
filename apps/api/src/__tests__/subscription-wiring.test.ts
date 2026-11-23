@@ -9,7 +9,7 @@ import { eq, sql } from "drizzle-orm";
 
 import { db } from "../db";
 import { withTenant } from "../db/withTenant";
-import { organizations, plans, roles, rolePermissions, sectors, users, userRoles } from "../db/schema";
+import { auditLogs, identifiers, organizations, plans, roles, rolePermissions, sectors, users, userRoles } from "../db/schema";
 
 const API_ROOT = join(import.meta.dir, "..", "..");
 const TEST_PORT = process.env.SUBSCRIPTION_WIRING_PORT || "3104";
@@ -21,6 +21,8 @@ let adminToken = "";
 let tenantId = "";
 let adminUserId = "";
 let importPlanId = "";
+let memberRoleId = "";
+let quotaPlanId = "";
 
 async function api<T>(
   path: string,
@@ -89,12 +91,15 @@ beforeAll(async () => {
     body: JSON.stringify({ name: "MEMBER" }),
   });
   expect(memberRole.status).toBe(200);
+  memberRoleId = memberRole.body.data.id;
 }, 45000);
 
 afterAll(async () => {
   serverProc?.kill(9);
   if (tenantId) {
     await withTenant(tenantId, async (tx) => {
+      await tx.delete(auditLogs).where(eq(auditLogs.tenantId, tenantId));
+      await tx.delete(identifiers).where(eq(identifiers.tenantId, tenantId));
       await tx.delete(userRoles).where(
         sql`${userRoles.userId} IN (SELECT ${users.id} FROM ${users} WHERE ${users.tenantId} = ${tenantId})`,
       );
@@ -108,6 +113,7 @@ afterAll(async () => {
     });
   }
   if (importPlanId) await db.delete(plans).where(eq(plans.id, importPlanId));
+  if (quotaPlanId) await db.delete(plans).where(eq(plans.id, quotaPlanId));
 });
 
 describe("limite de utilizadores no wiring dos endpoints", () => {
@@ -176,5 +182,93 @@ describe("limite de utilizadores no wiring dos endpoints", () => {
       `import-1-${RUN_ID}@test.docid`,
       `import-2-${RUN_ID}@test.docid`,
     ].sort());
+  });
+});
+
+describe("quota mensal de identificadores no wiring", () => {
+  let memberToken = "";
+  let memberUserId = "";
+  let sectorId = "";
+
+  beforeAll(async () => {
+    const [plan] = await db.insert(plans).values({
+      name: `wiring-quota-${RUN_ID}`,
+      price: 100000,
+      maxUsers: 10,
+      monthlyOnlineIdentifiers: 2,
+      offlineBudgetPerMachine: 100,
+    }).returning();
+    quotaPlanId = plan.id;
+    await db.update(organizations).set({
+      planId: plan.id,
+      subscriptionStatus: "paid",
+      subscriptionExpiresAt: null,
+    }).where(eq(organizations.id, tenantId));
+
+    const list = await api<any>("/sectors", { token: adminToken });
+    sectorId = list.body.data[0].id;
+
+    const email = `wiring-member-${RUN_ID}@test.docid`;
+    const created = await api<any>("/users", {
+      method: "POST",
+      token: adminToken,
+      body: JSON.stringify({ email, password: "testpass123", fullName: "Membro", sectorId }),
+    });
+    expect(created.status).toBe(200);
+    memberUserId = created.body.data.id;
+
+    const assigned = await api<any>(`/users/${memberUserId}/roles`, {
+      method: "POST",
+      token: adminToken,
+      body: JSON.stringify({ roleId: memberRoleId, sectorId }),
+    });
+    expect(assigned.status).toBe(200);
+
+    const login = await api<any>("/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email, password: "testpass123" }),
+    });
+    expect(login.status).toBe(200);
+    memberToken = login.body.data.token;
+    expect(login.body.data.user.roles).toContain("MEMBER");
+  });
+
+  function generate(token: string) {
+    return api<any>("/identifiers/generate", {
+      method: "POST",
+      token,
+      body: JSON.stringify({ categoryId: "PROP", origin: "digital" }),
+    });
+  }
+
+  test("tenant ativo no teto (2/2): 403 IDENTIFIER_QUOTA_EXCEEDED", async () => {
+    expect((await generate(adminToken)).status).toBe(200);
+    expect((await generate(adminToken)).status).toBe(200);
+    const res = await generate(adminToken);
+    expect(res.status).toBe(403);
+    expect(res.body.error?.code).toBe("IDENTIFIER_QUOTA_EXCEEDED");
+    expect(res.body.error?.message).toBe(
+      "O limite mensal de identificadores do seu plano foi atingido. Faça upgrade para continuar.",
+    );
+  });
+
+  test("tenant suspenso, MEMBER: 403 SUBSCRIPTION_RESTRICTED", async () => {
+    await db.update(organizations).set({ subscriptionStatus: "suspended" })
+      .where(eq(organizations.id, tenantId));
+    const res = await generate(memberToken);
+    expect(res.status).toBe(403);
+    expect(res.body.error?.code).toBe("SUBSCRIPTION_RESTRICTED");
+    expect(res.body.error?.message).toBe("Subscrição expirada. Contacte o administrador.");
+  });
+
+  test("tenant suspenso, ORG_ADMIN: quota aplica-se; com headroom gera", async () => {
+    const atCap = await generate(adminToken);
+    expect(atCap.status).toBe(403);
+    expect(atCap.body.error?.code).toBe("IDENTIFIER_QUOTA_EXCEEDED");
+
+    await db.update(plans).set({ monthlyOnlineIdentifiers: 3 }).where(eq(plans.id, quotaPlanId));
+    const ok = await generate(adminToken);
+    expect(ok.status).toBe(200);
+    expect(ok.body.data.identifier).toBeDefined();
   });
 });
