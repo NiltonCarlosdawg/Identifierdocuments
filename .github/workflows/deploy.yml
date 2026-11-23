@@ -1,0 +1,66 @@
+name: Deploy DocID
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Build landing
+        working-directory: apps/landing
+        run: |
+          bun install
+          VITE_API_URL=https://didall.milvendas.ao bun run build
+
+      - name: Build admin
+        working-directory: apps/admin
+        run: |
+          bun install
+          VITE_API_URL=https://didall.milvendas.ao bun run build
+
+      - name: Pack artifacts
+        run: |
+          tar czf /tmp/api.tgz -C apps/api src package.json
+          tar czf /tmp/landing.tgz -C apps/landing/dist .
+          tar czf /tmp/admin.tgz -C apps/admin/dist .
+
+      - name: Write deploy key
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/deploy_key
+          chmod 600 /tmp/deploy_key
+
+      - name: Upload files
+        run: |
+          SSH="ssh -i /tmp/deploy_key -o StrictHostKeyChecking=no -o ConnectTimeout=30 milvendas@135.181.34.42"
+          $SSH 'mkdir -p /tmp/docid-deploy'
+          scp -i /tmp/deploy_key -o StrictHostKeyChecking=no /tmp/api.tgz /tmp/landing.tgz /tmp/admin.tgz milvendas@135.181.34.42:/tmp/docid-deploy/
+          echo "upload ok"
+
+      - name: Deploy API
+        run: |
+          SSH="ssh -i /tmp/deploy_key -o StrictHostKeyChecking=no milvendas@135.181.34.42"
+          $SSH 'cd /mnt/homer2/milvendas/didall.milvendas.ao && tar xzf /tmp/docid-deploy/api.tgz && grep -q "^ADMIN_ORIGIN=" .env || echo "ADMIN_ORIGIN=https://docid.milvendas.ao" >> .env; echo api-code-ok'
+
+      - name: Migrate and seed
+        run: |
+          SSH="ssh -i /tmp/deploy_key -o StrictHostKeyChecking=no milvendas@135.181.34.42"
+          $SSH 'cd /mnt/homer2/milvendas/didall.milvendas.ao && export PATH=/opt/alt/alt-nodejs22/root/usr/bin:$PATH && set -a && . ./.env && set +a && timeout 90 node --import tsx src/db/migrate.ts | tail -1 && timeout 90 node --import tsx src/db/seed.ts | tail -1 || true; psql "$DATABASE_URL" -Atc "select count(*) from pg_tables where tablename in ('"'"'plans'"'"','"'"'provider_users'"'"','"'"'licenses'"'")"'
+
+      - name: Deploy landing and admin
+        run: |
+          SSH="ssh -i /tmp/deploy_key -o StrictHostKeyChecking=no milvendas@135.181.34.42"
+          $SSH 'mkdir -p /mnt/homer2/milvendas/docid.milvendas.ao/admin && tar xzf /tmp/docid-deploy/landing.tgz -C /mnt/homer2/milvendas/docid.milvendas.ao && tar xzf /tmp/docid-deploy/admin.tgz -C /mnt/homer2/milvendas/docid.milvendas.ao/admin && echo static-ok'
+
+      - name: Restart API
+        run: |
+          SSH="ssh -i /tmp/deploy_key -o StrictHostKeyChecking=no milvendas@135.181.34.42"
+          $SSH 'PID=$(cat /mnt/homer2/milvendas/didall.milvendas.ao/docid-api.pid); kill -9 "$PID" 2>/dev/null || true; echo restart-signal'
