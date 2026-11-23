@@ -9,6 +9,21 @@
         "@tauri-apps/cli": "^2.11.3",
       },
     },
+    "apps/admin": {
+      "name": "@docid/admin",
+      "version": "1.0.0",
+      "dependencies": {
+        "react": "^18.3.0",
+        "react-dom": "^18.3.0",
+      },
+      "devDependencies": {
+        "@types/react": "^18.3.0",
+        "@types/react-dom": "^18.3.0",
+        "@vitejs/plugin-react": "^4.3.0",
+        "typescript": "^5.4.0",
+        "vite": "^5.4.0",
+      },
+    },
     "apps/api": {
       "name": "@verano/docid-api",
       "version": "1.0.0",
@@ -141,6 +156,8 @@
     "@babel/types": ["@babel/types@7.29.7", "", { "dependencies": { "@babel/helper-string-parser": "^7.29.7", "@babel/helper-validator-identifier": "^7.29.7" } }, "sha512-4zBIxpPzowiZpusoFkyGVwakdRJUyuH5PxQ/PrqghfdFWWasvnCdPfQXHrenDai+gyLARulZjZowCOj6fjT4pA=="],
 
     "@borewit/text-codec": ["@borewit/text-codec@0.2.2", "", {}, "sha512-DDaRehssg1aNrH4+2hnj1B7vnUGEjU6OIlyRdkMd0aUdIUvKXrJfXsy8LVtXAy7DRvYVluWbMspsRhz2lcW0mQ=="],
+
+    "@docid/admin": ["@docid/admin@workspace:apps/admin"],
 
     "@docid/desktop": ["@docid/desktop@workspace:apps/desktop"],
 
