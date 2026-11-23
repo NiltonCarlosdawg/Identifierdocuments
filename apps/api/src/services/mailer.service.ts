@@ -102,6 +102,69 @@ export async function sendOrderReceivedEmail(toProvider: string, order: OrderNot
   return true;
 }
 
+export interface SubscriptionActiveInfo {
+  tenantName: string;
+  planName: string;
+  expiresAt: Date;
+}
+
+export async function sendSubscriptionActiveEmail(to: string, info: SubscriptionActiveInfo): Promise<boolean> {
+  const t = getTransporter();
+  const fim = info.expiresAt.toISOString().slice(0, 10);
+  const bodyText = `Olá,\n\nA sua subscrição no DocID foi concluída.\n\n` +
+    `Organização: ${info.tenantName}\n` +
+    `Plano: ${info.planName}\n` +
+    `Válida até: ${fim}\n`;
+  if (!t) {
+    logger.warn({ to }, "SMTP não configurado — subscrição concluída não notificada por email.");
+    if (!IS_PROD) logger.info(`Subscrição concluída para ${to}: ${info.planName} até ${fim}`);
+    return false;
+  }
+  await t.sendMail({
+    from: SMTP_FROM,
+    to,
+    subject: "DocID — Subscrição concluída",
+    text: bodyText,
+    html: `<p>Olá,</p><p>A sua <strong>subscrição concluída</strong> no DocID está ativa.</p>` +
+      `<p>Organização: <strong>${info.tenantName}</strong><br/>` +
+      `Plano: <strong>${info.planName}</strong><br/>` +
+      `Válida até: <strong>${fim}</strong></p>`,
+  });
+  return true;
+}
+
+export interface OrderRejectedInfo {
+  tenantName: string;
+  planName: string;
+  reason: string;
+}
+
+export async function sendOrderRejectedEmail(to: string, info: OrderRejectedInfo): Promise<boolean> {
+  const t = getTransporter();
+  const bodyText = `Olá,\n\nO seu pedido de subscrição no DocID foi rejeitado.\n\n` +
+    `Organização: ${info.tenantName}\n` +
+    `Plano: ${info.planName}\n` +
+    `Motivo: ${info.reason}\n\n` +
+    `Pode submeter um novo pedido pelo checkout.\n`;
+  if (!t) {
+    logger.warn({ to }, "SMTP não configurado — rejeição não notificada por email.");
+    if (!IS_PROD) logger.info(`Pedido rejeitado para ${to}: ${info.reason}`);
+    return false;
+  }
+  await t.sendMail({
+    from: SMTP_FROM,
+    to,
+    subject: "DocID — Pedido de subscrição rejeitado",
+    text: bodyText,
+    html: `<p>Olá,</p><p>O seu pedido de subscrição no DocID foi rejeitado.</p>` +
+      `<p>Organização: <strong>${info.tenantName}</strong><br/>` +
+      `Plano: <strong>${info.planName}</strong><br/>` +
+      `Motivo: <strong>${info.reason}</strong></p>` +
+      `<p>Pode submeter um novo pedido pelo checkout.</p>`,
+  });
+  return true;
+}
+
 export async function sendResetPasswordEmail(to: string, token: string): Promise<void> {
   const t = getTransporter();
   if (!t) {

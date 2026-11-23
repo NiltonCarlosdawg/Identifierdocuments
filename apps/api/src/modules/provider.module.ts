@@ -1,12 +1,13 @@
 import Elysia from "elysia";
 import { Type as t } from "@sinclair/typebox";
-import { eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { db } from "../db";
-import { plans, providerUsers } from "../db/schema";
+import { organizations, orders, plans, providerUsers } from "../db/schema";
 import { verifyPassword } from "../lib/password";
 import { signProviderToken, requireProvider } from "../middleware/auth";
 import { checkRateLimit } from "../middleware/rateLimit";
 import { getClientIp } from "../lib/ip";
+import { approveOrder, OrderError, rejectOrder } from "../services/order.service";
 
 const planFields = {
   name: t.String({ minLength: 1 }),
@@ -17,6 +18,14 @@ const planFields = {
 };
 
 export const providerModule = new (Elysia as any)({ prefix: "/provider" })
+
+  // O onError global do index é ignorado em erros de validação de body.
+  .onError(({ code, set }: any) => {
+    if (code === "VALIDATION") {
+      set.status = 422;
+      return { error: { code: "VALIDATION_ERROR", message: "Dados inválidos." } };
+    }
+  })
 
   .post("/login", async (ctx: any) => {
     const { body, request, set } = ctx;
@@ -85,5 +94,46 @@ export const providerModule = new (Elysia as any)({ prefix: "/provider" })
     detail: { summary: "Editar plano", tags: ["Painel"] },
   })
 
-  // As rotas reais de pedidos/organizações chegam nas tasks 10–12.
-  .get("/orders", () => [], { detail: { summary: "Pedidos (placeholder)", tags: ["Painel"] } });
+  .get("/orders", async () => {
+    // Tabelas globais: SEM withTenant.
+    const rows = await db.select({
+      order: orders,
+      tenantName: organizations.name,
+      planName: plans.name,
+    }).from(orders)
+      .innerJoin(organizations, eq(orders.tenantId, organizations.id))
+      .innerJoin(plans, eq(orders.planId, plans.id))
+      .orderBy(desc(orders.createdAt));
+    return rows.map(({ order, tenantName, planName }) => ({ ...order, tenantName, planName }));
+  }, { detail: { summary: "Listar pedidos", tags: ["Painel"] } })
+
+  .post("/orders/:id/approve", async (ctx: any) => {
+    try {
+      return await approveOrder(ctx.params.id, ctx.provider.id, getClientIp(ctx.request));
+    } catch (err) {
+      if (err instanceof OrderError) {
+        ctx.set.status = err.status;
+        return { error: { code: err.code, message: err.message } };
+      }
+      throw err;
+    }
+  }, {
+    params: t.Object({ id: t.String() }),
+    detail: { summary: "Aprovar pedido", tags: ["Painel"] },
+  })
+
+  .post("/orders/:id/reject", async (ctx: any) => {
+    try {
+      return await rejectOrder(ctx.params.id, ctx.provider.id, ctx.body.reason, getClientIp(ctx.request));
+    } catch (err) {
+      if (err instanceof OrderError) {
+        ctx.set.status = err.status;
+        return { error: { code: err.code, message: err.message } };
+      }
+      throw err;
+    }
+  }, {
+    params: t.Object({ id: t.String() }),
+    body: t.Object({ reason: t.String({ minLength: 1 }) }),
+    detail: { summary: "Rejeitar pedido", tags: ["Painel"] },
+  });

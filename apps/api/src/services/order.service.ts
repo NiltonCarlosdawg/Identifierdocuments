@@ -1,10 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { jwtVerify, SignJWT } from "jose";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "../db";
-import { organizations, orders, plans, users } from "../db/schema";
+import { auditLogs, organizations, orders, plans, users } from "../db/schema";
+import { withTenant } from "../db/withTenant";
 import { logger } from "../lib/logger";
-import { sendOrderReceivedEmail } from "./mailer.service";
+import { sendOrderReceivedEmail, sendOrderRejectedEmail, sendSubscriptionActiveEmail } from "./mailer.service";
+import { getSubscriptionContext, getTenantContactEmail } from "./subscription.service";
 
 const rawSecret = process.env.JWT_SECRET;
 if (!rawSecret) throw new Error("JWT_SECRET environment variable is required");
@@ -123,4 +125,117 @@ export async function createOrder(input: CreateOrderInput): Promise<{ orderId: s
   }
 
   return { orderId: inserted.id, status: "pending" };
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const SUBSCRIPTION_DAYS = 365;
+
+async function pendingOrderWithNames(orderId: string) {
+  const [row] = await db.select({
+    order: orders,
+    tenantName: organizations.name,
+    planName: plans.name,
+  }).from(orders)
+    .innerJoin(organizations, eq(orders.tenantId, organizations.id))
+    .innerJoin(plans, eq(orders.planId, plans.id))
+    .where(eq(orders.id, orderId)).limit(1);
+  if (!row) throw new OrderError("ORDER_NOT_FOUND", "Pedido não encontrado.", 404);
+  if (row.order.status !== "pending") {
+    throw new OrderError("ORDER_NOT_PENDING", "Este pedido já foi decidido.", 409);
+  }
+  return row;
+}
+
+export async function approveOrder(
+  orderId: string,
+  providerUserId: string,
+  ip?: string | null,
+): Promise<{ orderId: string; status: "approved" }> {
+  const { order, tenantName, planName } = await pendingOrderWithNames(orderId);
+  const decidedAt = new Date();
+  const expiresAt = new Date(decidedAt.getTime() + SUBSCRIPTION_DAYS * DAY_MS);
+
+  await withTenant(order.tenantId, async (tx) => {
+    const [updated] = await tx.update(orders).set({
+      status: "approved", decidedAt, decidedBy: providerUserId,
+    }).where(and(eq(orders.id, orderId), eq(orders.status, "pending"))).returning();
+    if (!updated) throw new OrderError("ORDER_NOT_PENDING", "Este pedido já foi decidido.", 409);
+
+    await tx.update(organizations).set({
+      planId: order.planId,
+      subscriptionStatus: "paid",
+      subscriptionExpiresAt: expiresAt,
+    }).where(eq(organizations.id, order.tenantId));
+
+    // Verificação runtime: confirma a ativação antes de notificar o cliente.
+    const ctx = await getSubscriptionContext(order.tenantId, tx);
+    if (ctx.org.subscriptionStatus !== "paid" || ctx.org.planId !== order.planId) {
+      throw new OrderError(
+        "ACTIVATION_VERIFICATION_FAILED",
+        "Não foi possível confirmar a ativação da subscrição.",
+        500,
+      );
+    }
+
+    await tx.insert(auditLogs).values({
+      tenantId: order.tenantId,
+      userId: null,
+      action: "subscription.approve",
+      resource: "orders",
+      resourceId: order.id,
+      metadata: JSON.stringify({ providerUserId }),
+      ip: ip ?? null,
+    });
+  });
+
+  const contact = await getTenantContactEmail(order.tenantId);
+  if (contact) {
+    try {
+      await sendSubscriptionActiveEmail(contact, { tenantName, planName, expiresAt });
+    } catch (err) {
+      logger.warn({ err, orderId }, "[ORDERS] Falha ao notificar a ativação por email.");
+    }
+  }
+  return { orderId, status: "approved" };
+}
+
+export async function rejectOrder(
+  orderId: string,
+  providerUserId: string,
+  reason: string,
+  ip?: string | null,
+): Promise<{ orderId: string; status: "rejected" }> {
+  if (!reason?.trim()) {
+    throw new OrderError("REASON_REQUIRED", "Indique o motivo da rejeição.", 400);
+  }
+  const { order, tenantName, planName } = await pendingOrderWithNames(orderId);
+
+  await withTenant(order.tenantId, async (tx) => {
+    const [updated] = await tx.update(orders).set({
+      status: "rejected",
+      rejectReason: reason,
+      decidedAt: new Date(),
+      decidedBy: providerUserId,
+    }).where(and(eq(orders.id, orderId), eq(orders.status, "pending"))).returning();
+    if (!updated) throw new OrderError("ORDER_NOT_PENDING", "Este pedido já foi decidido.", 409);
+
+    await tx.insert(auditLogs).values({
+      tenantId: order.tenantId,
+      userId: null,
+      action: "subscription.reject",
+      resource: "orders",
+      resourceId: order.id,
+      metadata: JSON.stringify({ providerUserId }),
+      ip: ip ?? null,
+    });
+  });
+
+  if (order.contactEmail) {
+    try {
+      await sendOrderRejectedEmail(order.contactEmail, { tenantName, planName, reason });
+    } catch (err) {
+      logger.warn({ err, orderId }, "[ORDERS] Falha ao notificar a rejeição por email.");
+    }
+  }
+  return { orderId, status: "rejected" };
 }

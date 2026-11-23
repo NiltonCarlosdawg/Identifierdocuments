@@ -12,7 +12,9 @@ import { decodeJwt, SignJWT } from "jose";
 
 import { db } from "../db";
 import { withTenant } from "../db/withTenant";
-import { orders, organizations, plans, roles, sectors, userRoles, users } from "../db/schema";
+import { auditLogs, identifiers, orders, organizations, plans, providerUsers, roles, sectors, userRoles, users } from "../db/schema";
+import { hashPassword } from "../lib/password";
+import { signProviderToken } from "../middleware/auth";
 
 const API_ROOT = join(import.meta.dir, "..", "..");
 const TEST_PORT = process.env.ORDERS_TEST_PORT || "3110";
@@ -20,15 +22,21 @@ const BASE = `http://127.0.0.1:${TEST_PORT}`;
 const RUN_ID = Date.now().toString(36);
 const SLUG = `orders-tenant-${RUN_ID}`;
 const ADMIN_EMAIL = `orders-admin-${RUN_ID}@test.docid`;
+const PROVIDER_EMAIL = `orders-provider-${RUN_ID}@test.docid`;
 const TENANT_NAME = `Pedidos Org ${RUN_ID}`;
 const PASSWORD = "testpass123";
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 let serverProc: Subprocess | null = null;
 let adminToken = "";
+let providerToken = "";
+let providerUserId = "";
 let tenantId = "";
 let paidPlanId = "";
+let upgradePlanId = "";
 let freePlanId = "";
 let inactivePlanId = "";
+let firstApprovedOrderId = "";
 
 type AnyBody = Record<string, any>;
 
@@ -85,6 +93,25 @@ function orderBody(planId = paidPlanId): OrderFields {
   };
 }
 
+async function newPendingOrder(planId = paidPlanId): Promise<string> {
+  const res = await api<any>("/orders", {
+    method: "POST",
+    body: JSON.stringify({ ...orderBody(planId), tenantSlug: SLUG }),
+  });
+  expect(res.status).toBe(200);
+  return res.body.orderId;
+}
+
+function approve(orderId: string) {
+  return api<any>(`/provider/orders/${orderId}/approve`, { method: "POST", token: providerToken });
+}
+
+function reject(orderId: string, body: Record<string, unknown>) {
+  return api<any>(`/provider/orders/${orderId}/reject`, {
+    method: "POST", token: providerToken, body: JSON.stringify(body),
+  });
+}
+
 beforeAll(async () => {
   const [free] = await db.select().from(plans).where(eq(plans.isFree, true)).limit(1);
   expect(free).toBeTruthy();
@@ -99,6 +126,16 @@ beforeAll(async () => {
   }).returning();
   paidPlanId = paid.id;
 
+  // Plano de upgrade: headroom para o teste de geração pós-aprovação e para renovação.
+  const [upgrade] = await db.insert(plans).values({
+    name: `Pedidos upgrade ${RUN_ID}`,
+    price: 400000,
+    maxUsers: 20,
+    monthlyOnlineIdentifiers: 500,
+    offlineBudgetPerMachine: 1000,
+  }).returning();
+  upgradePlanId = upgrade.id;
+
   const [inactive] = await db.insert(plans).values({
     name: `Pedidos inactivo ${RUN_ID}`,
     price: 250000,
@@ -108,6 +145,14 @@ beforeAll(async () => {
     active: false,
   }).returning();
   inactivePlanId = inactive.id;
+
+  const [provider] = await db.insert(providerUsers).values({
+    email: PROVIDER_EMAIL,
+    passwordHash: await hashPassword(PASSWORD),
+    name: "Provedora Teste",
+  }).returning();
+  providerUserId = provider.id;
+  providerToken = await signProviderToken({ id: provider.id, email: provider.email });
 
   serverProc = spawn({
     cmd: ["bun", "src/index.ts"],
@@ -148,6 +193,8 @@ afterAll(async () => {
     // Tabela global: SEM withTenant.
     await db.delete(orders).where(eq(orders.tenantId, tenantId));
     await withTenant(tenantId, async (tx) => {
+      await tx.delete(auditLogs).where(eq(auditLogs.tenantId, tenantId));
+      await tx.delete(identifiers).where(eq(identifiers.tenantId, tenantId));
       await tx.delete(userRoles).where(
         sql`${userRoles.userId} IN (SELECT ${users.id} FROM ${users} WHERE ${users.tenantId} = ${tenantId})`,
       );
@@ -157,7 +204,9 @@ afterAll(async () => {
       await tx.delete(organizations).where(eq(organizations.id, tenantId));
     });
   }
+  if (providerUserId) await db.delete(providerUsers).where(eq(providerUsers.id, providerUserId));
   if (paidPlanId) await db.delete(plans).where(eq(plans.id, paidPlanId));
+  if (upgradePlanId) await db.delete(plans).where(eq(plans.id, upgradePlanId));
   if (inactivePlanId) await db.delete(plans).where(eq(plans.id, inactivePlanId));
 });
 
@@ -350,5 +399,103 @@ describe("criação de pedidos", () => {
 
     const [row] = await db.select().from(orders).where(eq(orders.id, result.orderId));
     expect(row.tenantId).toBe(tenantId);
+  });
+});
+
+describe("aprovação e rejeição de pedidos (painel)", () => {
+  async function currentOrg() {
+    const [row] = await db.select().from(organizations).where(eq(organizations.id, tenantId)).limit(1);
+    return row;
+  }
+
+  test("aprovar: pedido approved e organization paid com plano e expiresAt ≈ now+365d", async () => {
+    const orderId = await newPendingOrder();
+    const antes = Date.now();
+    const res = await approve(orderId);
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ orderId, status: "approved" });
+
+    const [order] = await db.select().from(orders).where(eq(orders.id, orderId));
+    expect(order).toMatchObject({ status: "approved", decidedBy: providerUserId });
+    expect(order.decidedAt).toBeTruthy();
+
+    const org = await currentOrg();
+    expect(org.subscriptionStatus).toBe("paid");
+    expect(org.planId).toBe(paidPlanId);
+    const dias = (org.subscriptionExpiresAt!.getTime() - antes) / DAY_MS;
+    expect(dias).toBeGreaterThan(364.9);
+    expect(dias).toBeLessThan(365.1);
+    firstApprovedOrderId = orderId;
+  });
+
+  test("2.ª aprovação do mesmo pedido: 409 ORDER_NOT_PENDING", async () => {
+    const res = await approve(firstApprovedOrderId);
+    expect(res.status).toBe(409);
+    expect(res.body.error).toEqual({
+      code: "ORDER_NOT_PENDING",
+      message: "Este pedido já foi decidido.",
+    });
+  });
+
+  test("rejeitar com motivo: pedido rejected, reason guardado, tenant intacto", async () => {
+    const orderId = await newPendingOrder();
+    const antes = await currentOrg();
+    const semMotivo = await reject(orderId, {});
+    expect(semMotivo.status).toBe(422);
+    expect(semMotivo.body.error?.code).toBe("VALIDATION_ERROR");
+
+    const res = await reject(orderId, { reason: "Pagamento não confirmado." });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ orderId, status: "rejected" });
+
+    const [order] = await db.select().from(orders).where(eq(orders.id, orderId));
+    expect(order).toMatchObject({
+      status: "rejected",
+      rejectReason: "Pagamento não confirmado.",
+      decidedBy: providerUserId,
+    });
+    const depois = await currentOrg();
+    expect(depois.subscriptionStatus).toBe(antes.subscriptionStatus);
+    expect(depois.planId).toBe(antes.planId);
+    expect(depois.subscriptionExpiresAt?.getTime()).toBe(antes.subscriptionExpiresAt?.getTime());
+  });
+
+  test("VERIFICAÇÃO DEV: após aprovar, ORG_ADMIN gera identificador sem bloqueio", async () => {
+    const res = await api<any>("/identifiers/generate", {
+      method: "POST",
+      token: adminToken,
+      body: JSON.stringify({ categoryId: "PROP", origin: "digital" }),
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.data.identifier).toBeTruthy();
+  });
+
+  test("auditoria: row subscription.approve no tenant com providerUserId no metadata", async () => {
+    const [row] = await db.select().from(auditLogs)
+      .where(eq(auditLogs.resourceId, firstApprovedOrderId)).limit(1);
+    expect(row).toBeTruthy();
+    expect(row.tenantId).toBe(tenantId);
+    expect(row.userId).toBeNull();
+    expect(row.action).toBe("subscription.approve");
+    expect(JSON.parse(row.metadata!).providerUserId).toBe(providerUserId);
+  });
+
+  test("renovação: tenant já paid com expiresAt antigo recalcula da aprovação", async () => {
+    await db.update(organizations).set({
+      subscriptionStatus: "paid",
+      planId: upgradePlanId,
+      subscriptionExpiresAt: new Date("2020-01-01T00:00:00Z"),
+    }).where(eq(organizations.id, tenantId));
+
+    const orderId = await newPendingOrder();
+    const antes = Date.now();
+    const res = await approve(orderId);
+    expect(res.status).toBe(200);
+
+    const org = await currentOrg();
+    expect(org.planId).toBe(paidPlanId);
+    const dias = (org.subscriptionExpiresAt!.getTime() - antes) / DAY_MS;
+    expect(dias).toBeGreaterThan(364.9);
+    expect(dias).toBeLessThan(365.1);
   });
 });
