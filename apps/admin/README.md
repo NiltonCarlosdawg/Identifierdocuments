@@ -12,10 +12,16 @@ VITE_API_URL=http://127.0.0.1:3000 npm run dev
 
 A app abre em `http://127.0.0.1:5174`.
 
-## Credenciais locais
+## Credenciais
 
-Utilizador de teste criado na base local: `admin@docid.local` / `testpass123`.
-Em produção, criar com `bun run provider:create -- <email> <password>`.
+Crie um utilizador do painel na base usada pela API:
+
+```bash
+cd ../api
+bun run provider:create -- <email> <password> [nome]
+```
+
+O painel não guarda credenciais no repositório; o token fica no `localStorage` do browser.
 
 ## Variáveis
 
