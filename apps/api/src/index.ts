@@ -13,6 +13,7 @@ import { categoriesModule } from "./modules/categories.module";
 import { identifiersModule } from "./modules/identifiers.module";
 import { documentsModule } from "./modules/documents.module";
 import { providerModule } from "./modules/provider.module";
+import { plansModule } from "./modules/plans.module";
 
 import { approvalsModule } from "./modules/approvals.module";
 import { auditModule } from "./modules/audit.module";
@@ -114,6 +115,7 @@ app
   .use(identifiersModule)
   .use(documentsModule)
   .use(providerModule)
+  .use(plansModule)
 
   .use(approvalsModule)
   .use(auditModule)
