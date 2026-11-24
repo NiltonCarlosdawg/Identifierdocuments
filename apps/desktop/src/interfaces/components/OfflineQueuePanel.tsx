@@ -33,7 +33,7 @@ export default function OfflineQueuePanel() {
             <h2 className="text-lg font-semibold text-docid-text">Ficheiros por enviar</h2>
             <p className="text-xs text-docid-muted">{online ? <span className="flex items-center gap-1 text-docid-secondary"><CheckCircle2 className="h-3 w-3" /> Ligado</span> : <span className="flex items-center gap-1 text-orange-500"><CloudOff className="h-3 w-3" /> Sem ligação</span>}</p>
           </div>
-          <button onClick={() => setPanelOpen(false)} className="rounded-lg p-1.5 hover:bg-docid-surface-low text-docid-muted"><X className="h-5 w-5" /></button>
+          <button aria-label="Fechar" onClick={() => setPanelOpen(false)} className="rounded-lg p-1.5 hover:bg-docid-surface-low text-docid-muted"><X className="h-5 w-5" /></button>
         </div>
         <div className="flex items-center gap-2 border-b border-docid-border px-5 py-3">
           <button onClick={async () => { await sync.forceSync(); await refresh(); }} disabled={!online || pending === 0} className="flex items-center gap-2 rounded-lg bg-docid-primary px-3 py-1.5 text-xs font-medium text-white hover:brightness-110 disabled:opacity-50"><RefreshCw className="h-3.5 w-3.5" /> Sincronizar agora</button>

@@ -9,7 +9,7 @@ export default function NotificationBell() {
   return (<>
     {toasts.length > 0 && <div className="fixed right-6 top-16 z-50 space-y-2">{toasts.map(t => <div key={t.id} className="rounded-lg bg-docid-primary px-4 py-3 text-sm text-white shadow-lg animate-in fade-in slide-in-from-right">{t.message}</div>)}</div>}
     <div className="relative">
-      <button onClick={() => { setOpen(!open); if (!open) loadNotifications(); }} className="relative rounded-lg p-2 hover:bg-docid-surface-low transition-colors">
+      <button aria-label="Notificações" onClick={() => { setOpen(!open); if (!open) loadNotifications(); }} className="relative rounded-lg p-2 hover:bg-docid-surface-low transition-colors">
         <Bell className="h-4 w-4 text-docid-muted" />
         {unreadCount > 0 && <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">{unreadCount}</span>}
       </button>
@@ -18,7 +18,7 @@ export default function NotificationBell() {
         <div className="absolute right-0 top-full z-50 mt-2 w-80 docid-panel shadow-xl">
           <div className="flex items-center justify-between border-b border-docid-border px-4 py-3">
             <h3 className="text-sm font-semibold text-docid-text">Notificações</h3>
-            <button onClick={() => setOpen(false)} className="rounded p-1 hover:bg-docid-surface-low text-docid-muted"><X className="h-4 w-4" /></button>
+            <button aria-label="Fechar" onClick={() => setOpen(false)} className="rounded p-1 hover:bg-docid-surface-low text-docid-muted"><X className="h-4 w-4" /></button>
           </div>
           <div className="max-h-80 overflow-y-auto">
             {notifications.length === 0 && <p className="px-4 py-6 text-center text-sm text-docid-muted">Sem notificações.</p>}

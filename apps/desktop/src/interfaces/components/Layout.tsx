@@ -96,7 +96,7 @@ export default function Layout() {
       <div className="flex flex-1 flex-col overflow-hidden">
         <header className="flex h-16 items-center justify-between gap-4 border-b border-docid-border bg-docid-background px-6">
           <div className="flex items-center gap-3">
-            <button className="rounded-lg p-2 text-docid-muted transition hover:bg-docid-surface-high hover:text-docid-text"><Menu className="h-4 w-4" /></button>
+            <button aria-label="Abrir menu" className="rounded-lg p-2 text-docid-muted transition hover:bg-docid-surface-high hover:text-docid-text"><Menu className="h-4 w-4" /></button>
             <div className="hidden w-80 items-center gap-2 rounded-lg border border-docid-border bg-docid-surface-low px-3 py-1.5 md:flex">
               <Search className="h-4 w-4 text-docid-outline" />
               <input className="w-full border-none bg-transparent text-sm text-docid-text outline-none placeholder:text-docid-outline" placeholder="Pesquisar no DocID..." />
