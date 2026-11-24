@@ -16,7 +16,7 @@ const QUESTIONS = [
   },
   {
     q: "Funciona em Mac ou Linux?",
-    a: "Ainda não. Esta versão corre em Windows 10 e 11, 64 bits. As versões para Linux e macOS estão em preparação e serão publicadas na mesma página de versões.",
+    a: "Sim, em Linux: há um pacote .deb para Ubuntu 22.04 e compatíveis (amd64). Windows 10 e 11, 64 bits, tem instalador completo. A versão para macOS está em preparação e será publicada na mesma página.",
   },
   {
     q: "Como actualizo a aplicação?",

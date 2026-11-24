@@ -9,7 +9,12 @@ export const DOWNLOADS = {
   installer: {
     href: "/downloads/DocID_1.2.2_x64-setup.exe",
     size: "290 MB",
-    sha256: "a05d6aa282bc87f9df2b6b96a99c85df2e05305eaa8cbd7aada29f9a34fb9556",
+    sha256: "9f16192bae3a9d9e984fd9ce1bffe54cdc820a73a2b5195986ad2d3dfa0d3d55",
+  },
+  linux: {
+    href: "/downloads/DocID_1.2.2_amd64.deb",
+    size: "10 MB",
+    sha256: "b9479826b526cf22b74c4abba5c7b708351776b74b00b17811bbda8d31113ccc",
   },
 } as const;
 
@@ -103,9 +108,14 @@ export function DownloadSection() {
             <PlatformRow
               mark={<LinuxMark className="h-4 w-4" />}
               name="Linux"
-              meta="Em breve"
-              detail="Estamos a preparar os pacotes .deb e AppImage."
-              action={<span className="btn-ghost w-full cursor-not-allowed opacity-55 sm:w-auto" aria-disabled="true">Em breve</span>}
+              meta="Pacote Debian · amd64"
+              detail="Pacote .deb para Ubuntu 22.04 e compatíveis. Instale com `sudo apt install ./DocID_1.2.2_amd64.deb`."
+              action={
+                <a className="btn-primary w-full sm:w-auto" href={DOWNLOADS.linux.href}>
+                  <Download className="h-4 w-4" />
+                  Descarregar {DOWNLOADS.linux.size}
+                </a>
+              }
             />
             <div className="rule" />
             <PlatformRow
@@ -133,6 +143,12 @@ export function DownloadSection() {
                     <dt className="font-mono text-[10px] uppercase tracking-[0.14em] text-docid-muted">SHA-256 instalador</dt>
                     <dd className="w-full break-all font-mono text-[11px] leading-relaxed text-docid-muted">
                       {DOWNLOADS.installer.sha256}
+                    </dd>
+                  </div>
+                  <div className="flex flex-wrap items-baseline gap-x-2">
+                    <dt className="font-mono text-[10px] uppercase tracking-[0.14em] text-docid-muted">SHA-256 Linux (.deb)</dt>
+                    <dd className="w-full break-all font-mono text-[11px] leading-relaxed text-docid-muted">
+                      {DOWNLOADS.linux.sha256}
                     </dd>
                   </div>
                 </dl>
