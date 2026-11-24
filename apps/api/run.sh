@@ -28,7 +28,7 @@ else
   log "em baixo — a arrancar"
 fi
 
-setsid nohup node --import tsx src/index.ts >> docid-api.log 2>&1 < /dev/null &
+setsid nohup node dist/index.js >> docid-api.log 2>&1 < /dev/null &
 echo $! > "$PIDFILE"
 sleep 15
 if healthy; then log "ok (pid $(cat "$PIDFILE"))"; else log "FALHOU a arrancar — ver docid-api.log"; exit 1; fi
