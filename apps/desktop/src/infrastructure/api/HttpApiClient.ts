@@ -129,6 +129,7 @@ export class HttpApiClient implements IApiClient {
   get = <T>(path: string) => this.request<T>(path);
   post = <T>(path: string, body?: unknown) => this.request<T>(path, { method: "POST", body: body instanceof FormData ? body : JSON.stringify(body) });
   patch = <T>(path: string, body: unknown) => this.request<T>(path, { method: "PATCH", body: JSON.stringify(body) });
+  put = <T>(path: string, body: unknown) => this.request<T>(path, { method: "PUT", body: JSON.stringify(body) });
   delete = <T>(path: string) => this.request<T>(path, { method: "DELETE" });
   getBlob = (path: string) => this.requestBlob(path);
 }

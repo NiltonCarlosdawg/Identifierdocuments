@@ -10,12 +10,12 @@ import { useOfflineCache } from "../hooks/useOfflineCache";
 import { mapError } from "../../shared/errors/mapError";
 import { sync, api } from "../../infrastructure/di/container";
 import type { WatcherFileRow } from "../../domain/entities/Watcher";
-import { Server, Sun, Moon, Save, RotateCcw, FolderPlus, Trash2, Play, Square, Eye, RefreshCw, Building2, Bell, Download, Smartphone, AlertTriangle, Printer } from "lucide-react";
+import { Server, Sun, Moon, Save, RotateCcw, FolderPlus, Trash2, Play, Square, Eye, RefreshCw, Building2, Bell, Download, Smartphone, AlertTriangle, Printer, Mail } from "lucide-react";
 
 export default function Settings() {
   const user = useAuthStore(s => s.user);
   const isAdmin = user?.roles?.includes("ORG_ADMIN") ?? false;
-  const [tab, setTab] = useState<"server" | "appearance" | "watcher" | "organizacao" | "notificacoes" | "dispositivos">(
+  const [tab, setTab] = useState<"server" | "appearance" | "watcher" | "organizacao" | "notificacoes" | "dispositivos" | "email">(
     isAdmin ? "server" : "watcher"
   );
 
@@ -29,9 +29,10 @@ export default function Settings() {
         {isAdmin && <TabBtn active={tab === "organizacao"} onClick={() => setTab("organizacao")}><Building2 className="h-4 w-4" /> Organização</TabBtn>}
         <TabBtn active={tab === "dispositivos"} onClick={() => setTab("dispositivos")}><Smartphone className="h-4 w-4" /> Dispositivos</TabBtn>
         {isAdmin && <TabBtn active={tab === "notificacoes"} onClick={() => setTab("notificacoes")}><Bell className="h-4 w-4" /> Notificações</TabBtn>}
+        {isAdmin && <TabBtn active={tab === "email"} onClick={() => setTab("email")}><Mail className="h-4 w-4" /> E-mail</TabBtn>}
       </div>
       <div className="max-w-2xl">
-        {tab === "server" ? <ServerTab /> : tab === "appearance" ? <AppearanceTab /> : tab === "watcher" ? <WatcherTab /> : tab === "organizacao" ? <OrganizationTab /> : tab === "dispositivos" ? <DevicesTab /> : <NotificationsTab />}
+        {tab === "server" ? <ServerTab /> : tab === "appearance" ? <AppearanceTab /> : tab === "watcher" ? <WatcherTab /> : tab === "organizacao" ? <OrganizationTab /> : tab === "dispositivos" ? <DevicesTab /> : tab === "email" ? <EmailTab /> : <NotificationsTab />}
       </div>
     </div>
   );
@@ -844,6 +845,180 @@ function WatcherTab() {
       )}
 
       <p className="text-xs text-docid-muted">Com identificador, «Adicionar agora» anexa já (ou enfileira se estiver offline). Sem identificador, abre Documentos para completar o anexo.</p>
+    </div>
+  );
+}
+
+/* ── E-mail dos alertas (configuração por organização) ── */
+
+export type EmailForm = {
+  provider: "smtp" | "resend" | "sendgrid";
+  fromEmail: string; fromName: string; replyTo: string;
+  smtpHost: string; smtpPort: string; smtpSecurity: "ssl" | "starttls" | "none"; smtpUser: string;
+  secret: string; enabled: boolean;
+};
+
+export function emailSettingsPayload(f: EmailForm) {
+  const base = {
+    provider: f.provider,
+    fromEmail: f.fromEmail.trim(),
+    fromName: f.fromName.trim() || null,
+    replyTo: f.replyTo.trim() || null,
+    enabled: f.enabled,
+  };
+  const secret = f.secret ? { secret: f.secret } : {};
+  if (f.provider === "smtp") {
+    return { ...base, ...secret, smtpHost: f.smtpHost.trim(), smtpPort: Number(f.smtpPort), smtpSecurity: f.smtpSecurity, smtpUser: f.smtpUser.trim() || null };
+  }
+  return { ...base, ...secret };
+}
+
+type EmailSettingsView = {
+  provider: "smtp" | "resend" | "sendgrid";
+  fromEmail: string; fromName: string | null; replyTo: string | null;
+  smtpHost: string | null; smtpPort: number | null; smtpSecurity: "ssl" | "starttls" | "none" | null;
+  smtpUser: string | null; enabled: boolean; hasSecret: boolean;
+  verifiedAt: string | null; lastTestAt: string | null; lastTestError: string | null;
+};
+
+type EmailLog = {
+  id: string; eventType: string; recipientEmail: string; subject: string; status: string;
+  attempts: number; provider: string | null; sender: string | null; lastError: string | null;
+  createdAt: string; sentAt: string | null;
+};
+
+const emptyEmailForm: EmailForm = {
+  provider: "smtp", fromEmail: "", fromName: "", replyTo: "",
+  smtpHost: "", smtpPort: "587", smtpSecurity: "starttls", smtpUser: "",
+  secret: "", enabled: true,
+};
+
+function EmailTab() {
+  const [form, setForm] = useState<EmailForm>(emptyEmailForm);
+  const [settings, setSettings] = useState<EmailSettingsView | null>(null);
+  const [fallback, setFallback] = useState<string>("platform");
+  const [logs, setLogs] = useState<EmailLog[]>([]);
+  const [testTo, setTestTo] = useState("");
+  const [busy, setBusy] = useState("");
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
+  const load = async () => {
+    try {
+      const [s, l] = await Promise.all([
+        api.get<{ data: { settings: EmailSettingsView | null; fallbackMode: string } }>("/email/settings"),
+        api.get<{ data: EmailLog[] }>("/email/logs?limit=20"),
+      ]);
+      setSettings(s.data.settings);
+      setFallback(s.data.fallbackMode);
+      setLogs(l.data);
+      if (s.data.settings) {
+        const v = s.data.settings;
+        setForm({
+          provider: v.provider, fromEmail: v.fromEmail, fromName: v.fromName ?? "", replyTo: v.replyTo ?? "",
+          smtpHost: v.smtpHost ?? "", smtpPort: String(v.smtpPort ?? 587), smtpSecurity: v.smtpSecurity ?? "starttls",
+          smtpUser: v.smtpUser ?? "", secret: "", enabled: v.enabled,
+        });
+      }
+    } catch (err: any) { setError(mapError(err, "Não foi possível carregar a configuração de e-mail.")); }
+  };
+
+  useEffect(() => { void load(); }, []);
+
+  const run = async (action: string, fn: () => Promise<unknown>, ok: string) => {
+    setBusy(action); setError(""); setMessage("");
+    try { await fn(); setMessage(ok); await load(); }
+    catch (err: any) { setError(mapError(err, "Falha ao guardar/configurar o e-mail.")); }
+    finally { setBusy(""); }
+  };
+
+  const set = <K extends keyof EmailForm>(key: K, value: EmailForm[K]) => setForm(f => ({ ...f, [key]: value }));
+
+  return (
+    <div className="space-y-5" data-testid="email-settings">
+      <div>
+        <h3 className="text-sm font-semibold text-docid-text">Alertas por e-mail</h3>
+        <p className="text-xs text-docid-muted">Configure o envio de avisos quando um documento é aprovado ou partilhado. Sem configuração própria, a empresa usa o modo «{fallback}».</p>
+      </div>
+
+      <div className="docid-panel p-4 space-y-3">
+        <div className="grid grid-cols-2 gap-3">
+          <label className="text-xs text-docid-muted">Fornecedor
+            <select data-testid="email-provider" className="docid-input mt-1 w-full" value={form.provider} onChange={e => set("provider", e.target.value as EmailForm["provider"])}>
+              <option value="smtp">SMTP</option><option value="resend">Resend</option><option value="sendgrid">SendGrid</option>
+            </select>
+          </label>
+          <label className="text-xs text-docid-muted">Remetente (e-mail)
+            <input data-testid="email-from" className="docid-input mt-1 w-full" value={form.fromEmail} onChange={e => set("fromEmail", e.target.value)} placeholder="alertas@empresa.ao" />
+          </label>
+          <label className="text-xs text-docid-muted">Nome do remetente
+            <input className="docid-input mt-1 w-full" value={form.fromName} onChange={e => set("fromName", e.target.value)} />
+          </label>
+          <label className="text-xs text-docid-muted">Responder a
+            <input className="docid-input mt-1 w-full" value={form.replyTo} onChange={e => set("replyTo", e.target.value)} />
+          </label>
+        </div>
+
+        {form.provider === "smtp" && (
+          <div className="grid grid-cols-2 gap-3">
+            <label className="text-xs text-docid-muted">Servidor SMTP
+              <input data-testid="email-smtp-host" className="docid-input mt-1 w-full" value={form.smtpHost} onChange={e => set("smtpHost", e.target.value)} />
+            </label>
+            <label className="text-xs text-docid-muted">Porta
+              <input className="docid-input mt-1 w-full" value={form.smtpPort} onChange={e => set("smtpPort", e.target.value)} inputMode="numeric" />
+            </label>
+            <label className="text-xs text-docid-muted">Segurança
+              <select className="docid-input mt-1 w-full" value={form.smtpSecurity} onChange={e => set("smtpSecurity", e.target.value as EmailForm["smtpSecurity"])}>
+                <option value="starttls">STARTTLS</option><option value="ssl">SSL/TLS</option><option value="none">Nenhuma</option>
+              </select>
+            </label>
+            <label className="text-xs text-docid-muted">Utilizador SMTP
+              <input className="docid-input mt-1 w-full" value={form.smtpUser} onChange={e => set("smtpUser", e.target.value)} />
+            </label>
+          </div>
+        )}
+
+        <label className="block text-xs text-docid-muted">Palavra-passe / chave de API
+          <input data-testid="email-secret" type="password" className="docid-input mt-1 w-full" value={form.secret} onChange={e => set("secret", e.target.value)}
+            placeholder={settings?.hasSecret ? "Já guardada — deixe vazio para manter" : "Obrigatório para Resend/SendGrid"} />
+        </label>
+        <label className="flex items-center gap-2 text-xs text-docid-text">
+          <input type="checkbox" checked={form.enabled} onChange={e => set("enabled", e.target.checked)} /> Activar notificações
+        </label>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <button data-testid="email-save" disabled={!!busy} className="docid-button-primary" onClick={() => run("guardar", () => api.put("/email/settings", emailSettingsPayload(form)), "Configuração guardada.")}>
+            <Save className="h-4 w-4" /> {busy === "guardar" ? "A guardar..." : "Guardar"}
+          </button>
+          <button disabled={!!busy} className="docid-button-secondary" onClick={() => run("testar", () => api.post("/email/settings/test", { to: testTo }), "E-mail de teste enviado.")}>
+            <Mail className="h-4 w-4" /> Enviar teste
+          </button>
+          <input className="docid-input w-56" value={testTo} onChange={e => setTestTo(e.target.value)} placeholder="destinatario@empresa.ao" />
+          {settings && <button disabled={!!busy} className="docid-button-secondary text-docid-error" onClick={() => run("remover", () => api.delete("/email/settings"), "Configuração removida; modo plataforma.")}><Trash2 className="h-4 w-4" /> Remover</button>}
+        </div>
+        {message && <p data-testid="email-message" className="text-xs text-docid-secondary">{message}</p>}
+        {error && <p className="text-xs text-docid-error">{error}</p>}
+        {settings?.lastTestError && <p className="text-xs text-docid-error">Último teste falhou: {settings.lastTestError}</p>}
+      </div>
+
+      <div>
+        <h3 className="mb-2 text-sm font-semibold text-docid-text">Histórico de envios</h3>
+        {logs.length === 0 ? <p className="text-xs text-docid-muted">Ainda não há e-mails registados.</p> : (
+          <div className="docid-panel divide-y divide-docid-border">
+            {logs.map(l => (
+              <div key={l.id} data-testid="email-log-row" className="flex items-center justify-between gap-3 px-4 py-2">
+                <div className="min-w-0">
+                  <p className="truncate text-sm text-docid-text">{l.subject} <span className="text-docid-muted">→ {l.recipientEmail}</span></p>
+                  <p className="text-xs text-docid-muted">{new Date(l.createdAt).toLocaleString("pt-AO")} · {l.status} · {l.provider ?? "—"}</p>
+                </div>
+                {(l.status === "failed" || l.status === "skipped") && l.eventType !== "test" && (
+                  <button disabled={!!busy} className="docid-button-secondary text-xs py-1" onClick={() => run("reenviar", () => api.post(`/email/logs/${l.id}/retry`), "E-mail reenfileirado.")}>Reenviar</button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
