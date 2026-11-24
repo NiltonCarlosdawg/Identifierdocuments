@@ -28,7 +28,9 @@ else
   log "em baixo — a arrancar"
 fi
 
-setsid nohup node dist/index.js >> docid-api.log 2>&1 < /dev/null &
+# 9>&- fecha o fd do watchdog.lock no filho: sem isto o node herda o lock e
+# nenhum watchdog futuro consegue executar run.sh (flock -n falha sempre).
+setsid nohup node dist/index.js 9>&- >> docid-api.log 2>&1 < /dev/null &
 echo $! > "$PIDFILE"
 sleep 15
 if healthy; then log "ok (pid $(cat "$PIDFILE"))"; else log "FALHOU a arrancar — ver docid-api.log"; exit 1; fi
