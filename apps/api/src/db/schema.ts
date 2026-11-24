@@ -489,3 +489,55 @@ export const identifierReleasePoolRelations = relations(identifierReleasePool, (
   category: one(categories, { fields: [identifierReleasePool.categoryId], references: [categories.id] }),
   sector: one(sectors, { fields: [identifierReleasePool.sectorId], references: [sectors.id] }),
 }));
+/* ── Notificações por e-mail (migração 0025) ── */
+
+export const tenantEmailSettings = pgTable("tenant_email_settings", {
+  tenantId: uuid("tenant_id").primaryKey().references(() => organizations.id),
+  provider: text("provider", { enum: ["smtp", "resend", "sendgrid"] }).notNull(),
+  fromEmail: text("from_email").notNull(),
+  fromName: text("from_name"),
+  replyTo: text("reply_to"),
+  smtpHost: text("smtp_host"),
+  smtpPort: integer("smtp_port"),
+  smtpSecurity: text("smtp_security", { enum: ["ssl", "starttls", "none"] }),
+  smtpUser: text("smtp_user"),
+  /** Password SMTP ou chave de API, encriptada (ver lib/secret-box.ts). Nunca devolver na API. */
+  secretEncrypted: text("secret_encrypted"),
+  enabled: boolean("enabled").notNull().default(true),
+  verifiedAt: timestamp("verified_at", { withTimezone: true }),
+  lastTestAt: timestamp("last_test_at", { withTimezone: true }),
+  lastTestError: text("last_test_error"),
+  updatedBy: uuid("updated_by").references(() => users.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type EmailEventType = "document_approved" | "document_shared" | "test";
+export type EmailStatus = "queued" | "sending" | "sent" | "failed" | "skipped";
+
+/** Histórico de envios e fila de saída (outbox) de e-mails. */
+export const emailLogs = pgTable("email_logs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  tenantId: uuid("tenant_id").notNull().references(() => organizations.id),
+  eventType: text("event_type", { enum: ["document_approved", "document_shared", "test"] }).notNull(),
+  recipientEmail: text("recipient_email").notNull(),
+  recipientUserId: uuid("recipient_user_id").references(() => users.id),
+  documentId: uuid("document_id").references(() => documents.id),
+  subject: text("subject").notNull(),
+  templateData: jsonb("template_data").notNull().default({}),
+  status: text("status", { enum: ["queued", "sending", "sent", "failed", "skipped"] }).notNull().default("queued"),
+  attempts: integer("attempts").notNull().default(0),
+  maxAttempts: integer("max_attempts").notNull().default(5),
+  nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+  lockedUntil: timestamp("locked_until", { withTimezone: true }),
+  provider: text("provider"),
+  sender: text("sender"),
+  messageId: text("message_id"),
+  lastError: text("last_error"),
+  dedupeKey: text("dedupe_key"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  sentAt: timestamp("sent_at", { withTimezone: true }),
+}, (t) => ({ indexes: [
+  index("email_logs_tenant_created_idx").on(t.tenantId, t.createdAt),
+] }) );

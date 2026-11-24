@@ -24,6 +24,8 @@ import { classifierModule } from "./modules/classifier.module";
 import { notificationSSEModule } from "./services/notification.service";
 import { logger } from "./lib/logger";
 import { startWorkers } from "./jobs/workers";
+import { startEmailWorker } from "./jobs/email-worker";
+import { emailModule, emailLinksModule } from "./modules/email.module";
 import { getClientIp } from "./lib/ip";
 import { ALLOWED_ORIGINS } from "./lib/cors";
 
@@ -73,6 +75,7 @@ if (enableSwagger) {
         { name: "Estatísticas", description: "Métricas" },
         { name: "Notificações", description: "SSE em tempo real" },
         { name: "Classificador", description: "Classificação por IA (Groq)" },
+        { name: "E-mail", description: "Notificações por e-mail por organização" },
       ],
       servers: [{ url: `http://localhost:${PORT}`, description: "Desenvolvimento" }],
     },
@@ -112,6 +115,7 @@ app
     uptime: process.uptime(),
   }), { detail: { summary: "Health check detalhado", tags: ["Sistema"] } })
 
+  .use(emailLinksModule) // público (link assinado): antes dos módulos autenticados
   .use(authModule)
   .use(tenantsModule)
   .use(sectorsModule)
@@ -129,6 +133,7 @@ app
   .use(statsModule)
   .use(devicesModule)
   .use(classifierModule)
+  .use(emailModule)
   .use(notificationSSEModule)
   .onError((ctx: any) => {
     const { code, error, set, request } = ctx;
@@ -162,5 +167,8 @@ logger.info(`DocID API arrancou em http://localhost:${PORT}`);
 void startWorkers().catch((err) => {
   logger.warn({ err }, "[BULLMQ] Falha ao arrancar workers");
 });
+
+// Fila de e-mails em PostgreSQL: não depende do Redis.
+startEmailWorker();
 
 export type App = typeof app;

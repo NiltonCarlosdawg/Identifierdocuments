@@ -13,6 +13,7 @@ import { requireAuth, getFreshRoles } from "../middleware/auth";
 import { documents, documentShares, approvals, sectors, auditLogs, identifiers, users, documentAccessRequests } from "../db/schema";
 import { eq, and, isNull, or } from "drizzle-orm";
 import { notify } from "../services/notification.service";
+import { onDocumentApproved, onDocumentShared } from "../services/email/tenant-email.service";
 import { withTenant } from "../db/withTenant";
 import { safeError } from "../lib/errors";
 import { isTenantAdmin, shouldCreateShare, syncCounterpart } from "../services/access-decision.service";
@@ -515,6 +516,19 @@ export const documentsModule = new (Elysia as any)({ prefix: "/documents" })
             ip: clientIp,
           });
 
+          // E-mail ao(s) destinatário(s) só quando a partilha já dá acesso (não em pending_approval).
+          if (share.status === "active") {
+            await onDocumentShared(tx, {
+              tenantId,
+              documentId: docId,
+              shareId: share.id,
+              senderId: auth!.userId,
+              sharedWithUserId: share.sharedWithUserId,
+              sharedWithSectorId: share.sharedWithSectorId,
+              sharedAt: share.createdAt ?? new Date(),
+            });
+          }
+
           return { data: share };
         } catch (err: any) {
           console.error("[SHARE_ERROR]", err);
@@ -770,6 +784,16 @@ export const documentsModule = new (Elysia as any)({ prefix: "/documents" })
               resource: "documents", resourceId: idRow.document.id,
               metadata: JSON.stringify({ requestId: params.requestId }),
               ip: clientIp,
+            });
+
+            await onDocumentApproved(tx, {
+              tenantId,
+              documentId: idRow.document.id,
+              approvalId: req.id,
+              approverId: auth!.userId,
+              approvedAt: now,
+              notes: body.notes ?? null,
+              interestedUserIds: [req.requesterId],
             });
           } else {
             const now = new Date();

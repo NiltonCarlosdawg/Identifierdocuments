@@ -6,6 +6,7 @@ import { eq, and, isNull } from "drizzle-orm";
 import { withTenant } from "../db/withTenant";
 import { requireAuth, getFreshRoles } from "../middleware/auth";
 import { notify } from "../services/notification.service";
+import { onDocumentApproved, onDocumentShared } from "../services/email/tenant-email.service";
 import { safeError } from "../lib/errors";
 import { withIdempotency } from "../lib/idempotency";
 import { approvalAuditEntry, canResolveApproval, canSeeApproval, shouldCreateShare, syncCounterpart } from "../services/access-decision.service";
@@ -101,6 +102,7 @@ export const approvalsModule = new (Elysia as any)({ prefix: "/approvals" })
 
           const doc = existing.document;
           const identifierStr = doc?.identifier?.identifier;
+          let activatedShare: typeof documentShares.$inferSelect | undefined;
 
           if (body.status === "approved") {
             if (existing.type === "cross_sector" && existing.shareId) {
@@ -108,6 +110,7 @@ export const approvalsModule = new (Elysia as any)({ prefix: "/approvals" })
                 .set({ status: "active" })
                 .where(eq(documentShares.id, existing.shareId))
                 .returning();
+              activatedShare = updatedShare;
 
               if (updatedShare?.sharedWithUserId) {
                 await notify(tx, {
@@ -188,6 +191,30 @@ export const approvalsModule = new (Elysia as any)({ prefix: "/approvals" })
                 status: body.status,
               },
             });
+          }
+
+          // E-mails (fila transaccional): só entram se esta transacção fizer commit.
+          if (body.status === "approved") {
+            await onDocumentApproved(tx, {
+              tenantId,
+              documentId: approval.documentId,
+              approvalId: approval.id,
+              approverId: auth!.userId,
+              approvedAt: now,
+              notes: body.notes ?? null,
+              interestedUserIds: [existing.requesterId, activatedShare?.sharedBy],
+            });
+            if (activatedShare) {
+              await onDocumentShared(tx, {
+                tenantId,
+                documentId: approval.documentId,
+                shareId: activatedShare.id,
+                senderId: activatedShare.sharedBy,
+                sharedWithUserId: activatedShare.sharedWithUserId,
+                sharedWithSectorId: activatedShare.sharedWithSectorId,
+                sharedAt: now,
+              });
+            }
           }
 
           if (existing.type === "access_request" && existing.requesterId) {
