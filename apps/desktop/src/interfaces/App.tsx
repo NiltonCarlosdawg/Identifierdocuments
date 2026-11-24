@@ -15,6 +15,7 @@ import Documents from "./pages/Documents";
 import Approvals from "./pages/Approvals";
 import Sectors from "./pages/Sectors";
 import Users from "./pages/Users";
+import Roles from "./pages/Roles";
 import Settings from "./pages/Settings";
 import Audit from "./pages/Audit";
 import Scanner from "./pages/Scanner";
@@ -106,6 +107,7 @@ export default function App() {
           <Route path="sectores" element={<RoleProtectedRoute roles={["ORG_ADMIN"]}><Sectors /></RoleProtectedRoute>} />
           <Route path="utilizadores" element={<RoleProtectedRoute roles={["ORG_ADMIN", "SECTOR_SUPERVISOR"]}><Users /></RoleProtectedRoute>} />
           <Route path="utilizadores/:id" element={<RoleProtectedRoute roles={["ORG_ADMIN", "SECTOR_SUPERVISOR"]}><UserProfile /></RoleProtectedRoute>} />
+          <Route path="roles" element={<RoleProtectedRoute roles={["ORG_ADMIN"]}><Roles /></RoleProtectedRoute>} />
           <Route path="auditoria" element={<RoleProtectedRoute roles={["ORG_ADMIN"]}><Audit /></RoleProtectedRoute>} />
           <Route path="digitalizar" element={<Scanner />} />
           <Route path="configuracoes" element={<Settings />} />

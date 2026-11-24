@@ -7,9 +7,12 @@ import { mapError, isNetworkError } from "../../shared/errors/mapError";
 import { useAuthStore } from "../stores/authStore";
 import { useQueueStore } from "../stores/queueStore";
 import ShareDocumentModal from "../components/ShareDocumentModal";
+import DocumentSharesModal from "../components/DocumentSharesModal";
+import DocumentAccessRequestsModal from "../components/DocumentAccessRequestsModal";
 import ClassifierSuggestion from "../components/ClassifierSuggestion";
 import type { ClassifierResult } from "../hooks/useClassifier";
-import { Upload, Download, Share2, Search, Printer, Plus, History, LayoutGrid, List, Tag, Lock } from "lucide-react";
+import { useThumbnail } from "../hooks/useThumbnail";
+import { Upload, Download, Share2, Search, Printer, Plus, History, LayoutGrid, List, Tag, Lock, Users, Inbox } from "lucide-react";
 import { usePrinterStore } from "../stores/printerStore";
 
 const PROFILE_CATEGORY_IDS = new Set(["CPS", "CPF", "CTR", "CLA"]);
@@ -535,6 +538,8 @@ function UploadModal({ onClose, onDone, initialPath = "", initialIdentifier = ""
 
 function DetailModal({ row, onClose, onDone, onDownload, profileMode = false }: { row: DocRow; onClose: () => void; onDone: () => void; onDownload: () => Promise<void>; profileMode?: boolean }) {
   const [showShare, setShowShare] = useState(false);
+  const [showShares, setShowShares] = useState(false);
+  const [showRequests, setShowRequests] = useState(false);
   const [showRequestAccess, setShowRequestAccess] = useState(false);
   const [offlineAvailable, setOfflineAvailable] = useState<boolean | null>(null);
   const [printing, setPrinting] = useState(false);
@@ -554,6 +559,7 @@ function DetailModal({ row, onClose, onDone, onDownload, profileMode = false }: 
   const printFile = usePrinterStore(s => s.printFile);
   const isTauri = sync.isAvailable();
   const user = useAuthStore(s => s.user);
+  const { url: thumbnailUrl } = useThumbnail(row.id);
 
   const isSectorOnly = row.identifier?.visibility === "sector_only";
   const isOtherSector = isSectorOnly && row.identifier?.sectorId != null && row.identifier.sectorId !== user?.sectorId;
@@ -748,20 +754,25 @@ function DetailModal({ row, onClose, onDone, onDownload, profileMode = false }: 
           <button onClick={() => handleNewVersion(row.id)} disabled={busy} className="docid-button-secondary"><History className="h-4 w-4" /> Nova versão</button>
           <button onClick={handleAddAttachment} disabled={busy} className="docid-button-secondary"><Plus className="h-4 w-4" /> Adicionar anexo</button>
           <button onClick={() => setShowShare(true)} className="docid-button-primary"><Share2 className="h-4 w-4" /> Partilhar</button>
+          <button onClick={() => setShowShares(true)} className="docid-button-secondary"><Users className="h-4 w-4" /> Partilhas</button>
+          <button onClick={() => setShowRequests(true)} className="docid-button-secondary"><Inbox className="h-4 w-4" /> Pedidos</button>
         </div>
       }>
         <div className="space-y-4">
           {(printError || detailError) && <div className="rounded-lg border border-docid-error/30 bg-docid-error/10 p-3 text-sm text-docid-error">{printError || detailError}</div>}
-          <div>
-            <div className="flex items-center gap-2">
-              <p className="text-sm font-medium">{filename}</p>
-              {offlineAvailable !== null && (
-                <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${offlineAvailable ? "bg-docid-secondary/10 text-docid-secondary" : "bg-docid-surface-high text-docid-muted"}`}>
-                  {offlineAvailable ? "Disponível offline" : "Não disponível offline"}
-                </span>
-              )}
+          <div className="flex items-start gap-3">
+            {thumbnailUrl && <img src={thumbnailUrl} alt="Miniatura do documento" className="h-14 w-14 shrink-0 rounded border border-docid-outline/20 object-cover" />}
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <p className="text-sm font-medium">{filename}</p>
+                {offlineAvailable !== null && (
+                  <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${offlineAvailable ? "bg-docid-secondary/10 text-docid-secondary" : "bg-docid-surface-high text-docid-muted"}`}>
+                    {offlineAvailable ? "Disponível offline" : "Não disponível offline"}
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-docid-muted">{fileSize ? `${(fileSize / 1024 / 1024).toFixed(2)} MB · ${mimeType}` : mimeType}</p>
             </div>
-            <p className="text-xs text-docid-muted">{fileSize ? `${(fileSize / 1024 / 1024).toFixed(2)} MB · ${mimeType}` : mimeType}</p>
           </div>
 
           {isProfile && (
@@ -881,6 +892,8 @@ function DetailModal({ row, onClose, onDone, onDownload, profileMode = false }: 
         </div>
       </Modal>
       {showShare && <ShareDocumentModal identifier={identCode} onClose={() => setShowShare(false)} onShared={() => { setShowShare(false); onDone(); }} />}
+      {showShares && <DocumentSharesModal identifier={identCode} onClose={() => setShowShares(false)} onChanged={onDone} />}
+      {showRequests && <DocumentAccessRequestsModal identifier={identCode} onClose={() => setShowRequests(false)} onChanged={onDone} />}
       {showRequestAccess && <RequestAccessModal identifier={identCode} onClose={() => setShowRequestAccess(false)} onDone={() => { setShowRequestAccess(false); onDone(); }} />}
     </>
   );

@@ -106,10 +106,12 @@ export default function Dashboard() {
 
   useEffect(() => { queueRefresh().catch(() => {}); }, [queueRefresh]);
 
+  const isAdmin = (user?.roles || []).includes("ORG_ADMIN");
+  const statsEndpoint = isAdmin ? "/tenants/me/stats" : "/stats";
   const { loading, error, isStale, cachedAt, refresh } = useOfflineCache<StatsData>({
-    endpoint: "/stats",
+    endpoint: statsEndpoint,
     fetcher: async () => {
-      const res = await api.get<{ data: StatsData }>("/stats");
+      const res = await api.get<{ data: StatsData }>(statsEndpoint);
       return res.data;
     },
     onData: data => setStats(data),

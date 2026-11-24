@@ -8,6 +8,8 @@ import { Search, Plus, Users, Pencil, Trash2 } from "lucide-react";
 
 interface SectorRow { id: string; name: string; code: string; supervisorName: string | null; supervisorId: string | null; memberCount: number; createdAt: string; }
 interface User { id: string; fullName: string; }
+// O detalhe inclui o supervisor completo; apenas estes campos podem ser usados na UI.
+interface SectorDetail { name: string; code: string; supervisorId: string | null; supervisor: { id: string; fullName: string } | null; }
 
 function SkeletonSector() {
   return (
@@ -138,6 +140,21 @@ function EditSectorModal({ sector, onClose, onDone }: { sector: SectorRow; onClo
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const fetchAux = useCachedAux();
+
+  useEffect(() => {
+    let cancelled = false;
+    api.get<{ data: SectorDetail }>(`/sectors/${sector.id}`)
+      .then(res => {
+        if (cancelled || !res.data) return;
+        setName(res.data.name);
+        setCode(res.data.code);
+        const id = res.data.supervisor?.id || res.data.supervisorId || "";
+        setSupervisorId(id);
+        setSupervisorName(res.data.supervisor?.fullName || "");
+      })
+      .catch((err: unknown) => { if (!cancelled) setError(mapError(err, "Erro ao carregar sector.")); });
+    return () => { cancelled = true; };
+  }, [sector.id]);
 
   useEffect(() => {
     (async () => {

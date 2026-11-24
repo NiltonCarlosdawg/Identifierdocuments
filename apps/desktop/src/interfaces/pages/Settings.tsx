@@ -7,6 +7,7 @@ import { useScannerStore } from "../stores/scannerStore";
 import { usePrinterStore } from "../stores/printerStore";
 import { PageHeader, OfflineNotice } from "../components/docid-ui";
 import { useOfflineCache } from "../hooks/useOfflineCache";
+import { useCachedAux } from "../hooks/useCachedAux";
 import { mapError } from "../../shared/errors/mapError";
 import { sync, api } from "../../infrastructure/di/container";
 import type { WatcherFileRow } from "../../domain/entities/Watcher";
@@ -181,9 +182,22 @@ type OrgView = {
   license?: LicenseView | null;
 };
 
+/** Snapshot legado de GET /tenants/me/license — mantido ao lado da licença moderna. */
+type LegacyLicenseView = {
+  licenseNumber: string | null;
+  state: string;
+  status: string | null;
+  planName: string | null;
+  maxUsers: number | null;
+  validUntil: string | null;
+};
+
 function OrganizationTab() {
   const [org, setOrg] = useState<OrgView | null>(null);
   const [license, setLicense] = useState<LicenseView | null>(null);
+  const [legacyLicense, setLegacyLicense] = useState<LegacyLicenseView | null>(null);
+  const [checkoutBusy, setCheckoutBusy] = useState(false);
+  const [checkoutError, setCheckoutError] = useState("");
   const [name, setName] = useState("");
   const [prefix, setPrefix] = useState("");
   const [saving, setSaving] = useState(false);
@@ -206,6 +220,28 @@ function OrganizationTab() {
       if (data.license !== undefined) setLicense(data.license);
     },
   });
+
+  useOfflineCache<LegacyLicenseView>({
+    endpoint: "/tenants/me/license",
+    fetcher: async () => {
+      const res = await api.get<{ data: LegacyLicenseView }>("/tenants/me/license");
+      return res.data;
+    },
+    onData: setLegacyLicense,
+  });
+
+  const handleCheckout = async () => {
+    setCheckoutBusy(true);
+    setCheckoutError("");
+    try {
+      const res = await api.post<{ token: string; url: string }>("/subscriptions/checkout-token", {});
+      if (res?.url) window.open(res.url, "_blank", "noopener,noreferrer");
+    } catch (e: any) {
+      setCheckoutError(mapError(e, "Não foi possível gerar o link de renovação."));
+    } finally {
+      setCheckoutBusy(false);
+    }
+  };
 
   const handleSave = async () => {
     setSaving(true);
@@ -279,6 +315,21 @@ function OrganizationTab() {
             <dt className="text-docid-muted">Validade</dt><dd className="text-docid-text">{license?.validUntil ? new Date(license.validUntil).toLocaleDateString("pt-AO") : "Sem prazo"}</dd>
             <dt className="text-docid-muted">Utilizadores</dt><dd className="text-docid-text">{license ? `${license.activeUsers}/${license.maxUsers ?? "∞"}` : "—"}</dd>
           </dl>
+          <div className="border-t border-docid-border pt-3 space-y-1.5">
+            <p className="text-xs font-semibold uppercase tracking-wider text-docid-muted">Registo legado</p>
+            <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs" data-testid="legacy-license-details">
+              <dt className="text-docid-muted">Número</dt><dd className="text-docid-text font-mono">{legacyLicense?.licenseNumber ?? "—"}</dd>
+              <dt className="text-docid-muted">Estado</dt><dd className="text-docid-text">{legacyLicense?.state ?? "—"}</dd>
+              <dt className="text-docid-muted">Situação</dt><dd className="text-docid-text">{legacyLicense?.status ?? "—"}</dd>
+              <dt className="text-docid-muted">Plano</dt><dd className="text-docid-text">{legacyLicense?.planName ?? "—"}</dd>
+              <dt className="text-docid-muted">Validade</dt><dd className="text-docid-text">{legacyLicense?.validUntil ? new Date(legacyLicense.validUntil).toLocaleDateString("pt-AO") : "Sem prazo"}</dd>
+              <dt className="text-docid-muted">Limite</dt><dd className="text-docid-text">{legacyLicense?.maxUsers ?? "∞"}</dd>
+            </dl>
+            {checkoutError && <p className="text-xs text-docid-error">{checkoutError}</p>}
+            <button data-testid="license-checkout" onClick={handleCheckout} disabled={checkoutBusy} className="docid-button-secondary mt-1">
+              <RefreshCw className="h-4 w-4" /> {checkoutBusy ? "A gerar..." : "Renovar / Actualizar"}
+            </button>
+          </div>
         </div>
         <div className="flex items-center gap-3">
           <button onClick={handleSave} disabled={saving || !name.trim()} className="docid-button-primary"><Save className="h-4 w-4" /> {saving ? "A guardar..." : "Guardar"}</button>
@@ -325,15 +376,22 @@ interface DeviceRow {
   registeredBy: { id: string; fullName: string } | null;
 }
 
+interface SectorOption { id: string; name: string; }
+
 function DevicesTab() {
   const user = useAuthStore(s => s.user);
   const isOrgAdmin = user?.roles?.includes("ORG_ADMIN") ?? false;
   const [devices, setDevices] = useState<DeviceRow[]>([]);
+  const [sectors, setSectors] = useState<SectorOption[]>([]);
   const [leases, setLeases] = useState<LeaseRow[]>([]);
   const [writeError, setWriteError] = useState("");
+  const [releaseInfo, setReleaseInfo] = useState<{ leaseId: string; message: string } | null>(null);
   const [releasing, setReleasing] = useState<string | null>(null);
+  const [releasingUnused, setReleasingUnused] = useState<string | null>(null);
+  const [sectorSaving, setSectorSaving] = useState<string | null>(null);
   const [deactivating, setDeactivating] = useState<string | null>(null);
   const [isTauri] = useState(() => sync.isAvailable());
+  const fetchAux = useCachedAux();
 
   const { loading, error: loadError, isStale, cachedAt, refresh } = useOfflineCache<DeviceRow[]>({
     endpoint: "/devices",
@@ -355,6 +413,13 @@ function DevicesTab() {
   const handleRefresh = async () => { await refresh(); await reloadLeases(); };
 
   useEffect(() => { reloadLeases(); }, [isTauri]);
+
+  useEffect(() => {
+    (async () => {
+      const loaded = await fetchAux<SectorOption[]>("/sectors");
+      if (loaded) setSectors(loaded);
+    })();
+  }, [fetchAux]);
 
   const scannerDevices = useScannerStore(s => s.devices);
   const defaultScanner = useScannerStore(s => s.selectedDevice);
@@ -400,6 +465,34 @@ function DevicesTab() {
       setWriteError(mapError(e, "Erro ao desactivar dispositivo."));
     } finally {
       setDeactivating(null);
+    }
+  };
+
+  const handleSectorChange = async (device: DeviceRow, value: string) => {
+    setSectorSaving(device.id);
+    setWriteError("");
+    try {
+      await api.patch(`/devices/${device.id}`, { sectorId: value || null });
+      await handleRefresh();
+    } catch (e: any) {
+      setWriteError(mapError(e, "Erro ao alterar o sector do dispositivo."));
+    } finally {
+      setSectorSaving(null);
+    }
+  };
+
+  // shortcut: o estado do lease local não é alterado por /identifiers/release; marcar remote_released quando a app precisar de estado local sincronizado.
+  const handleReleaseUnused = async (lease: LeaseRow) => {
+    setReleasingUnused(lease.id);
+    setWriteError("");
+    setReleaseInfo(null);
+    try {
+      const res = await api.post<{ data: { message: string } }>("/identifiers/release", { leaseId: lease.id });
+      setReleaseInfo({ leaseId: lease.id, message: res?.data?.message ?? "Identificadores não usados libertados." });
+    } catch (e: any) {
+      setWriteError(mapError(e, "Erro ao libertar identificadores não usados."));
+    } finally {
+      setReleasingUnused(null);
     }
   };
 
@@ -469,7 +562,20 @@ function DevicesTab() {
                         {device.status === "active" ? "Activo" : "Inactivo"}
                       </span>
                     </td>
-                    <td className="px-3 py-2.5 text-xs text-docid-muted">{device.sector?.name ?? "—"}</td>
+                    <td className="px-3 py-2.5 text-xs text-docid-muted">
+                      {isOrgAdmin ? (
+                        <select
+                          data-testid={`device-sector-${device.id}`}
+                          value={device.sectorId ?? ""}
+                          onChange={e => handleSectorChange(device, e.target.value)}
+                          disabled={sectorSaving === device.id}
+                          className="docid-input w-36 text-xs"
+                        >
+                          <option value="">Sem sector</option>
+                          {sectors.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                        </select>
+                      ) : (device.sector?.name ?? "—")}
+                    </td>
                     <td className="px-3 py-2.5 text-xs text-docid-muted">{device.registeredBy?.fullName ?? "—"}</td>
                     <td className="px-3 py-2.5 text-xs text-docid-muted">{device.lastSeenAt ? new Date(device.lastSeenAt).toLocaleDateString("pt-AO") : "—"}</td>
                     {isOrgAdmin && (
@@ -586,16 +692,25 @@ function DevicesTab() {
                         }`} style={{ width: `${Math.min(usage.pct, 100)}%` }} />
                       </div>
                       {lease.status === "active" && (
-                        <div className="flex justify-end">
+                        <div className="flex justify-end gap-2">
+                          <button
+                            data-testid={`release-unused-${lease.id}`}
+                            onClick={() => handleReleaseUnused(lease)}
+                            disabled={releasingUnused === lease.id || !!releasing}
+                            className="docid-button-secondary text-xs"
+                          >
+                            {releasingUnused === lease.id ? "A libertar..." : "Libertar não usados"}
+                          </button>
                           <button
                             onClick={() => handleForceRelease(lease)}
-                            disabled={releasing === lease.id}
+                            disabled={releasing === lease.id || !!releasingUnused}
                             className="docid-button-secondary text-xs text-docid-error border-docid-error/30 hover:bg-docid-error/10"
                           >
                             {releasing === lease.id ? "A libertar..." : "Forçar libertação"}
                           </button>
                         </div>
                       )}
+                      {releaseInfo?.leaseId === lease.id && <p data-testid="release-message" className="text-xs text-docid-secondary">{releaseInfo.message}</p>}
                     </div>
                   );
                 })}

@@ -537,38 +537,49 @@ function GenerateModal({ categories, onClose, onDone }: { categories: Category[]
 }
 
 function DetailModal({ row, onClose, onCancelled }: { row: IdentifierRow; onClose: () => void; onCancelled: () => void }) {
+  const [detail, setDetail] = useState<IdentifierRow>(row);
+  const [detailError, setDetailError] = useState("");
   const [cancelReason, setCancelReason] = useState("");
   const [showCancel, setShowCancel] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
+  useEffect(() => {
+    let cancelled = false;
+    api.get<{ data: IdentifierRow }>(`/identifiers/${encodeURIComponent(row.identifier)}`)
+      .then(res => { if (!cancelled && res.data) setDetail(prev => ({ ...prev, ...res.data })); })
+      .catch((err: unknown) => { if (!cancelled) setDetailError(mapError(err, "Erro ao carregar detalhe.")); });
+    return () => { cancelled = true; };
+  }, [row.identifier]);
+
   const handleCancel = async () => {
     if (!cancelReason.trim()) return;
     setError(""); setLoading(true);
     try {
-      await api.patch(`/identifiers/${row.identifier}/cancel`, { reason: cancelReason });
+      await api.patch(`/identifiers/${detail.identifier}/cancel`, { reason: cancelReason });
       onCancelled();
     } catch (err: any) { setError(mapError(err, "Erro ao cancelar.")); } finally { setLoading(false); }
   };
 
-  const statusTone = row.status === "active" ? "success" as const : row.status === "cancelled" ? "error" as const : row.status === "attached" ? "info" as const : "neutral" as const;
+  const statusTone = detail.status === "active" ? "success" as const : detail.status === "cancelled" ? "error" as const : detail.status === "attached" ? "info" as const : "neutral" as const;
 
   return (
-    <Modal title="Detalhe do Identificador" onClose={onClose} footer={row.status === "active" && !showCancel ? <button onClick={() => setShowCancel(true)} className="docid-button-secondary text-docid-error"><Ban className="h-4 w-4" /> Cancelar</button> : undefined}>
+    <Modal title="Detalhe do Identificador" onClose={onClose} footer={detail.status === "active" && !showCancel ? <button onClick={() => setShowCancel(true)} className="docid-button-secondary text-docid-error"><Ban className="h-4 w-4" /> Cancelar</button> : undefined}>
       <div className="space-y-5">
-        <div className="flex items-center justify-between"><span className="font-mono text-lg font-bold">{row.identifier}</span><StatusChip tone={statusTone}>{STATUS_LABELS[row.status] || row.status}</StatusChip></div>
+        {detailError && <div className="rounded-lg border border-docid-error/30 bg-docid-error/10 p-3 text-sm text-docid-error">{detailError}</div>}
+        <div className="flex items-center justify-between"><span className="font-mono text-lg font-bold">{detail.identifier}</span><StatusChip tone={statusTone}>{STATUS_LABELS[detail.status] || detail.status}</StatusChip></div>
         <div className="grid grid-cols-2 gap-4 text-sm">
-          <div><p className="text-xs text-docid-muted">Categoria</p><p className="font-medium">{row.category?.name || row.categoryId}</p></div>
-          <div><p className="text-xs text-docid-muted">Origem</p><p className="font-medium">{row.origin === "digital" ? "Digital" : "Físico"}</p></div>
-          <div><p className="text-xs text-docid-muted">Visibilidade</p><p className="font-medium">{row.visibility === "sector_only" ? "Apenas sector" : "Público"}</p></div>
-          <div><p className="text-xs text-docid-muted">Sector</p><p className="font-medium">{row.sector?.name || "-"}</p></div>
-          {row.issuedTo && <div><p className="text-xs text-docid-muted">Emitido para</p><p className="font-medium">{row.issuedTo}</p></div>}
-          {row.description && <div className="col-span-2"><p className="text-xs text-docid-muted">Descrição</p><p className="font-medium">{row.description}</p></div>}
-          <div><p className="text-xs text-docid-muted">Criado por</p><p className="font-medium">{row.createdByUser?.fullName || "-"}</p></div>
-          <div><p className="text-xs text-docid-muted">Criado em</p><p className="font-medium">{new Date(row.createdAt).toLocaleString("pt-AO")}</p></div>
+          <div><p className="text-xs text-docid-muted">Categoria</p><p className="font-medium">{detail.category?.name || detail.categoryId}</p></div>
+          <div><p className="text-xs text-docid-muted">Origem</p><p className="font-medium">{detail.origin === "digital" ? "Digital" : "Físico"}</p></div>
+          <div><p className="text-xs text-docid-muted">Visibilidade</p><p className="font-medium">{detail.visibility === "sector_only" ? "Apenas sector" : "Público"}</p></div>
+          <div><p className="text-xs text-docid-muted">Sector</p><p className="font-medium">{detail.sector?.name || "-"}</p></div>
+          {detail.issuedTo && <div><p className="text-xs text-docid-muted">Emitido para</p><p className="font-medium">{detail.issuedTo}</p></div>}
+          {detail.description && <div className="col-span-2"><p className="text-xs text-docid-muted">Descrição</p><p className="font-medium">{detail.description}</p></div>}
+          <div><p className="text-xs text-docid-muted">Criado por</p><p className="font-medium">{detail.createdByUser?.fullName || "-"}</p></div>
+          <div><p className="text-xs text-docid-muted">Criado em</p><p className="font-medium">{new Date(detail.createdAt).toLocaleString("pt-AO")}</p></div>
         </div>
-        {row.document && <div className="rounded-lg border border-docid-border bg-docid-surface-low p-3"><p className="text-xs text-docid-muted mb-1">Documento associado</p><p className="text-sm font-medium">{row.document.filename}</p></div>}
-        <HistorySection identifierId={row.id} />
+        {detail.document && <div className="rounded-lg border border-docid-border bg-docid-surface-low p-3"><p className="text-xs text-docid-muted mb-1">Documento associado</p><p className="text-sm font-medium">{detail.document.filename}</p></div>}
+        <HistorySection identifierId={detail.id} />
         {showCancel && (
           <div className="rounded-lg border border-docid-error/30 bg-docid-error/10 p-4 space-y-3">
             <p className="text-sm font-medium text-docid-error">Cancelar identificador</p>

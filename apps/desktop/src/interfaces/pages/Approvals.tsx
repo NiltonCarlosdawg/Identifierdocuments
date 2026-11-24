@@ -87,10 +87,27 @@ export default function Approvals() {
 
 function ApprovalCard({ row, onResolved }: { row: ApprovalRow; onResolved: () => void }) {
   const [showResolve, setShowResolve] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const [detail, setDetail] = useState<ApprovalRow | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState("");
   const [action, setAction] = useState<"approved" | "rejected">("approved");
   const [notes, setNotes] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  const toggleDetail = async () => {
+    if (expanded) { setExpanded(false); return; }
+    setExpanded(true); setDetailError(""); setDetailLoading(true);
+    try {
+      const res = await api.get<{ data: ApprovalRow }>(`/approvals/${row.id}`);
+      setDetail(res.data);
+    } catch (err: unknown) {
+      setDetailError(mapError(err, "Erro ao carregar detalhe."));
+    } finally {
+      setDetailLoading(false);
+    }
+  };
 
   const handleResolve = async () => {
     setError(""); setLoading(true);
@@ -125,6 +142,7 @@ function ApprovalCard({ row, onResolved }: { row: ApprovalRow; onResolved: () =>
             Pedido: {new Date(row.requestedAt).toLocaleString("pt-AO")}{row.resolvedAt && ` · Resolvido: ${new Date(row.resolvedAt).toLocaleString("pt-AO")}`}
           </p>
           {row.notes && <p className="mt-2 text-sm text-docid-muted italic">"{row.notes}"</p>}
+          <button type="button" onClick={() => void toggleDetail()} className="mt-2 text-xs text-docid-primary underline">{expanded ? "Ocultar detalhe" : "Ver detalhe"}</button>
         </div>
         {row.status === "pending" && !showResolve && (
           <div className="flex gap-2 shrink-0">
@@ -133,6 +151,23 @@ function ApprovalCard({ row, onResolved }: { row: ApprovalRow; onResolved: () =>
           </div>
         )}
       </div>
+
+      {expanded && (
+        <div className="mt-4 rounded-lg border border-docid-border bg-docid-surface-low p-4 text-xs text-docid-muted">
+          {detailLoading && <p>A carregar detalhe...</p>}
+          {detailError && <p className="text-docid-error">{detailError}</p>}
+          {detail && (
+            <div className="grid grid-cols-2 gap-3">
+              <div><p className="text-docid-outline">Tipo</p><p className="font-medium text-docid-text">{TYPE_LABELS[detail.type] || detail.type}</p></div>
+              <div><p className="text-docid-outline">Requerente</p><p className="font-medium text-docid-text">{detail.requesterId || "-"}</p></div>
+              <div><p className="text-docid-outline">Documento</p><p className="font-medium text-docid-text">{detail.document?.identifier?.identifier || detail.document?.id || "-"}</p></div>
+              <div><p className="text-docid-outline">Categoria</p><p className="font-medium text-docid-text">{detail.document?.identifier?.category?.name || "-"}</p></div>
+              <div><p className="text-docid-outline">Resolvido em</p><p className="font-medium text-docid-text">{detail.resolvedAt ? new Date(detail.resolvedAt).toLocaleString("pt-AO") : "-"}</p></div>
+              <div><p className="text-docid-outline">Notas</p><p className="font-medium text-docid-text">{detail.notes || "-"}</p></div>
+            </div>
+          )}
+        </div>
+      )}
 
       {showResolve && (
         <div className="mt-4 rounded-lg border border-docid-border bg-docid-surface-low p-4 space-y-3">

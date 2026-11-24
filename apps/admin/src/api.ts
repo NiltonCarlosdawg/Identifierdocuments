@@ -1,5 +1,6 @@
 const BASE = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, "") || "http://127.0.0.1:3002";
 const TOKEN_KEY = "docid-provider-token";
+const PLATFORM_TOKEN_KEY = "docid-platform-token";
 
 export type Plan = {
   id: string; name: string; price: number; maxUsers: number;
@@ -24,9 +25,26 @@ export type License = {
   validUntil: string | null; planName: string | null; activeUsers: number;
 };
 
+export type PlatformLicense = {
+  organizationId: string; name: string; slug: string; licenseNumber: string;
+  licenseIssuedAt: string; plan: string; status: string;
+  state: "active" | "grace" | "expired" | "suspended"; canWrite: boolean;
+  validUntil: string | null; graceUntil: string | null; daysLeft: number | null;
+  maxUsers: number | null; activeUsers: number; createdAt: string;
+};
+
+export type PlatformLicensePatch = {
+  plan?: string; validUntil?: string | null; extendDays?: number;
+  maxUsers?: number | null; status?: "active" | "suspended";
+};
+
 export const getToken = () => localStorage.getItem(TOKEN_KEY);
 export const setToken = (token: string) => localStorage.setItem(TOKEN_KEY, token);
 export const clearToken = () => localStorage.removeItem(TOKEN_KEY);
+
+export const getPlatformToken = () => localStorage.getItem(PLATFORM_TOKEN_KEY);
+export const setPlatformToken = (token: string) => localStorage.setItem(PLATFORM_TOKEN_KEY, token);
+export const clearPlatformToken = () => localStorage.removeItem(PLATFORM_TOKEN_KEY);
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = { ...(init.headers as Record<string, string>) };
@@ -40,6 +58,18 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     if (res.status === 401) clearToken();
     throw new Error(body?.error?.message || `Erro ${res.status}`);
   }
+  return body as T;
+}
+
+// Token da plataforma é distinto do Bearer da provedora: um 401 aqui não invalida a sessão.
+async function platformRequest<T>(path: string, token: string, init: RequestInit = {}): Promise<T> {
+  const headers: Record<string, string> = { ...(init.headers as Record<string, string>) };
+  headers["x-platform-admin-token"] = token;
+  if (init.body) headers["Content-Type"] = "application/json";
+  const res = await fetch(`${BASE}${path}`, { ...init, headers });
+  const text = await res.text();
+  const body = text ? JSON.parse(text) : null;
+  if (!res.ok) throw new Error(body?.error?.message || `Erro ${res.status}`);
   return body as T;
 }
 
@@ -61,4 +91,10 @@ export const api = {
   licenses: () => request<License[]>("/provider/licenses"),
   updateLicense: (number: string, patch: Record<string, unknown>) =>
     request<{ updated: boolean }>(`/provider/licenses/${encodeURIComponent(number)}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  platformLicenses: (token: string) =>
+    platformRequest<{ data: PlatformLicense[]; meta: { total: number } }>("/platform/licenses", token),
+  platformLicense: (token: string, number: string) =>
+    platformRequest<{ data: PlatformLicense }>(`/platform/licenses/${encodeURIComponent(number)}`, token),
+  updatePlatformLicense: (token: string, number: string, patch: PlatformLicensePatch) =>
+    platformRequest<{ data: PlatformLicense }>(`/platform/licenses/${encodeURIComponent(number)}`, token, { method: "PATCH", body: JSON.stringify(patch) }),
 };

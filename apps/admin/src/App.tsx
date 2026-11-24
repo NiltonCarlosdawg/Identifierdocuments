@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { api, clearToken, getToken, setToken, type License, type Order, type Plan, type Tenant } from "./api";
+import { api, clearToken, getPlatformToken, getToken, setPlatformToken, setToken, type License, type Order, type Plan, type PlatformLicense, type PlatformLicensePatch, type Tenant } from "./api";
 
-type Tab = "orders" | "plans" | "tenants" | "licenses";
+type Tab = "orders" | "plans" | "tenants" | "licenses" | "platform";
 
 function Login({ onLogin }: { onLogin: () => void }) {
   const [email, setEmail] = useState("");
@@ -158,12 +158,74 @@ function Licenses() {
   );
 }
 
+function Platform() {
+  const [token, setToken] = useState(getPlatformToken() || "");
+  const [lookup, setLookup] = useState("");
+  const [rows, setRows] = useState<PlatformLicense[] | null>(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState("");
+
+  const load = async () => {
+    if (!token) return;
+    setError("");
+    try { setRows((await api.platformLicenses(token)).data); }
+    catch (e) { setError((e as Error).message); }
+  };
+
+  // Carrega apenas se já houver token guardado; nunca dispara pedido com token vazio.
+  useEffect(() => { if (token) load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+
+  const save = () => { setPlatformToken(token); load(); };
+
+  const find = async () => {
+    if (!token || !lookup.trim()) return;
+    setError("");
+    try { setRows([(await api.platformLicense(token, lookup.trim())).data]); }
+    catch (e) { setError((e as Error).message); }
+  };
+
+  const act = async (n: string, patch: PlatformLicensePatch) => {
+    if (!token) return;
+    setBusy(n); setError("");
+    try { await api.updatePlatformLicense(token, n, patch); await load(); }
+    catch (e) { setError((e as Error).message); }
+    finally { setBusy(""); }
+  };
+
+  return (
+    <section data-testid="platform-panel">
+      <h2>Plataforma · Licenças</h2>
+      {error && <p className="error">{error}</p>}
+      <div className="card form-grid">
+        <label>Token da plataforma<input data-testid="platform-token" type="password" value={token} onChange={e => setToken(e.target.value)} /></label>
+        <button data-testid="platform-save" onClick={save} disabled={!token}>Guardar token</button>
+        <label>Consultar licença<input data-testid="platform-lookup" value={lookup} onChange={e => setLookup(e.target.value)} placeholder="DOCID-..." /></label>
+        <button data-testid="platform-find" onClick={find} disabled={!token || !lookup.trim()}>Consultar</button>
+      </div>
+      <table data-testid="platform-list"><thead><tr><th>Organização</th><th>Número</th><th>Estado</th><th>Validade</th><th>Dias</th><th>Utilizadores</th><th></th></tr></thead>
+        <tbody>{(rows || []).map((l: PlatformLicense) => (
+          <tr key={l.organizationId} data-testid="platform-row">
+            <td>{l.name}<small>{l.slug}</small></td><td className="mono">{l.licenseNumber}</td><td>{l.state}</td>
+            <td>{l.validUntil ? new Date(l.validUntil).toLocaleDateString("pt-AO") : "Sem prazo"}</td>
+            <td>{l.daysLeft ?? "—"}</td>
+            <td>{l.activeUsers}{l.maxUsers ? ` / ${l.maxUsers}` : ""}</td>
+            <td className="row-actions">
+              <button data-testid="platform-renew" disabled={!token || busy === l.licenseNumber} onClick={() => act(l.licenseNumber, { extendDays: 365 })}>Renovar</button>
+              <button data-testid="platform-suspend" disabled={!token || busy === l.licenseNumber} onClick={() => act(l.licenseNumber, { status: "suspended" })}>Suspender</button>
+              <button disabled={!token || busy === l.licenseNumber} onClick={() => act(l.licenseNumber, { status: "active" })}>Reactivar</button>
+            </td>
+          </tr>
+        ))}</tbody></table>
+    </section>
+  );
+}
+
 export default function App() {
   const [token, setTokenState] = useState(getToken());
   const [tab, setTab] = useState<Tab>("orders");
   if (!token) return <Login onLogin={() => setTokenState(getToken())} />;
 
-  const tabs: Array<[Tab, string]> = [["orders", "Pedidos"], ["plans", "Planos"], ["tenants", "Organizações"], ["licenses", "Licenças"]];
+  const tabs: Array<[Tab, string]> = [["orders", "Pedidos"], ["plans", "Planos"], ["tenants", "Organizações"], ["licenses", "Licenças"], ["platform", "Plataforma"]];
   return (
     <div className="shell">
       <header>
@@ -176,6 +238,7 @@ export default function App() {
         {tab === "plans" && <Plans />}
         {tab === "tenants" && <Tenants />}
         {tab === "licenses" && <Licenses />}
+        {tab === "platform" && <Platform />}
       </main>
     </div>
   );

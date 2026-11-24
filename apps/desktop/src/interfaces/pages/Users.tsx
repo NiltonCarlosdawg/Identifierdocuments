@@ -6,10 +6,11 @@ import { useOfflineCache } from "../hooks/useOfflineCache";
 import { useCachedAux } from "../hooks/useCachedAux";
 import { mapError } from "../../shared/errors/mapError";
 import { useAuthStore } from "../stores/authStore";
-import { Search, Plus, Shield, RefreshCw, Upload, Download, CheckCircle2, AlertTriangle, Ban, Mail, Eye } from "lucide-react";
+import { Search, Plus, Shield, RefreshCw, Upload, Download, CheckCircle2, AlertTriangle, Ban, Mail, Eye, X } from "lucide-react";
 
-interface UserRow { id: string; email: string; fullName: string; isActive: boolean; sectorId: string | null; sectorName: string | null; roles: { id: string; name: string }[]; createdAt: string; }
+interface UserRow { id: string; email: string; fullName: string; isActive: boolean; sectorId: string | null; sectorName: string | null; roles: RoleOption[]; createdAt: string; }
 interface Sector { id: string; name: string; }
+interface RoleOption { id: string; name: string; }
 
 function SkeletonUser() {
   return (
@@ -33,6 +34,7 @@ export default function Users() {
   const [search, setSearch] = useState("");
   const [sectorFilter, setSectorFilter] = useState("");
   const [sectors, setSectors] = useState<Sector[]>([]);
+  const [roles, setRoles] = useState<RoleOption[]>([]);
   const [showCreate, setShowCreate] = useState(false);
   const [showInvite, setShowInvite] = useState(false);
   const [showImport, setShowImport] = useState(false);
@@ -54,8 +56,12 @@ export default function Users() {
 
   useEffect(() => {
     (async () => {
-      const sectors = await fetchAux<Sector[]>("/sectors");
+      const [sectors, roles] = await Promise.all([
+        fetchAux<Sector[]>("/sectors"),
+        fetchAux<RoleOption[]>("/roles"),
+      ]);
       if (sectors) setSectors(sectors);
+      if (roles) setRoles(roles);
     })();
   }, [fetchAux]);
 
@@ -125,7 +131,7 @@ export default function Users() {
       {showCreate && <CreateUserModal sectors={sectors} onClose={() => setShowCreate(false)} onDone={() => { setShowCreate(false); refresh(); }} />}
       {showInvite && <InviteUserModal sectors={sectors} isAdmin={isAdmin} onClose={() => setShowInvite(false)} onDone={() => { setShowInvite(false); refresh(); }} />}
       {showImport && <ImportUsersModal onClose={() => setShowImport(false)} onDone={() => { setShowImport(false); refresh(); }} />}
-      {selected && <DetailUserModal user={selected} sectors={sectors} onClose={() => setSelected(null)} onDone={() => { setSelected(null); refresh(); }} />}
+      {selected && <DetailUserModal user={selected} sectors={sectors} roles={roles} onClose={() => setSelected(null)} onDone={() => { setSelected(null); refresh(); }} />}
     </div>
   );
 }
@@ -220,11 +226,13 @@ function InviteUserModal({ sectors, isAdmin, onClose, onDone }: { sectors: Secto
   );
 }
 
-function DetailUserModal({ user, sectors, onClose, onDone }: { user: UserRow; sectors: Sector[]; onClose: () => void; onDone: () => void }) {
+function DetailUserModal({ user, sectors, roles, onClose, onDone }: { user: UserRow; sectors: Sector[]; roles: RoleOption[]; onClose: () => void; onDone: () => void }) {
   const [editing, setEditing] = useState(false);
   const [fullName, setFullName] = useState(user.fullName);
   const [email, setEmail] = useState(user.email);
   const [sectorId, setSectorId] = useState(user.sectorId || "");
+  const [roleToAssign, setRoleToAssign] = useState("");
+  const [busyRole, setBusyRole] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -244,6 +252,19 @@ function DetailUserModal({ user, sectors, onClose, onDone }: { user: UserRow; se
     if (!confirm("Tem a certeza que deseja desactivar este utilizador?")) return;
     setLoading(true);
     try { await api.delete(`/users/${user.id}`); onDone(); } catch (err: any) { setError(mapError(err, "Erro ao desactivar utilizador.")); setLoading(false); }
+  };
+
+  const handleAssignRole = async () => {
+    if (!roleToAssign) return;
+    setBusyRole("assign"); setError("");
+    try { await api.post(`/users/${user.id}/roles`, { roleId: roleToAssign }); onDone(); }
+    catch (err: any) { setError(mapError(err, "Erro ao atribuir role.")); setBusyRole(null); }
+  };
+
+  const handleRemoveRole = async (roleId: string) => {
+    setBusyRole(roleId); setError("");
+    try { await api.delete(`/users/${user.id}/roles/${roleId}`); onDone(); }
+    catch (err: any) { setError(mapError(err, "Erro ao remover role.")); setBusyRole(null); }
   };
 
   return (
@@ -267,7 +288,25 @@ function DetailUserModal({ user, sectors, onClose, onDone }: { user: UserRow; se
             <div><p className="text-xs text-docid-muted">Sector</p><p className="font-medium">{user.sectorName || "—"}</p></div>
             <div><p className="text-xs text-docid-muted">Estado</p><StatusChip tone={user.isActive ? "success" : "error"}>{user.isActive ? "Activo" : "Inactivo"}</StatusChip></div>
             <div><p className="text-xs text-docid-muted">Criado em</p><p className="font-medium">{new Date(user.createdAt).toLocaleDateString("pt-AO")}</p></div>
-            <div className="col-span-2"><p className="text-xs text-docid-muted mb-1">Roles</p><div className="flex flex-wrap gap-1">{(user.roles || []).map(r => <span key={r.id} className="rounded-full bg-docid-primary/10 px-3 py-1 text-xs font-medium text-docid-primary-soft">{r.name}</span>)}</div></div>
+            <div className="col-span-2">
+              <p className="text-xs text-docid-muted mb-1">Roles</p>
+              <div className="flex flex-wrap gap-1">
+                {(user.roles || []).map(r => (
+                  <span key={r.id} className="rounded-full bg-docid-primary/10 px-3 py-1 text-xs font-medium text-docid-primary-soft">
+                    {r.name}
+                    <button title="Remover role" onClick={() => handleRemoveRole(r.id)} disabled={!!busyRole} className="ml-1 text-docid-primary-soft hover:text-docid-error disabled:opacity-40"><X className="h-3 w-3" /></button>
+                  </span>
+                ))}
+                {(user.roles || []).length === 0 && <span className="text-xs text-docid-muted">Sem roles</span>}
+              </div>
+              <div className="mt-2 flex gap-2">
+                <select value={roleToAssign} onChange={e => setRoleToAssign(e.target.value)} className="docid-input w-full text-sm">
+                  <option value="">Adicionar role...</option>
+                  {roles.filter(r => !(user.roles || []).some(a => a.id === r.id)).map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                </select>
+                <button onClick={handleAssignRole} disabled={!roleToAssign || !!busyRole} className="docid-button-secondary text-sm">{busyRole === "assign" ? "A atribuir..." : "Atribuir"}</button>
+              </div>
+            </div>
           </div>
         )}
       </div>

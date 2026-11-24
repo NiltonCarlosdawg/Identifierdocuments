@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { Outlet, NavLink, useNavigate } from "react-router-dom";
 import { useAuthStore } from "../stores/authStore";
 import { useAppConfigStore } from "../stores/configStore";
-import { LayoutDashboard, FileText, Fingerprint, CheckSquare, Users, UserPlus, Cog, History, Scan, CloudOff, Search, Menu, LogOut, User } from "lucide-react";
+import { LayoutDashboard, FileText, Fingerprint, CheckSquare, Users, UserPlus, Cog, History, Scan, CloudOff, Search, Menu, LogOut, User, Shield } from "lucide-react";
 import OfflineQueuePanel, { OfflineQueueBadge } from "./OfflineQueuePanel";
 import WriteQueuePanel, { WriteQueueBadge } from "./WriteQueuePanel";
 import NotificationBell from "./NotificationBell";
@@ -16,6 +16,7 @@ const navItems = [
   { to: "/aprovacoes", label: "Aprovações", icon: CheckSquare, roles: ["ORG_ADMIN", "SECTOR_SUPERVISOR"] },
   { to: "/sectores", label: "Sectores", icon: Users, roles: ["ORG_ADMIN"] },
   { to: "/utilizadores", label: "Utilizadores", icon: UserPlus, roles: ["ORG_ADMIN", "SECTOR_SUPERVISOR"] },
+  { to: "/roles", label: "Roles", icon: Shield, roles: ["ORG_ADMIN"] },
   { to: "/auditoria", label: "Auditoria", icon: History, roles: ["ORG_ADMIN"] },
   { to: "/digitalizar", label: "Digitalizar", icon: Scan },
   { to: "/configuracoes", label: "Configurações", icon: Cog },
