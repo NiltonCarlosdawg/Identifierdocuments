@@ -160,7 +160,7 @@ export const documentsModule = new (Elysia as any)({ prefix: "/documents" })
       return { error: { code: "TAGS_ERROR", message: safeError(err) } };
     }
   }, {
-    params: t.Object({ id: t.String() }),
+    params: t.Object({ param: t.String() }),
     body: t.Object({
       tags: t.Array(t.String({ minLength: 1, maxLength: 64 }), { maxItems: 24 }),
     }),
