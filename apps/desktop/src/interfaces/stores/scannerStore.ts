@@ -37,7 +37,8 @@ export const useScannerStore = create<ScannerState>((set, get) => ({
       const exists = preferred && devices.some((d) => d.name === preferred);
       set({ devices, selectedDevice: exists ? preferred : (devices[0]?.name ?? null) });
     } catch (err: any) {
-      set({ error: err.message || "Erro ao listar scanners." });
+      // O invoke do Tauri rejeita com a string devolvida pelo Rust, não com um Error.
+      set({ error: (typeof err === "string" ? err : err?.message) || "Erro ao listar scanners." });
     }
   },
 
@@ -65,7 +66,7 @@ export const useScannerStore = create<ScannerState>((set, get) => ({
         return { pages, currentPage: pages.length - 1, scanning: false };
       });
     } catch (err: any) {
-      set({ error: err.message || "Erro ao digitalizar.", scanning: false });
+      set({ error: (typeof err === "string" ? err : err?.message) || "Erro ao digitalizar.", scanning: false });
     }
   },
 

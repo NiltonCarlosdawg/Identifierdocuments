@@ -33,3 +33,10 @@ pdf-extract = "0.7"
 regex = "1"
 zeroize = { version = "1", features = ["derive"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
+
+# Cofre do sistema para a chave da store encriptada (ver commands/secure_key.rs).
+[target.'cfg(windows)'.dependencies]
+keyring = { version = "3", features = ["windows-native"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", features = ["apple-native"] }

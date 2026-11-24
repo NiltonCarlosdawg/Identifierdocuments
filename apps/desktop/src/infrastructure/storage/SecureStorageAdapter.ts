@@ -7,15 +7,34 @@ const isTauri = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in 
 
 async function getStore() { const { load } = await import("@tauri-apps/plugin-store"); return load("docid-secure"); }
 
-async function getOrCreateKey(): Promise<CryptoKey> {
+let keyPromise: Promise<CryptoKey> | null = null;
+
+/** A chave fica em memória depois da primeira leitura; se falhar, tenta de novo na próxima chamada. */
+function getOrCreateKey(): Promise<CryptoKey> {
+  if (!keyPromise) keyPromise = loadKey().catch(err => { keyPromise = null; throw err; });
+  return keyPromise;
+}
+
+/**
+ * A chave mestra vive no cofre do sistema (Gestor de Credenciais do Windows), não no
+ * ficheiro `docid-secure` que guarda os dados encriptados. Instalações antigas tinham a
+ * chave nesse ficheiro: é migrada para o cofre e apagada do ficheiro na primeira execução.
+ * Em plataformas sem cofre suportado, mantém-se o comportamento antigo.
+ */
+async function loadKey(): Promise<CryptoKey> {
   const store = await getStore();
-  let stored = await store.get<string>(KEY);
-  if (!stored) {
-    const key = await crypto.subtle.generateKey({ name: ALGO, length: 256 }, true, ["encrypt", "decrypt"]);
-    stored = btoa(String.fromCharCode(...new Uint8Array(await crypto.subtle.exportKey("raw", key))));
-    await store.set(KEY, stored); await store.save();
+  const legacy = await store.get<string>(KEY);
+  const candidate = legacy ?? btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32))));
+  let keyB64: string;
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    keyB64 = await invoke<string>("secure_key_get_or_init", { candidate });
+    if (legacy) { await store.delete(KEY); await store.save(); }
+  } catch {
+    keyB64 = candidate;
+    if (!legacy) { await store.set(KEY, candidate); await store.save(); }
   }
-  return crypto.subtle.importKey("raw", Uint8Array.from(atob(stored), c => c.charCodeAt(0)), ALGO, false, ["encrypt", "decrypt"]);
+  return crypto.subtle.importKey("raw", Uint8Array.from(atob(keyB64), c => c.charCodeAt(0)), ALGO, false, ["encrypt", "decrypt"]);
 }
 
 async function encrypt(text: string): Promise<string> {
@@ -38,18 +57,9 @@ async function decrypt(data: string): Promise<string> {
 const browserKey = (name: string) => `browser_${name}`;
 
 export const secureStorageInner: ISecureStorage = {
-  getItem: async name => {
-    if (!isTauri()) return typeof localStorage === "undefined" ? null : localStorage.getItem(browserKey(name));
-    try { const store = await getStore(); const raw = await store.get<string>(`enc_${name}`); return raw ? decrypt(raw) : null; } catch { return null; }
-  },
-  setItem: async (name, value) => {
-    if (!isTauri()) { if (typeof localStorage !== "undefined") localStorage.setItem(browserKey(name), value); return; }
-    try { const store = await getStore(); await store.set(`enc_${name}`, await encrypt(value)); await store.save(); } catch {}
-  },
-  removeItem: async name => {
-    if (!isTauri()) { if (typeof localStorage !== "undefined") localStorage.removeItem(browserKey(name)); return; }
-    try { const store = await getStore(); await store.delete(`enc_${name}`); await store.save(); } catch {}
-  },
+  getItem: async name => { if (!isTauri()) return typeof localStorage === "undefined" ? null : localStorage.getItem(browserKey(name)); try { const store = await getStore(); const raw = await store.get<string>(`enc_${name}`); return raw ? decrypt(raw) : null; } catch { return null; } },
+  setItem: async (name, value) => { if (!isTauri()) { if (typeof localStorage !== "undefined") localStorage.setItem(browserKey(name), value); return; } try { const store = await getStore(); await store.set(`enc_${name}`, await encrypt(value)); await store.save(); } catch {} },
+  removeItem: async name => { if (!isTauri()) { if (typeof localStorage !== "undefined") localStorage.removeItem(browserKey(name)); return; } try { const store = await getStore(); await store.delete(`enc_${name}`); await store.save(); } catch {} },
 };
 
 export const secureJsonStorage = createJSONStorage(() => ({

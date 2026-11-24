@@ -93,6 +93,18 @@ jobs:
       - name: Cargo test (lib)
         run: cargo test --lib -- --test-threads=2
 
+  rust-windows:
+    name: Desktop Rust (Windows)
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: apps/desktop/src-tauri
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Cargo test (lib)
+        run: cargo test --lib -- --test-threads=2
+
   e2e:
     name: E2E (Playwright UI smoke)
     runs-on: ubuntu-22.04

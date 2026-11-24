@@ -1,9 +1,12 @@
+#[cfg(windows)]
+mod win_shell;
+
 mod commands;
 mod db;
 mod sync;
 mod updater;
 
-use commands::{identifiers, printer, scanner, text_extraction, watcher};
+use commands::{identifiers, printer, scanner, secure_key, text_extraction, watcher};
 use sync::{start_background_sync, SyncState};
 use tauri::Manager;
 use watcher::WatcherState;
@@ -104,6 +107,7 @@ pub fn run() {
             watcher::watcher_get_report,
             scanner::list_scanners,
             scanner::scan_document,
+            secure_key::secure_key_get_or_init,
             printer::list_printers,
             printer::print_file,
             printer::print_bytes,

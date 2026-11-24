@@ -79,19 +79,13 @@ pub async fn list_printers() -> Result<Vec<PrinterDevice>, String> {
     }
     #[cfg(target_os = "windows")]
     {
-        let output = tokio::process::Command::new("powershell")
-            .args([
-                "-NoProfile",
-                "-Command",
-                "Get-CimInstance Win32_Printer | Select-Object -ExpandProperty Name",
-            ])
-            .output()
+        // API do Windows (EnumPrintersW) em vez de lançar o PowerShell.
+        let names = tokio::task::spawn_blocking(crate::win_shell::list_printer_names)
             .await
-            .map_err(|e| format!("Erro ao listar impressoras: {e}"))?;
-        let names = String::from_utf8_lossy(&output.stdout);
+            .map_err(|e| format!("Erro ao listar impressoras: {e}"))??;
         Ok(names
-            .lines()
-            .map(|l| l.trim())
+            .iter()
+            .map(|n| n.trim())
             .filter(|n| printer_name_ok(n))
             .map(|name| PrinterDevice { name: name.to_string() })
             .collect())
@@ -130,21 +124,23 @@ async fn print_path(printer: &str, path: &Path) -> Result<String, String> {
 
     #[cfg(target_os = "windows")]
     {
-        let path_str = path.to_string_lossy().replace('\'', "''");
-        let printer_str = printer.replace('\'', "''");
-        let script = format!(
-            "Get-CimInstance Win32_Printer | Where-Object {{ $_.Name -eq '{printer_str}' }} | Out-Null; \
-             Start-Process -LiteralPath '{path_str}' -Verb Print"
-        );
-        let output = tokio::process::Command::new("powershell")
-            .args(["-NoProfile", "-Command", &script])
-            .output()
-            .await
-            .map_err(|e| format!("Erro ao imprimir: {e}"))?;
-        if !output.status.success() {
-            return Err("Impressão cancelada ou falhou.".to_string());
-        }
-        return Ok("Enviado para a impressora.".to_string());
+        // ShellExecuteW com o verbo "printto" (respeita a impressora escolhida), sem PowerShell.
+        // Antes, "Start-Process -Verb Print" ignorava a impressora e usava sempre a predefinida.
+        let printer_owned = printer.to_string();
+        let path_owned = path.to_path_buf();
+        let outcome = tokio::task::spawn_blocking(move || {
+            crate::win_shell::print_path(&printer_owned, &path_owned)
+        })
+        .await
+        .map_err(|e| format!("Erro ao imprimir: {e}"))?
+        .map_err(|e| format!("Erro ao imprimir: {e}"))?;
+        return Ok(match outcome {
+            crate::win_shell::PrintOutcome::ChosenPrinter => "Enviado para a impressora.".to_string(),
+            crate::win_shell::PrintOutcome::DefaultPrinter => {
+                "Enviado para a impressora predefinida (o programa deste tipo de ficheiro não permite escolher a impressora)."
+                    .to_string()
+            }
+        });
     }
 
     #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]

@@ -136,47 +136,26 @@ async fn scan_sane_document(scanner_name: &str, opts: &ScanOptions) -> Result<Ve
     Ok(output.stdout)
 }
 
+// Windows: a versão anterior lançava o PowerShell e nunca funcionou —
+// `Win32_Scanner` não é uma classe WMI do Windows (a lista vinha sempre vazia) e
+// `ReadAllBytes($d)` recebia um objecto COM WIA.ImageFile, não um caminho.
+// Lançar o PowerShell a partir da app é também um dos principais motivos de alertas
+// do Windows Defender. Até existir integração WIA nativa (COM via crate `windows`,
+// testada com scanners reais), o Windows usa o fluxo que já funciona: digitalizar
+// com o software do scanner (ou a app "Digitalizar" do Windows) para uma pasta
+// vigiada pelo DocID, que detecta o documento automaticamente.
+#[cfg(target_os = "windows")]
+pub const WINDOWS_SCAN_GUIDANCE: &str = "A digitalização directa ainda não está disponível no Windows. \
+Digitalize com o programa do scanner (ou a app \"Digitalizar\" do Windows) para uma pasta vigiada \
+pelo DocID (Configurações → Pastas Vigiladas): o documento é detectado automaticamente.";
+
 #[cfg(target_os = "windows")]
 async fn scan_twain() -> Result<Vec<ScannerDevice>, String> {
-    // TWAIN integration would require ffi bindings to twaindsm.dll
-    // For now, attempt via WIA using PowerShell
-    let output = tokio::process::Command::new("powershell")
-        .args(["-Command", "Get-WmiObject -Class Win32_Scanner | Select-Object Name"])
-        .output()
-        .await
-        .map_err(|e| format!("Erro ao listar scanners: {}", e))?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let devices: Vec<ScannerDevice> = stdout
-        .lines()
-        .filter(|l| !l.trim().is_empty() && !l.contains("Name"))
-        .map(|name| ScannerDevice {
-            name: name.trim().to_string(),
-            vendor: "WIA".to_string(),
-            model: name.trim().to_string(),
-        })
-        .collect();
-
-    Ok(devices)
+    // Erro em vez de lista vazia: a página Digitalizar mostra esta orientação ao utilizador.
+    Err(WINDOWS_SCAN_GUIDANCE.to_string())
 }
 
 #[cfg(target_os = "windows")]
-async fn scan_twain_document(scanner_name: &str, opts: &ScanOptions) -> Result<Vec<u8>, String> {
-    // WIA scanning via PowerShell
-    let output = tokio::process::Command::new("powershell")
-        .args([
-            "-Command",
-            &format!(
-                "$s = New-Object -ComObject WIA.CommonDialog; $d = $s.ShowAcquireImage(); \
-                 if ($d) {{ [System.IO.File]::ReadAllBytes($d) }} else {{ exit 1 }}"
-            ),
-        ])
-        .output()
-        .await
-        .map_err(|e| format!("Erro ao digitalizar: {}", e))?;
-
-    if !output.status.success() {
-        return Err("Digitalização cancelada ou falhou.".to_string());
-    }
-    Ok(output.stdout)
+async fn scan_twain_document(_scanner_name: &str, _opts: &ScanOptions) -> Result<Vec<u8>, String> {
+    Err(WINDOWS_SCAN_GUIDANCE.to_string())
 }

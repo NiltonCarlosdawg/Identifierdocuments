@@ -2199,18 +2199,22 @@ pub fn open_local_file(state: State<'_, SyncState>, path: String) -> Result<(), 
         return Err("Só é permitido abrir ficheiros da cache local DocID.".to_string());
     }
 
-    let result = if cfg!(target_os = "windows") {
-        std::process::Command::new("cmd")
-            .args(["/C", "start", "", &canonical.to_string_lossy()])
+    // Windows: ShellExecuteW directamente. O antigo `cmd /C start` lançava um intérprete
+    // de comandos (sinal heurístico para o Defender) e o cmd interpreta `&`, `^` e `|`
+    // no nome do ficheiro.
+    #[cfg(target_os = "windows")]
+    {
+        crate::win_shell::open_path(&canonical).map_err(|e| format!("Erro ao abrir o ficheiro: {e}"))
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+        std::process::Command::new(opener)
+            .arg(&canonical)
             .spawn()
-    } else if cfg!(target_os = "macos") {
-        std::process::Command::new("open").arg(&canonical).spawn()
-    } else {
-        std::process::Command::new("xdg-open").arg(&canonical).spawn()
-    };
-    result
-        .map(|_| ())
-        .map_err(|e| format!("Erro ao abrir o ficheiro: {e}"))
+            .map(|_| ())
+            .map_err(|e| format!("Erro ao abrir o ficheiro: {e}"))
+    }
 }
 
 const DOWNLOAD_CACHE_MAX_AGE_DAYS: u64 = 30;
