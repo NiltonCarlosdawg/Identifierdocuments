@@ -125,7 +125,7 @@ const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const READ_ONLY_ALLOWED: RegExp[] = [
   /^\/auth\//,
   /^\/notifications\/[^/]+\/read$/,
-  /^\/devices\/?$/,
+  /^\/devices(?:\/[^/]+)*$/,
   /^\/identifiers\/(register-offline|register-offline-loose|release|force-release)$/,
   /^\/platform\//,
 ];

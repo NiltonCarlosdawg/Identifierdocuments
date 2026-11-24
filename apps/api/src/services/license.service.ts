@@ -5,14 +5,14 @@ import { withTenant } from "../db/withTenant";
 import { licenses, plans, organizations } from "../db/schema";
 import { invalidateLicenseCache } from "./license-enforcement.service";
 import { formatLicenseNumber, licenseState, type LicenseState, type LicenseStatus } from "../lib/license";
-
-const ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+import { LICENSE_ALPHABET, licenseCheckChar } from "../lib/license-check";
 
 export function generateLicenseNumber(now = new Date()): string {
-  const bytes = randomBytes(12);
-  let seed = "";
-  for (const b of bytes) seed += ALPHABET[b % ALPHABET.length];
-  return formatLicenseNumber(now.getUTCFullYear(), seed);
+  const bytes = randomBytes(11);
+  let body = "";
+  for (const b of bytes) body += LICENSE_ALPHABET[b % LICENSE_ALPHABET.length];
+  const year = String(now.getUTCFullYear());
+  return formatLicenseNumber(Number(year), body + licenseCheckChar(year + body));
 }
 
 /** Deriva o estado e os limites a partir da licença, sem tocar na BD. */

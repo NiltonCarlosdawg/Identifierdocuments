@@ -161,12 +161,15 @@ function AppearanceTab() {
 }
 
 type LicenseView = {
-  licenseNumber: string | null;
-  state: string;
-  status: string | null;
-  planName: string | null;
-  maxUsers: number | null;
+  licenseNumber: string;
+  plan: string;
+  state: "active" | "grace" | "expired" | "suspended";
+  canWrite: boolean;
   validUntil: string | null;
+  graceUntil: string | null;
+  daysLeft: number | null;
+  maxUsers: number | null;
+  activeUsers: number;
 };
 
 type OrgView = {
@@ -174,6 +177,7 @@ type OrgView = {
   slug: string;
   identifierPrefix: string;
   subscription: { status: string; planName: string; price: number; expiresAt: string | null };
+  license?: LicenseView | null;
 };
 
 function OrganizationTab() {
@@ -198,16 +202,9 @@ function OrganizationTab() {
       setOrg(data);
       setName(data.name);
       setPrefix(data.identifierPrefix);
+      if (data.license !== undefined) setLicense(data.license);
     },
   });
-
-  useEffect(() => {
-    let alive = true;
-    api.get<{ data: LicenseView }>("/tenants/me/license")
-      .then(res => { if (alive) setLicense(res.data); })
-      .catch(() => {});
-    return () => { alive = false; };
-  }, []);
 
   const handleSave = async () => {
     setSaving(true);
@@ -276,10 +273,10 @@ function OrganizationTab() {
           <p className="text-xs font-semibold uppercase tracking-wider text-docid-muted">Licença</p>
           <p className="font-mono text-sm text-docid-text">{license?.licenseNumber ?? "—"}</p>
           <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-            <dt className="text-docid-muted">Plano</dt><dd className="text-docid-text">{license?.planName ?? org?.subscription.planName ?? "—"}</dd>
+            <dt className="text-docid-muted">Plano</dt><dd className="text-docid-text">{license?.plan ?? org?.subscription.planName ?? "—"}</dd>
             <dt className="text-docid-muted">Estado</dt><dd className="text-docid-text">{license?.state ?? org?.subscription.status ?? "—"}</dd>
             <dt className="text-docid-muted">Validade</dt><dd className="text-docid-text">{license?.validUntil ? new Date(license.validUntil).toLocaleDateString("pt-AO") : "Sem prazo"}</dd>
-            <dt className="text-docid-muted">Utilizadores</dt><dd className="text-docid-text">{license?.maxUsers ?? "Sem limite"}</dd>
+            <dt className="text-docid-muted">Utilizadores</dt><dd className="text-docid-text">{license ? `${license.activeUsers}/${license.maxUsers ?? "∞"}` : "—"}</dd>
           </dl>
         </div>
         <div className="flex items-center gap-3">

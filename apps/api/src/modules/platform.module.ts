@@ -65,6 +65,17 @@ async function listAll(): Promise<LicenseRow[]> {
   return (await db.execute(sql`SELECT * FROM platform_list_licenses()`)) as unknown as LicenseRow[];
 }
 
+/** Número novo (organizations) ou número legado (tabela licenses, instalações antigas). */
+async function findOrgByLicense(raw: string): Promise<string | null> {
+  const n = normalizeLicenseNumber(raw);
+  if (n) {
+    const [row] = (await db.execute(sql`SELECT platform_find_org_by_license(${n}) AS org_id`)) as unknown as Array<{ org_id: string | null }>;
+    if (row?.org_id) return row.org_id;
+  }
+  const [legacy] = (await db.execute(sql`SELECT platform_find_org_by_legacy_license(${raw}) AS org_id`)) as unknown as Array<{ org_id: string | null }>;
+  return legacy?.org_id ?? null;
+}
+
 export const platformModule = new (Elysia as any)({ prefix: "/platform" })
   .onBeforeHandle(async ({ request, set }: any) => {
     if (!process.env.PLATFORM_ADMIN_TOKEN || process.env.PLATFORM_ADMIN_TOKEN.length < MIN_TOKEN) {
@@ -100,8 +111,8 @@ export const platformModule = new (Elysia as any)({ prefix: "/platform" })
   })
 
   .get("/licenses/:licenseNumber", async ({ params, set }: any) => {
-    const n = normalizeLicenseNumber(params.licenseNumber);
-    const row = n ? (await listAll()).find((r) => r.license_number === n) : undefined;
+    const orgId = await findOrgByLicense(params.licenseNumber);
+    const row = orgId ? (await listAll()).find((r) => r.id === orgId) : undefined;
     if (!row) { set.status = 404; return { error: { code: "NOT_FOUND", message: "Licença não encontrada." } }; }
     return { data: present(row) };
   }, {
@@ -110,8 +121,7 @@ export const platformModule = new (Elysia as any)({ prefix: "/platform" })
   })
 
   .patch("/licenses/:licenseNumber", async ({ params, body, set, request }: any) => {
-    const n = normalizeLicenseNumber(params.licenseNumber);
-    if (!n) { set.status = 422; return { error: { code: "VALIDATION_ERROR", message: "Número de licença com formato inválido." } }; }
+    const orgId = await findOrgByLicense(params.licenseNumber);
     if (body.validUntil !== undefined && body.extendDays !== undefined) {
       set.status = 422; return { error: { code: "VALIDATION_ERROR", message: "Use validUntil OU extendDays, não os dois." } };
     }
@@ -122,9 +132,6 @@ export const platformModule = new (Elysia as any)({ prefix: "/platform" })
       if (Number.isNaN(validUntil.getTime())) { set.status = 422; return { error: { code: "VALIDATION_ERROR", message: "validUntil inválido (use AAAA-MM-DD)." } }; }
     }
 
-    const [{ org_id: orgId }] = (await db.execute(
-      sql`SELECT platform_find_org_by_license(${n}) AS org_id`,
-    )) as unknown as Array<{ org_id: string | null }>;
     if (!orgId) { set.status = 404; return { error: { code: "NOT_FOUND", message: "Licença não encontrada." } }; }
 
     try {

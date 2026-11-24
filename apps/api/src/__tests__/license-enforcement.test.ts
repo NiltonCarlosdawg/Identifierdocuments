@@ -39,8 +39,8 @@ describe("o que fica bloqueado em só consulta", () => {
     }
   });
   it("conta, notificações e sincronização fiscal offline continuam a funcionar", () => {
-    for (const p of ["/auth/login", "/auth/refresh", "/auth/me/password", "/notifications/abc/read", "/devices", "/identifiers/register-offline", "/identifiers/register-offline-loose", "/identifiers/release", "/platform/licenses/X"]) {
-      expect(isBlockedWhenReadOnly(p.startsWith("/notifications") || p.startsWith("/platform") ? "PATCH" : "POST", p)).toBe(false);
+    for (const p of ["/auth/login", "/auth/refresh", "/auth/me/password", "/notifications/abc/read", "/devices", "/devices/abc", "/devices/abc/deactivate", "/identifiers/register-offline", "/identifiers/register-offline-loose", "/identifiers/release", "/platform/licenses/X"]) {
+      expect(isBlockedWhenReadOnly(p.startsWith("/notifications") || p.startsWith("/platform") || p.startsWith("/devices/") ? "PATCH" : "POST", p)).toBe(false);
     }
   });
 });
