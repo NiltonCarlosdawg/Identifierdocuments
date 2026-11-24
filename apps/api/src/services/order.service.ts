@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { jwtVerify, SignJWT } from "jose";
 import { and, eq } from "drizzle-orm";
-import { db } from "../db";
+import { db, lookupDb } from "../db";
 import { auditLogs, organizations, orders, plans, users } from "../db/schema";
 import { withTenant } from "../db/withTenant";
 import { logger } from "../lib/logger";
@@ -71,13 +71,14 @@ export async function createOrder(input: CreateOrderInput): Promise<{ orderId: s
     tenantId = claims.tenantId;
     jti = claims.jti;
   } else if (input.tenantSlug) {
-    const [bySlug] = await db.select({ id: organizations.id }).from(organizations)
+    // Lookup cross-tenant: organizations tem RLS (ver lookupDb em db/index.ts).
+    const [bySlug] = await lookupDb.select({ id: organizations.id }).from(organizations)
       .where(eq(organizations.slug, input.tenantSlug)).limit(1);
     if (!bySlug) throw new OrderError("TENANT_NOT_FOUND", "Organização não encontrada.", 404);
     tenantId = bySlug.id;
     jti = randomUUID();
   } else {
-    const [byEmail] = await db.select({ tenantId: users.tenantId }).from(users)
+    const [byEmail] = await lookupDb.select({ tenantId: users.tenantId }).from(users)
       .where(eq(users.email, input.tenantEmail!)).limit(1);
     if (!byEmail) throw new OrderError("TENANT_NOT_FOUND", "Organização não encontrada.", 404);
     tenantId = byEmail.tenantId;
@@ -85,7 +86,7 @@ export async function createOrder(input: CreateOrderInput): Promise<{ orderId: s
   }
 
   // Tabelas globais: SEM withTenant.
-  const [org] = await db.select().from(organizations).where(eq(organizations.id, tenantId)).limit(1);
+  const [org] = await lookupDb.select().from(organizations).where(eq(organizations.id, tenantId)).limit(1);
   if (!org) throw new OrderError("TENANT_NOT_FOUND", "Organização não encontrada.", 404);
 
   const [plan] = await db.select().from(plans).where(eq(plans.id, input.planId)).limit(1);
@@ -149,7 +150,8 @@ export function licenseInputFromOrder(
 }
 
 async function pendingOrderWithNames(orderId: string) {
-  const [row] = await db.select({
+  // Join com organizations: RLS esconde-as no pool normal (ver lookupDb).
+  const [row] = await lookupDb.select({
     order: orders,
     tenantName: organizations.name,
     planName: plans.name,

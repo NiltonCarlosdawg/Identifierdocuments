@@ -1,7 +1,8 @@
 import Elysia from "elysia";
 import { Type as t } from "@sinclair/typebox";
 import { desc, eq, sql } from "drizzle-orm";
-import { db } from "../db";
+// O painel lê cross-tenant: pool com app.auth_lookup ligado (ver db/index.ts).
+import { lookupDb as db } from "../db";
 import { withTenant } from "../db/withTenant";
 import { auditLogs, licenses, organizations, orders, plans, providerUsers, users } from "../db/schema";
 import { verifyPassword } from "../lib/password";

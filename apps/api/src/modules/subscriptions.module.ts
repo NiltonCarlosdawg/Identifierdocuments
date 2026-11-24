@@ -1,7 +1,7 @@
 import Elysia from "elysia";
 import { Type as t } from "@sinclair/typebox";
 import { eq } from "drizzle-orm";
-import { db } from "../db";
+import { lookupDb } from "../db";
 import { organizations } from "../db/schema";
 import { getFreshRoles, requireAuth } from "../middleware/auth";
 import { isTenantAdmin } from "../services/access-decision.service";
@@ -30,8 +30,8 @@ export const subscriptionsModule = new (Elysia as any)()
       set.status = 401;
       return { error: { code: "INVALID_TOKEN", message: "Token de checkout inválido ou expirado." } };
     }
-    // Tabela global: SEM withTenant.
-    const [org] = await db.select({ name: organizations.name }).from(organizations)
+    // Tabela global: SEM withTenant. organizations tem RLS (ver lookupDb).
+    const [org] = await lookupDb.select({ name: organizations.name }).from(organizations)
       .where(eq(organizations.id, claims.tenantId)).limit(1);
     if (!org) {
       set.status = 401;

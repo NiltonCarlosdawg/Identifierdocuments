@@ -1,5 +1,6 @@
 import { and, eq, inArray, isNotNull, lt, sql } from "drizzle-orm";
-import { db } from "../db";
+// Job corre fora de qualquer tenant: organizations tem RLS (ver lookupDb).
+import { lookupDb as db } from "../db";
 import { organizations } from "../db/schema";
 import { logger } from "../lib/logger";
 import { sendProviderExpiryAlertEmail, sendRenewalReminderEmail } from "../services/mailer.service";

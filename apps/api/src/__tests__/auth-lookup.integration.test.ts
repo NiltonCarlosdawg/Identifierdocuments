@@ -44,4 +44,26 @@ describe("lookup de autenticação com RLS activo", () => {
       await client.end();
     }
   });
+
+  test("pool com app.auth_lookup no arranque lê organizations cross-tenant", async () => {
+    const countAsRole = async (client: postgres.Sql) => {
+      const rows = await client.begin(async (tx) => {
+        await tx.unsafe(`SET LOCAL ROLE ${role}`);
+        return tx`SELECT count(*)::int AS n FROM organizations`;
+      });
+      return rows[0]!.n;
+    };
+    const plain = postgres(process.env.DATABASE_URL!, { max: 1 });
+    const lookup = postgres(process.env.DATABASE_URL!, {
+      max: 1,
+      connection: { "app.auth_lookup": "on" },
+    });
+    try {
+      expect(await countAsRole(plain)).toBe(0);
+      expect(await countAsRole(lookup)).toBeGreaterThan(0);
+    } finally {
+      await plain.end();
+      await lookup.end();
+    }
+  });
 });
