@@ -41,7 +41,10 @@ export default function Profile() {
     if (newPassword.length < 6) { setPwError("A nova password deve ter pelo menos 6 caracteres."); return; }
     setPwLoading(true);
     try {
-      await api.patch("/auth/me/password", { currentPassword, newPassword });
+      const res = await api.patch<{ token?: string; data?: { token?: string } }>("/auth/me/password", { currentPassword, newPassword });
+      // O servidor termina todas as sessões antigas e devolve um token novo para esta.
+      const newToken = res?.token ?? res?.data?.token;
+      if (newToken && user) useAuthStore.getState().login(newToken, user);
       setPwSuccess("Password alterada com sucesso.");
       setCurrentPassword(""); setNewPassword(""); setConfirmPassword("");
     } catch (err: any) { setPwError(mapError(err, "Erro ao alterar password.")); } finally { setPwLoading(false); }

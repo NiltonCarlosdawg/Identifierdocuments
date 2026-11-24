@@ -3,7 +3,7 @@ import { db } from "../db";
 import { withTenant } from "../db/withTenant";
 import { users, organizations, userRoles, roles, passwordResetTokens } from "../db/schema";
 import { eq, and, gt, isNull, sql } from "drizzle-orm";
-import { signToken, verifyTokenWithGrace, getFreshRoles } from "../middleware/auth";
+import { signToken, verifyTokenWithGrace, getFreshRoles, sessionExpired } from "../middleware/auth";
 import type { AuthPayload } from "../middleware/auth";
 import { enqueueResetPasswordEmail } from "../jobs/queues";
 import { randomBytes, createHash } from "node:crypto";
@@ -67,6 +67,7 @@ export async function login(email: string, password: string, organizationSlug?: 
     tenantId: user.tenantId,
     sectorId: user.sectorId,
     roles: userRolesList,
+    authTime: Math.floor(Date.now() / 1000),
   };
 
   const token = await signToken(payload);
@@ -121,14 +122,26 @@ export async function changePassword(auth: AuthPayload, currentPassword: string,
   if (!valid) throw new Error("Password actual incorrecta.");
 
   const newHash = await hashPassword(newPassword);
+  // Termina todas as sessões existentes (incluindo um token roubado). Esta sessão
+  // continua com o token novo devolvido abaixo, porque o utilizador acabou de provar a password.
   await withTenant(auth.tenantId, (tx) =>
-    tx.update(users).set({ passwordHash: newHash }).where(eq(users.id, auth.userId)),
+    tx.update(users).set({ passwordHash: newHash, tokensValidAfter: new Date() }).where(eq(users.id, auth.userId)),
   );
-  return { message: "Password alterada com sucesso." };
+  const freshRoles = await getFreshRoles(auth.userId, auth.tenantId);
+  const token = await signToken({
+    userId: auth.userId,
+    tenantId: auth.tenantId,
+    sectorId: user.sectorId,
+    roles: freshRoles,
+    authTime: Math.floor(Date.now() / 1000),
+  });
+  return { message: "Password alterada com sucesso.", token };
 }
 
 export async function refreshToken(token: string) {
   const payload = await verifyTokenWithGrace(token);
+  // Limite absoluto: sem novo login com password, a sessão acaba ao fim de SESSION_MAX_AGE_HOURS.
+  if (sessionExpired(payload.authTime)) throw new Error("Sessão expirada.");
   const user = await withTenant(payload.tenantId, (tx) =>
     tx.query.users.findFirst({
       where: eq(users.id, payload.userId),
@@ -136,6 +149,11 @@ export async function refreshToken(token: string) {
     }),
   );
   if (!user || !user.isActive) throw new Error("Utilizador não encontrado ou inactivo.");
+  // Tokens emitidos antes da última mudança de password já não renovam.
+  const validAfterSeconds = Math.floor(user.tokensValidAfter.getTime() / 1000);
+  if (typeof payload.issuedAt !== "number" || payload.issuedAt < validAfterSeconds) {
+    throw new Error("Sessão terminada.");
+  }
 
   const userRolesList = user.userRoles.map((ur) => ur.role.name);
   const newToken = await signToken({
@@ -143,6 +161,7 @@ export async function refreshToken(token: string) {
     tenantId: user.tenantId,
     sectorId: user.sectorId,
     roles: userRolesList,
+    authTime: payload.authTime,
   });
 
   return {
@@ -213,7 +232,7 @@ export async function resetPassword(token: string, newPassword: string) {
   const newHash = await hashPassword(newPassword);
 
   await withTenant(rec.tenant_id, async (tx) => {
-    await tx.update(users).set({ passwordHash: newHash }).where(eq(users.id, rec.user_id));
+    await tx.update(users).set({ passwordHash: newHash, tokensValidAfter: new Date() }).where(eq(users.id, rec.user_id));
     await tx.update(passwordResetTokens)
       .set({ usedAt: new Date() })
       .where(eq(passwordResetTokens.id, rec.id));

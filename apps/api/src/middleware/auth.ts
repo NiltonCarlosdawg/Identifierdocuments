@@ -9,18 +9,39 @@ import { withTenant } from "../db/withTenant";
 
 const rawSecret = process.env.JWT_SECRET;
 if (!rawSecret) throw new Error("JWT_SECRET environment variable is required");
+if (process.env.NODE_ENV === "production" && (rawSecret.length < 32 || rawSecret === "change-me-in-production")) {
+  throw new Error("JWT_SECRET demasiado fraco para produção: use pelo menos 32 caracteres aleatórios.");
+}
 const JWT_SECRET = new TextEncoder().encode(rawSecret);
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "15m";
+
+/** Duração máxima de uma sessão desde o último login com password. Depois disto a renovação falha. */
+const SESSION_MAX_AGE_SECONDS = Math.max(1, Number(process.env.SESSION_MAX_AGE_HOURS) || 168) * 3600;
 
 export interface AuthPayload {
   userId: string;
   tenantId: string;
   sectorId: string | null;
   roles: string[];
+  /** Instante (segundos Unix) do último login com password; mantém-se igual nas renovações. */
+  authTime?: number;
+  /** `iat` do token verificado. Só é preenchido na leitura, nunca enviado em `signToken`. */
+  issuedAt?: number;
+}
+
+export function sessionExpired(authTime: number | undefined, nowSeconds = Math.floor(Date.now() / 1000)): boolean {
+  return typeof authTime !== "number" || nowSeconds - authTime > SESSION_MAX_AGE_SECONDS;
 }
 
 export function signToken(payload: AuthPayload): Promise<string> {
-  return new SignJWT({ ...payload })
+  const claims = {
+    userId: payload.userId,
+    tenantId: payload.tenantId,
+    sectorId: payload.sectorId,
+    roles: payload.roles,
+    authTime: payload.authTime ?? Math.floor(Date.now() / 1000),
+  };
+  return new SignJWT(claims)
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setIssuer("docid-api")
@@ -34,7 +55,14 @@ function validateAuthPayload(raw: unknown): AuthPayload {
   if (typeof p.userId !== "string" || !p.userId) throw new Error("Invalid token: missing userId");
   if (typeof p.tenantId !== "string" || !p.tenantId) throw new Error("Invalid token: missing tenantId");
   if (!Array.isArray(p.roles)) throw new Error("Invalid token: missing roles");
-  return { userId: p.userId, tenantId: p.tenantId, sectorId: typeof p.sectorId === "string" ? p.sectorId : null, roles: p.roles as string[] };
+  return {
+    userId: p.userId,
+    tenantId: p.tenantId,
+    sectorId: typeof p.sectorId === "string" ? p.sectorId : null,
+    roles: p.roles as string[],
+    authTime: typeof p.authTime === "number" ? p.authTime : undefined,
+    issuedAt: typeof p.iat === "number" ? p.iat : undefined,
+  };
 }
 
 const JWT_VERIFY_OPTS = { issuer: "docid-api", audience: "docid-desktop" };

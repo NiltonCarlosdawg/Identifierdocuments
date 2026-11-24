@@ -96,6 +96,8 @@ export const users = pgTable("users", {
   fullName: text("full_name").notNull(),
   isActive: boolean("is_active").notNull().default(true),
   notificationPreferences: jsonb("notification_preferences").notNull().default("{}"),
+  /** Tokens emitidos antes deste instante já não podem ser renovados (mudança/reposição de password). */
+  tokensValidAfter: timestamp("tokens_valid_after", { withTimezone: true }).notNull().defaultNow(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => ({ indexes: [
   uniqueIndex("users_tenant_email_idx").on(t.tenantId, t.email),

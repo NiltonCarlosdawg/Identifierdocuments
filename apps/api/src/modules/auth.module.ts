@@ -14,8 +14,11 @@ export const authModule = new (Elysia as any)({ prefix: "/auth" })
   .post("/login", async (ctx: any) => {
     const { body, request, set } = ctx;
     const ip = getClientIp(request);
-    const rateLimitKey = `login:${ip}:${body.email}`;
-    if (!(await checkRateLimit(rateLimitKey))) {
+    const email = String(body.email).trim().toLowerCase();
+    // Dois limites: por IP+email (uso normal) e por email em qualquer IP (ataque distribuído).
+    const perIpOk = await checkRateLimit(`login:${ip}:${email}`);
+    const perEmailOk = await checkRateLimit(`login-email:${email}`, 20, 15 * 60_000);
+    if (!perIpOk || !perEmailOk) {
       set.status = 429;
       return { error: { code: "RATE_LIMITED", message: "Muitas tentativas. Tente novamente em 1 minuto." } };
     }

@@ -162,6 +162,20 @@
       "when": 1795480000000,
       "tag": "0022_license",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1795550000000,
+      "tag": "0023_session_hardening",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1795600000000,
+      "tag": "0024_rls_empty_tenant",
+      "breakpoints": true
     }
   ]
 }

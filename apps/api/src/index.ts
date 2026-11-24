@@ -24,11 +24,20 @@ import { classifierModule } from "./modules/classifier.module";
 import { notificationSSEModule } from "./services/notification.service";
 import { logger } from "./lib/logger";
 import { startWorkers } from "./jobs/workers";
+import { getClientIp } from "./lib/ip";
+import { ALLOWED_ORIGINS } from "./lib/cors";
 
 const requestTimings = new WeakMap<Request, number>();
 const PORT = Number(process.env.PORT) || 3000;
-const enableSwagger = process.env.ENABLE_SWAGGER === "true"
-  || process.env.NODE_ENV !== "production";
+const isProduction = process.env.NODE_ENV === "production";
+const enableSwagger = process.env.ENABLE_SWAGGER === "true" || !isProduction;
+
+if (isProduction) {
+  if (enableSwagger) logger.warn("[SEGURANÇA] ENABLE_SWAGGER=true em produção: a documentação da API fica pública em /docs.");
+  if (process.env.ALLOW_PUBLIC_ONBOARDING === "true") {
+    logger.warn("[SEGURANÇA] ALLOW_PUBLIC_ONBOARDING=true em produção: qualquer pessoa pode criar organizações.");
+  }
+}
 
 // Bun (dev/testes) mantém o adapter nativo; Node usa o adapter oficial —
 // o cPanel LGI/LVE limita processos/threads e o Bun não arranca em produção.
@@ -36,16 +45,7 @@ const isBun = typeof (globalThis as { Bun?: unknown }).Bun !== "undefined";
 
 const app = new (Elysia as any)(isBun ? {} : { adapter: node() })
   .use(cors({
-    origin: [
-      "http://localhost:1420", "http://127.0.0.1:1420", "tauri://localhost", "https://tauri.localhost",
-      ...(process.env.ADMIN_ORIGIN ? [process.env.ADMIN_ORIGIN] : []),
-      //Origens do frontend em modo browser (dev/e2e); em produção não são aceites.
-      ...(process.env.NODE_ENV === "production" ? [] : [
-        "http://localhost:4173", "http://127.0.0.1:4173",
-        "http://localhost:5173", "http://127.0.0.1:5173",
-        "http://localhost:5174", "http://127.0.0.1:5174",
-      ]),
-    ],
+    origin: ALLOWED_ORIGINS,
     credentials: true,
   }));
 
@@ -83,11 +83,7 @@ if (enableSwagger) {
 app
   .use(authMiddleware)
   .use(tenantMiddleware)
-  .derive(({ request }) => {
-    const xff = request.headers.get("x-forwarded-for");
-    const clientIp = xff ? xff.split(",")[0].trim() : "unknown";
-    return { clientIp };
-  })
+  .derive(({ request }: { request: Request }) => ({ clientIp: getClientIp(request) }))
   .onRequest(({ request }) => {
     requestTimings.set(request, performance.now());
   })
