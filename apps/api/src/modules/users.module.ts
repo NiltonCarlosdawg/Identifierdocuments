@@ -229,13 +229,13 @@ export const usersModule = new (Elysia as any)({ prefix: "/users" })
 
           const requestedRole = (isSupervisor && !isAdmin) ? "MEMBER" : (body.role || "MEMBER");
           if (requestedRole !== "MEMBER" && requestedRole !== "SECTOR_SUPERVISOR") {
-            set.status = 422; return { error: { code: "INVALID_ROLE", message: "Role de convite deve ser MEMBER ou SECTOR_SUPERVISOR." } };
+            set.status = 422; return { error: { code: "INVALID_ROLE", message: "Escolha um tipo de acesso válido: Membro ou Supervisor de sector." } };
           }
           const role = await tx.query.roles.findFirst({
             where: and(eq(roles.name, requestedRole), eq(roles.tenantId, tenantId)),
           });
           if (!role) {
-            set.status = 422; return { error: { code: "INVALID_ROLE", message: `Role "${requestedRole}" não existe.` } };
+            set.status = 422; return { error: { code: "INVALID_ROLE", message: "O tipo de acesso escolhido não está disponível." } };
           }
 
           const password = randomPassword();
@@ -369,7 +369,7 @@ export const usersModule = new (Elysia as any)({ prefix: "/users" })
               columns: { tenantId: true },
             });
             if (!role || (role.tenantId !== null && role.tenantId !== tenantId)) {
-              set.status = 400; return { error: { code: "VALIDATION_ERROR", message: "Role não encontrado." } };
+              set.status = 400; return { error: { code: "VALIDATION_ERROR", message: "Função de acesso não encontrada." } };
             }
             if (body.sectorId) {
               const sector = await tx.query.sectors.findFirst({
@@ -396,7 +396,7 @@ export const usersModule = new (Elysia as any)({ prefix: "/users" })
     }, {
       params: t.Object({ id: t.String() }),
       body: t.Object({ roleId: t.String(), sectorId: t.Optional(t.String()) }),
-      detail: { summary: "Atribuir role a utilizador", tags: ["Utilizadores"] },
+      detail: { summary: "Atribuir função de acesso", tags: ["Utilizadores"] },
     })
 
     .delete("/:id/roles/:roleId", async ({ tenantId, params, set }: any) => {
@@ -416,7 +416,7 @@ export const usersModule = new (Elysia as any)({ prefix: "/users" })
     }
   }, {
     params: t.Object({ id: t.String(), roleId: t.String() }),
-    detail: { summary: "Remover role de utilizador", tags: ["Utilizadores"] },
+    detail: { summary: "Remover função de acesso", tags: ["Utilizadores"] },
   })
 
     .post("/import", async ({ tenantId, auth, body, clientIp, set }: any) => {
@@ -439,7 +439,7 @@ export const usersModule = new (Elysia as any)({ prefix: "/users" })
             const roleIdx = header.indexOf("role");
             if (emailIdx === -1 || nameIdx === -1) {
               set.status = 422;
-              return { error: { code: "CSV_HEADER", message: "CSV deve ter as colunas: email,full_name,sector,role." } };
+              return { error: { code: "CSV_HEADER", message: "O ficheiro deve ter as colunas de e-mail, nome, sector e função de acesso." } };
             }
 
             const dataRows = csvRows.slice(1);
@@ -472,20 +472,20 @@ export const usersModule = new (Elysia as any)({ prefix: "/users" })
               const sectorRef = (cols[sectorIdx] || "").trim();
               const roleRef = (cols[roleIdx] || "").trim();
 
-              if (!email || !fullName) { errors.push({ row: rowNum, reason: "email ou nome em falta." }); continue; }
-              if (!EMAIL_RE.test(email)) { errors.push({ row: rowNum, reason: `email inválido: ${email}` }); continue; }
-              if (existingEmails.has(email)) { skipped.push({ row: rowNum, reason: `email já existente: ${email}` }); continue; }
+              if (!email || !fullName) { errors.push({ row: rowNum, reason: "Faltam o e-mail ou o nome." }); continue; }
+              if (!EMAIL_RE.test(email)) { errors.push({ row: rowNum, reason: "E-mail inválido." }); continue; }
+              if (existingEmails.has(email)) { skipped.push({ row: rowNum, reason: "Já existe um utilizador com este e-mail." }); continue; }
 
               let sectorId: string | null = null;
               if (sectorRef) {
                 sectorId = sectorByName.get(sectorRef.toLowerCase()) || sectorByCode.get(sectorRef.toLowerCase()) || null;
-                if (!sectorId) { errors.push({ row: rowNum, reason: `sector não encontrado: ${sectorRef}` }); continue; }
+                if (!sectorId) { errors.push({ row: rowNum, reason: "Sector não encontrado." }); continue; }
               }
 
               let roleId: string | null = null;
               if (roleRef) {
                 roleId = roleByName.get(roleRef.toLowerCase()) || null;
-                if (!roleId) { errors.push({ row: rowNum, reason: `role não encontrado: ${roleRef}` }); continue; }
+                if (!roleId) { errors.push({ row: rowNum, reason: "Função de acesso não encontrada." }); continue; }
               }
 
               // Reavalia o teto por linha: as inserções anteriores deste CSV já contam.

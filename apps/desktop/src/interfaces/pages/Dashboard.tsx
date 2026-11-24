@@ -282,7 +282,7 @@ export default function Dashboard() {
                           <div className="mb-1.5 flex items-center justify-between text-sm">
                             <span className="flex items-center gap-2 text-docid-text">
                               <Icon className={`h-4 w-4 ${STATUS_TONES[status] || "text-docid-muted"}`} />
-                              {STATUS_LABELS[status] || status}
+                              {STATUS_LABELS[status] || "Outro"}
                             </span>
                             <span className="font-semibold text-docid-text">{count}</span>
                           </div>

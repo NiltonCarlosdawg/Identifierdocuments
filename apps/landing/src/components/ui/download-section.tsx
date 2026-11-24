@@ -85,7 +85,7 @@ export function DownloadSection() {
             Instale o DocID no Windows
           </h2>
           <p className="mx-auto mt-5 max-w-xl text-base leading-relaxed text-docid-muted">
-            Versão 1.2.2 para Windows 10 e 11, 64 bits. A conta é criada pela sua organização; depois de instalar,
+            Para Windows 10 e 11, 64 bits. A conta é criada pela sua organização; depois de instalar,
             entre com as credenciais que recebeu.
           </p>
         </Reveal>
@@ -95,8 +95,8 @@ export function DownloadSection() {
             <PlatformRow
               mark={<WindowsMark className="h-4 w-4" />}
               name="Instalador completo"
-              meta="Recomendado · inclui WebView2"
-              detail="Um único ficheiro. Instala o DocID e o motor WebView2 no mesmo passo, mesmo sem internet. Duplo clique e seguir os passos."
+              meta="inclui todos os componentes"
+              detail="Um único ficheiro. Instala o DocID e os componentes necessários no mesmo passo, mesmo sem internet. Duplo clique e seguir os passos."
               action={
                 <a className="btn-primary w-full sm:w-auto" href={DOWNLOADS.installer.href}>
                   <Download className="h-4 w-4" />
@@ -108,8 +108,8 @@ export function DownloadSection() {
             <PlatformRow
               mark={<LinuxMark className="h-4 w-4" />}
               name="Linux"
-              meta="Pacote Debian · amd64"
-              detail="Pacote .deb para Ubuntu 22.04 e compatíveis. Instale com `sudo apt install ./DocID_1.2.2_amd64.deb`."
+              meta="Pacote para Linux · 64 bits"
+              detail="Pacote .deb para Ubuntu 22.04 e compatíveis. Para instalar, execute sudo apt install ./DocID_1.2.2_amd64.deb."
               action={
                 <a className="btn-primary w-full sm:w-auto" href={DOWNLOADS.linux.href}>
                   <Download className="h-4 w-4" />
@@ -122,7 +122,7 @@ export function DownloadSection() {
               mark={<AppleMark className="h-4 w-4" />}
               name="macOS"
               meta="Em breve"
-              detail="Versão para Apple Silicon e Intel em desenvolvimento."
+              detail="A versão para macOS está em preparação."
               action={<span className="btn-ghost w-full cursor-not-allowed opacity-55 sm:w-auto" aria-disabled="true">Em breve</span>}
             />
           </div>
@@ -140,13 +140,13 @@ export function DownloadSection() {
                 </p>
                 <dl className="mt-4 space-y-1.5">
                   <div className="flex flex-wrap items-baseline gap-x-2">
-                    <dt className="font-mono text-[10px] uppercase tracking-[0.14em] text-docid-muted">SHA-256 instalador</dt>
+                    <dt className="font-mono text-[10px] uppercase tracking-[0.14em] text-docid-muted">Código de verificação do instalador</dt>
                     <dd className="w-full break-all font-mono text-[11px] leading-relaxed text-docid-muted">
                       {DOWNLOADS.installer.sha256}
                     </dd>
                   </div>
                   <div className="flex flex-wrap items-baseline gap-x-2">
-                    <dt className="font-mono text-[10px] uppercase tracking-[0.14em] text-docid-muted">SHA-256 Linux (.deb)</dt>
+                    <dt className="font-mono text-[10px] uppercase tracking-[0.14em] text-docid-muted">Código de verificação do pacote Linux</dt>
                     <dd className="w-full break-all font-mono text-[11px] leading-relaxed text-docid-muted">
                       {DOWNLOADS.linux.sha256}
                     </dd>
@@ -156,7 +156,7 @@ export function DownloadSection() {
                   className="mt-2 inline-flex text-xs font-medium text-docid-link underline-offset-4 hover:underline"
                   href="/downloads/SHA256SUMS"
                 >
-                  Verificar integridade (SHA256SUMS)
+                  Verificar integridade dos ficheiros
                 </a>
                 <a
                   className={cn("mt-4 inline-flex items-center gap-1.5 text-sm font-medium text-docid-link underline-offset-4 hover:underline")}

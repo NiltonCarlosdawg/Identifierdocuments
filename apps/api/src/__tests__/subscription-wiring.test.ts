@@ -147,7 +147,7 @@ describe("limite de utilizadores no wiring dos endpoints", () => {
     expect(invite.status).toBe(403);
     expect(invite.body.error?.code).toBe("SUBSCRIPTION_USER_LIMIT");
     expect(invite.body.error?.message).toBe(
-      "O limite de utilizadores do seu plano foi atingido. Faça upgrade para convidar mais.",
+      "O limite de utilizadores do seu plano foi atingido. Actualize o plano para convidar mais utilizadores.",
     );
 
     const after = await api<any>("/users/", { token: adminToken });
@@ -182,7 +182,7 @@ describe("limite de utilizadores no wiring dos endpoints", () => {
     expect(res.status).toBe(403);
     expect(res.body.error?.code).toBe("SUBSCRIPTION_USER_LIMIT");
     expect(res.body.error?.message).toBe(
-      "O limite de utilizadores do seu plano foi atingido. Faça upgrade para convidar mais.",
+      "O limite de utilizadores do seu plano foi atingido. Actualize o plano para convidar mais utilizadores.",
     );
 
     const list = await api<any>("/users/", { token: adminToken });
@@ -318,7 +318,7 @@ describe("quota mensal de identificadores no wiring", () => {
     expect(res.status).toBe(403);
     expect(res.body.error?.code).toBe("IDENTIFIER_QUOTA_EXCEEDED");
     expect(res.body.error?.message).toBe(
-      "O limite mensal de identificadores do seu plano foi atingido. Faça upgrade para continuar.",
+      "O limite mensal de identificadores do seu plano foi atingido. Actualize o plano para continuar.",
     );
   });
 
@@ -349,7 +349,7 @@ describe("limite de 1 upload/dia na expiração", () => {
 
   const EXPECTED_ERROR = {
     code: "UPLOAD_LIMIT_REACHED",
-    message: "Subscrição expirada: limite de 1 upload por dia.",
+    message: "A subscrição expirou. Só é possível enviar um ficheiro por dia.",
   };
 
   async function newIdentifier(): Promise<string> {

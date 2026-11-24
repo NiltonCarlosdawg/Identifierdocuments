@@ -2,12 +2,14 @@ import { useState, useRef, useEffect } from "react";
 import { Outlet, NavLink, useNavigate } from "react-router-dom";
 import { useAuthStore } from "../stores/authStore";
 import { useAppConfigStore } from "../stores/configStore";
-import { LayoutDashboard, FileText, Fingerprint, CheckSquare, Users, UserPlus, Cog, History, Scan, CloudOff, Search, Menu, LogOut, User, Shield } from "lucide-react";
+import { LayoutDashboard, FileText, Fingerprint, CheckSquare, Users, UserPlus, Cog, History, Scan, CloudOff, Search, Menu, LogOut, User, Shield, RefreshCw, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
 import OfflineQueuePanel, { OfflineQueueBadge } from "./OfflineQueuePanel";
 import WriteQueuePanel, { WriteQueueBadge } from "./WriteQueuePanel";
 import NotificationBell from "./NotificationBell";
 import NativeNotificationsBridge from "./NativeNotificationsBridge";
 import LicenseBanner from "./LicenseBanner";
+import { useSyncStatus, syncStatusLabel } from "../hooks/useSyncStatus";
+import { useQueueStore } from "../stores/queueStore";
 
 const navItems = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -16,7 +18,7 @@ const navItems = [
   { to: "/aprovacoes", label: "Aprovações", icon: CheckSquare, roles: ["ORG_ADMIN", "SECTOR_SUPERVISOR"] },
   { to: "/sectores", label: "Sectores", icon: Users, roles: ["ORG_ADMIN"] },
   { to: "/utilizadores", label: "Utilizadores", icon: UserPlus, roles: ["ORG_ADMIN", "SECTOR_SUPERVISOR"] },
-  { to: "/roles", label: "Roles", icon: Shield, roles: ["ORG_ADMIN"] },
+  { to: "/roles", label: "Permissões", icon: Shield, roles: ["ORG_ADMIN"] },
   { to: "/auditoria", label: "Auditoria", icon: History, roles: ["ORG_ADMIN"] },
   { to: "/digitalizar", label: "Digitalizar", icon: Scan },
   { to: "/configuracoes", label: "Configurações", icon: Cog },
@@ -26,6 +28,9 @@ export default function Layout() {
   const user = useAuthStore(s => s.user);
   const logout = useAuthStore(s => s.logout);
   const avatar = useAppConfigStore(s => s.avatar);
+  const setQueuePanelOpen = useQueueStore(s => s.setPanelOpen);
+  const { pendingUploads, pendingWrites, online, syncing, lastSyncedAt, lastError, syncNow } = useSyncStatus();
+  const pendingTotal = pendingUploads + pendingWrites;
   const navigate = useNavigate();
   const visibleNav = navItems.filter(item => !item.roles || item.roles.some(r => user?.roles.includes(r)));
   const [menuOpen, setMenuOpen] = useState(false);
@@ -44,7 +49,7 @@ export default function Layout() {
       <aside className="flex w-[260px] shrink-0 flex-col border-r border-docid-border bg-docid-surface">
         <div className="flex items-center gap-3 px-6 py-5">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-docid-primary/15 text-docid-primary-soft"><FileText className="h-5 w-5" /></div>
-          <div><p className="text-lg font-bold text-docid-primary-soft">DocID</p><p className="text-xs text-docid-muted">{user?.organization || "Enterprise Management"}</p></div>
+          <div><p className="text-lg font-bold text-docid-primary-soft">DocID</p><p className="text-xs text-docid-muted">{user?.organization || "Organização"}</p></div>
         </div>
         <nav className="flex-1 space-y-1 px-3 py-4">
           {visibleNav.map(({ to, label, icon: Icon }) => (
@@ -54,9 +59,38 @@ export default function Layout() {
           ))}
         </nav>
         <div className="border-t border-docid-border px-3 py-4">
-          <div className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-docid-muted">
-            <CloudOff className="h-4 w-4" />Fila Offline<span className="ml-auto rounded-full bg-docid-surface-high px-2 py-0.5 text-[10px]">Sync</span>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              data-testid="sidebar-sync-status"
+              onClick={() => setQueuePanelOpen(true)}
+              className="flex min-w-0 flex-1 items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium text-docid-muted transition hover:bg-docid-surface-high hover:text-docid-text"
+            >
+              {!online ? <CloudOff className="h-4 w-4 shrink-0 text-docid-tertiary" /> : syncing ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : pendingTotal === 0 ? <CheckCircle2 className="h-4 w-4 shrink-0 text-docid-secondary" /> : <CloudOff className="h-4 w-4 shrink-0" />}
+              <span className="min-w-0">
+                <span className="block truncate">Fila de sincronização</span>
+                <span className="block text-xs font-normal text-docid-muted">{pendingUploads} envios · {pendingWrites} alterações</span>
+              </span>
+              <span className="ml-auto shrink-0 rounded-full bg-docid-surface-high px-2 py-0.5 text-[10px]" title={lastSyncedAt ? `Última sincronização: ${new Date(lastSyncedAt).toLocaleString("pt-PT")}` : "Ainda sem sincronização"}>
+                {syncStatusLabel(online, syncing, pendingTotal, lastSyncedAt)}
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => void syncNow()}
+              disabled={!online || syncing || pendingTotal === 0}
+              aria-label="Sincronizar agora"
+              title="Sincronizar agora"
+              className="rounded-lg p-2 text-docid-muted transition hover:bg-docid-surface-high hover:text-docid-text disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
+            </button>
           </div>
+          {lastError && (
+            <p className="mt-2 flex items-center gap-2 px-3 text-xs text-docid-error">
+              <AlertCircle className="h-3 w-3" /> A última sincronização teve um problema. Tente novamente.
+            </p>
+          )}
         </div>
       </aside>
       <div className="flex flex-1 flex-col overflow-hidden">

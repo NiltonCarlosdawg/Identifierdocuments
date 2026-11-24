@@ -24,7 +24,7 @@ export const tenantsModule = new (Elysia as any)({ prefix: "/tenants" })
     const providedKey = request.headers.get("x-onboarding-secret");
     if (!allowPublic && (!expectedKey || providedKey !== expectedKey)) {
       set.status = 403;
-      return { error: { code: "ONBOARDING_DISABLED", message: "Onboarding público desactivado. Contacte o administrador." } };
+      return { error: { code: "ONBOARDING_DISABLED", message: "A criação de organizações não está disponível. Contacte o administrador." } };
     }
 
     if (!body.termsAccepted) {
@@ -43,7 +43,7 @@ export const tenantsModule = new (Elysia as any)({ prefix: "/tenants" })
       const orgRows = (await db.execute(sql`SELECT * FROM auth_find_org_by_slug(${slug})`)) as unknown as Array<{ id: string }>;
       if (orgRows[0]) {
         set.status = 409;
-        return { error: { code: "SLUG_TAKEN", message: "Este slug já está em uso." } };
+        return { error: { code: "SLUG_TAKEN", message: "Este endereço já está em uso." } };
       }
 
       const orgId = randomUUID();
@@ -88,7 +88,7 @@ export const tenantsModule = new (Elysia as any)({ prefix: "/tenants" })
         });
 
         if (!orgAdminRole) {
-          throw new Error("Role ORG_ADMIN de sistema não encontrado. Corra o seed primeiro.");
+          throw new Error("Não foi possível concluir a configuração inicial. Contacte o suporte.");
         }
 
         await tx.insert(userRoles).values({

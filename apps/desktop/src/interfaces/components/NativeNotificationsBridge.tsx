@@ -55,7 +55,7 @@ export default function NativeNotificationsBridge() {
         useWriteQueueStore.getState().refresh().catch(() => {});
         const n = payload?.uploaded ?? 0;
         if (n > 0) {
-          void notifyNative(prefs(), "sync_complete", "Sincronização concluída", `${n} documento(s) enviado(s) para o servidor.`);
+          void notifyNative(prefs(), "sync_complete", "Sincronização concluída", `${n} documentos enviados para o servidor.`);
         }
       });
 
@@ -66,10 +66,10 @@ export default function NativeNotificationsBridge() {
         void notifyNative(
           prefs(),
           "sync_failed",
-          "Falha na sincronização",
+          "Não foi possível sincronizar",
           attempts != null
-            ? `${name} falhou (tentativa ${attempts}).`
-            : `${name} falhou ao enviar.`,
+            ? `Não foi possível enviar ${name} (tentativa ${attempts}).`
+            : `Não foi possível enviar ${name}.`,
         );
       });
 
@@ -79,25 +79,24 @@ export default function NativeNotificationsBridge() {
         void notifyNative(
           prefs(),
           "queue_enqueued",
-          "Guardado na fila offline",
+          "Guardado para envio",
           `${name} será enviado quando houver ligação.`,
         );
       });
 
-      await add<{ method?: string; path?: string }>("write:enqueued", (payload) => {
+      await add("write:enqueued", () => {
         useWriteQueueStore.getState().refresh().catch(() => {});
-        const path = payload?.path || "alteração";
         void notifyNative(
           prefs(),
           "write_enqueued",
-          "Escrita pendente",
-          `${payload?.method || "PATCH"} ${path} ficará sincronizada quando houver ligação.`,
+          "Alteração pendente",
+          "Uma alteração ficou guardada e será sincronizada quando houver ligação.",
         );
       });
 
-      await add<{ path?: string }>("watcher:file_detected", (payload) => {
+      await add("watcher:file_detected", () => {
         useWatcherStore.getState().bumpDetected();
-        void notifyNative(prefs(), "watcher_detected", "Documento detectado", `Ficheiro novo em ${payload?.path ?? "pasta vigiada"}`);
+        void notifyNative(prefs(), "watcher_detected", "Documento detectado", "Ficheiro novo na pasta vigiada.");
       });
 
       await add<{ identifier?: string }>("watcher:identifier_found", (payload) => {

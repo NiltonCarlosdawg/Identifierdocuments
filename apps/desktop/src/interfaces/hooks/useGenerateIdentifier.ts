@@ -1,6 +1,7 @@
 import { useState, useCallback } from "react";
 import { sync, api } from "../../infrastructure/di/container";
 import { useDeviceStore } from "../stores/deviceStore";
+import { friendlyMessage } from "../../shared/errors/mapError";
 
 export interface GenerateInput {
   categoryId: string;
@@ -19,15 +20,15 @@ export interface GenerateResult {
 function mapOfflineError(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err);
   if (msg.includes("OFFLINE_NO_DEVICE")) {
-    return "Dispositivo não registado. Conecte-se à internet uma vez para ativar a geração offline neste dispositivo.";
+    return "Este dispositivo ainda não está registado. Ligue-se à internet uma vez para poder gerar identificadores offline.";
   }
   if (msg.includes("Lease revogado") || msg.includes("Lease não") || msg.includes("lease não")) {
-    return "Lease revogado. Reconecte para obter um novo lease.";
+    return "A reserva de números deixou de estar disponível. Volte a ligar-se à internet para continuar.";
   }
   if (msg.includes("esgotado") || msg.includes("sem lease") || msg.includes("sem lote") || msg.includes("sem reserva")) {
-    return "Lote de números esgotado. Conecte-se à internet para reservar um novo lote antes de continuar a gerar offline.";
+    return "Não há mais números reservados neste dispositivo. Ligue-se à internet para reservar outros.";
   }
-  return msg;
+  return friendlyMessage(msg);
 }
 
 export function useGenerateIdentifier() {
@@ -75,7 +76,7 @@ export function useGenerateIdentifier() {
 
       const deviceId = useDeviceStore.getState().deviceId;
       if (!deviceId) {
-        const errMsg = useDeviceStore.getState().deviceIdError || "Dispositivo não identificado. Conecte-se à internet para registar este dispositivo.";
+        const errMsg = useDeviceStore.getState().deviceIdError || "Este dispositivo ainda não foi identificado. Ligue-se à internet para o registar.";
         throw new Error(errMsg);
       }
 

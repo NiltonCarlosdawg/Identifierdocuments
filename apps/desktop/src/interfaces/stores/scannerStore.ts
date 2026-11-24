@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { scanner } from "../../infrastructure/di/container";
 import { useAppConfigStore } from "./configStore";
+import { mapError } from "../../shared/errors/mapError";
 import type { ScannerDevice, ScanOptions } from "../../domain/entities/Scanner";
 
 interface ScannerState {
@@ -38,7 +39,7 @@ export const useScannerStore = create<ScannerState>((set, get) => ({
       set({ devices, selectedDevice: exists ? preferred : (devices[0]?.name ?? null) });
     } catch (err: any) {
       // O invoke do Tauri rejeita com a string devolvida pelo Rust, não com um Error.
-      set({ error: (typeof err === "string" ? err : err?.message) || "Erro ao listar scanners." });
+      set({ error: mapError(err, "Não foi possível encontrar scanners.") });
     }
   },
 
@@ -66,7 +67,7 @@ export const useScannerStore = create<ScannerState>((set, get) => ({
         return { pages, currentPage: pages.length - 1, scanning: false };
       });
     } catch (err: any) {
-      set({ error: (typeof err === "string" ? err : err?.message) || "Erro ao digitalizar.", scanning: false });
+      set({ error: mapError(err, "Não foi possível digitalizar o documento."), scanning: false });
     }
   },
 

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { api } from "../../infrastructure/di/container";
+import { mapError } from "../../shared/errors/mapError";
 
 export interface ClassifierResult {
   categoryId: string;
@@ -22,7 +23,7 @@ export function useClassifier() {
       const res = await api.post<{ data: ClassifierResult }>("/classifier/suggest", { text, filename });
       setData(res.data);
     } catch (err: any) {
-      setError(err.message || "Erro ao classificar documento.");
+      setError(mapError(err, "Não foi possível analisar o documento."));
     } finally {
       setLoading(false);
     }

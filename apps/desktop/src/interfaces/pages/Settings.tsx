@@ -8,7 +8,7 @@ import { usePrinterStore } from "../stores/printerStore";
 import { PageHeader, OfflineNotice } from "../components/docid-ui";
 import { useOfflineCache } from "../hooks/useOfflineCache";
 import { useCachedAux } from "../hooks/useCachedAux";
-import { mapError } from "../../shared/errors/mapError";
+import { mapError, friendlyMessage, friendlyPlan, friendlyLicenseState, friendlySubscription, friendlyStatus } from "../../shared/errors/mapError";
 import { sync, api } from "../../infrastructure/di/container";
 import type { WatcherFileRow } from "../../domain/entities/Watcher";
 import { Server, Sun, Moon, Save, RotateCcw, FolderPlus, Trash2, Play, Square, Eye, RefreshCw, Building2, Bell, Download, Smartphone, AlertTriangle, Printer, Mail } from "lucide-react";
@@ -66,7 +66,7 @@ function ServerTab() {
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } else {
-      setSaveError("HTTP só é permitido para localhost — use HTTPS para servidores remotos.");
+      setSaveError("Só é possível ligar sem segurança a este computador. Para outros computadores, use uma ligação segura.");
     }
   };
 
@@ -76,7 +76,7 @@ function ServerTab() {
     setCheckingUpdate(true);
     try {
       if (!sync.isAvailable()) {
-        setUpdateError("Actualizações só estão disponíveis na aplicação desktop.");
+        setUpdateError("As actualizações só estão disponíveis na aplicação instalada no computador.");
         return;
       }
       const { invoke } = await import("@tauri-apps/api/core");
@@ -107,10 +107,10 @@ function ServerTab() {
   return (
     <div className="docid-panel p-6 space-y-6">
       <div>
-        <label className="mb-1.5 block text-xs font-semibold text-docid-muted">URL da API</label>
+        <label className="mb-1.5 block text-xs font-semibold text-docid-muted">Endereço do servidor</label>
         <input value={input} onChange={e => setInput(e.target.value)} className="docid-input w-full font-mono text-sm" placeholder="https://didall.milvendas.ao" />
         {saveError && <p className="mt-1 text-xs text-docid-error">{saveError}</p>}
-        <p className="mt-1 text-xs text-docid-muted">URL actual: <span className="font-mono text-docid-text">{apiBaseUrl}</span></p>
+        <p className="mt-1 text-xs text-docid-muted">Endereço actual: <span className="font-mono text-docid-text">{apiBaseUrl}</span></p>
       </div>
       <div className="flex items-center gap-3">
         <button onClick={handleSave} disabled={!isValid || input === apiBaseUrl} className="docid-button-primary"><Save className="h-4 w-4" /> Guardar</button>
@@ -121,7 +121,7 @@ function ServerTab() {
       <div className="pt-6 space-y-3">
         <div>
           <label className="mb-1.5 block text-xs font-semibold text-docid-muted">Actualizações</label>
-          <p className="text-xs text-docid-muted mb-3">Verifica se existe uma nova versão assinada publicada em GitHub Releases.</p>
+          <p className="text-xs text-docid-muted mb-3">Verifica se existe uma versão mais recente disponível.</p>
           <button onClick={handleCheckUpdate} disabled={checkingUpdate} className="docid-button-secondary">
             <Download className="h-4 w-4" /> {checkingUpdate ? "A verificar..." : "Procurar actualizações"}
           </button>
@@ -255,7 +255,7 @@ function OrganizationTab() {
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch (e: any) {
-      setError(mapError(e, "Erro ao guardar dados da organização."));
+      setError(mapError(e, "Não foi possível guardar os dados da organização."));
     } finally {
       setSaving(false);
     }
@@ -280,7 +280,7 @@ function OrganizationTab() {
       const blob = await api.getBlob(path);
       if (blob) downloadBlob(blob, filename);
     } catch (e: any) {
-      setExportError(e.message === "Erro 429" ? "Limite de exportações excedido (5/hora). Tente novamente dentro de 1 hora." : mapError(e));
+      setExportError(mapError(e, "Não foi possível exportar os dados. Tente novamente mais tarde."));
     } finally {
       setter(false);
     }
@@ -303,25 +303,25 @@ function OrganizationTab() {
           <input value={prefix} onChange={e => setPrefix(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6))} className="docid-input w-full font-mono" maxLength={6} />
         </div>
         <div>
-          <label className="mb-1.5 block text-xs font-semibold text-docid-muted">Slug</label>
+          <label className="mb-1.5 block text-xs font-semibold text-docid-muted">Endereço da organização</label>
           <input value={org?.slug ?? ""} readOnly className="docid-input w-full font-mono bg-docid-surface-low text-docid-muted cursor-not-allowed" />
         </div>
         <div className="rounded-lg border border-docid-border bg-docid-surface-low p-4 space-y-1.5" data-testid="license-details">
           <p className="text-xs font-semibold uppercase tracking-wider text-docid-muted">Licença</p>
           <p className="font-mono text-sm text-docid-text">{license?.licenseNumber ?? "—"}</p>
           <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-            <dt className="text-docid-muted">Plano</dt><dd className="text-docid-text">{license?.plan ?? org?.subscription.planName ?? "—"}</dd>
-            <dt className="text-docid-muted">Estado</dt><dd className="text-docid-text">{license?.state ?? org?.subscription.status ?? "—"}</dd>
+            <dt className="text-docid-muted">Plano</dt><dd className="text-docid-text">{friendlyPlan(license?.plan ?? org?.subscription.planName)}</dd>
+            <dt className="text-docid-muted">Estado</dt><dd className="text-docid-text">{license?.state ? friendlyLicenseState(license.state) : friendlySubscription(org?.subscription.status)}</dd>
             <dt className="text-docid-muted">Validade</dt><dd className="text-docid-text">{license?.validUntil ? new Date(license.validUntil).toLocaleDateString("pt-AO") : "Sem prazo"}</dd>
             <dt className="text-docid-muted">Utilizadores</dt><dd className="text-docid-text">{license ? `${license.activeUsers}/${license.maxUsers ?? "∞"}` : "—"}</dd>
           </dl>
           <div className="border-t border-docid-border pt-3 space-y-1.5">
-            <p className="text-xs font-semibold uppercase tracking-wider text-docid-muted">Registo legado</p>
+            <p className="text-xs font-semibold uppercase tracking-wider text-docid-muted">Dados antigos</p>
             <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs" data-testid="legacy-license-details">
               <dt className="text-docid-muted">Número</dt><dd className="text-docid-text font-mono">{legacyLicense?.licenseNumber ?? "—"}</dd>
-              <dt className="text-docid-muted">Estado</dt><dd className="text-docid-text">{legacyLicense?.state ?? "—"}</dd>
-              <dt className="text-docid-muted">Situação</dt><dd className="text-docid-text">{legacyLicense?.status ?? "—"}</dd>
-              <dt className="text-docid-muted">Plano</dt><dd className="text-docid-text">{legacyLicense?.planName ?? "—"}</dd>
+              <dt className="text-docid-muted">Estado</dt><dd className="text-docid-text">{friendlyLicenseState(legacyLicense?.state)}</dd>
+              <dt className="text-docid-muted">Situação</dt><dd className="text-docid-text">{friendlySubscription(legacyLicense?.status)}</dd>
+              <dt className="text-docid-muted">Plano</dt><dd className="text-docid-text">{friendlyPlan(legacyLicense?.planName)}</dd>
               <dt className="text-docid-muted">Validade</dt><dd className="text-docid-text">{legacyLicense?.validUntil ? new Date(legacyLicense.validUntil).toLocaleDateString("pt-AO") : "Sem prazo"}</dd>
               <dt className="text-docid-muted">Limite</dt><dd className="text-docid-text">{legacyLicense?.maxUsers ?? "∞"}</dd>
             </dl>
@@ -342,8 +342,8 @@ function OrganizationTab() {
         {exportError && <p className="text-xs text-docid-error">{exportError}</p>}
         <p className="text-xs text-docid-muted">Limite de 5 exportações por hora.</p>
         <div className="flex gap-3 flex-wrap">
-          <button onClick={() => handleExport("audit")} disabled={exportingAudit} className="docid-button-secondary"><Download className="h-4 w-4" /> {exportingAudit ? "A exportar..." : "Exportar auditoria (CSV)"}</button>
-          <button onClick={() => handleExport("stats")} disabled={exportingStats} className="docid-button-secondary"><Download className="h-4 w-4" /> {exportingStats ? "A exportar..." : "Exportar estatísticas (JSON)"}</button>
+          <button onClick={() => handleExport("audit")} disabled={exportingAudit} className="docid-button-secondary"><Download className="h-4 w-4" /> {exportingAudit ? "A exportar..." : "Exportar auditoria"}</button>
+          <button onClick={() => handleExport("stats")} disabled={exportingStats} className="docid-button-secondary"><Download className="h-4 w-4" /> {exportingStats ? "A exportar..." : "Exportar estatísticas"}</button>
         </div>
       </div>
     </div>
@@ -454,7 +454,7 @@ function DevicesTab() {
   };
 
   const handleDeactivate = async (device: DeviceRow) => {
-    if (!confirm(`Tem a certeza que deseja desactivar o dispositivo "${device.name}"?\n\nEsta acção impede que o dispositivo gere novos identificadores offline. As leases activas neste dispositivo não serão afectadas.`)) return;
+    if (!confirm(`Tem a certeza que deseja desactivar o dispositivo «${device.name}»?\n\nDeixa de ser possível gerar identificadores offline nele. As reservas de números já existentes não são afectadas.`)) return;
 
     setDeactivating(device.id);
     setWriteError("");
@@ -462,7 +462,7 @@ function DevicesTab() {
       await api.patch(`/devices/${device.id}/deactivate`, {});
       await handleRefresh();
     } catch (e: any) {
-      setWriteError(mapError(e, "Erro ao desactivar dispositivo."));
+      setWriteError(mapError(e, "Não foi possível desactivar o dispositivo."));
     } finally {
       setDeactivating(null);
     }
@@ -475,7 +475,7 @@ function DevicesTab() {
       await api.patch(`/devices/${device.id}`, { sectorId: value || null });
       await handleRefresh();
     } catch (e: any) {
-      setWriteError(mapError(e, "Erro ao alterar o sector do dispositivo."));
+      setWriteError(mapError(e, "Não foi possível alterar o sector do dispositivo."));
     } finally {
       setSectorSaving(null);
     }
@@ -488,16 +488,16 @@ function DevicesTab() {
     setReleaseInfo(null);
     try {
       const res = await api.post<{ data: { message: string } }>("/identifiers/release", { leaseId: lease.id });
-      setReleaseInfo({ leaseId: lease.id, message: res?.data?.message ?? "Identificadores não usados libertados." });
+      setReleaseInfo({ leaseId: lease.id, message: friendlyMessage(res?.data?.message, "Números não usados libertados.") });
     } catch (e: any) {
-      setWriteError(mapError(e, "Erro ao libertar identificadores não usados."));
+      setWriteError(mapError(e, "Não foi possível libertar os números não usados."));
     } finally {
       setReleasingUnused(null);
     }
   };
 
   const handleForceRelease = async (lease: LeaseRow) => {
-    if (!confirm(`Tem a certeza? Esta acção é irreversível.\n\nLease: ${lease.id}\nCategoria: ${lease.category_id}\nSector: ${lease.sector_id}\nIntervalo: ${lease.start_seq}–${lease.end_seq}\n\nOs identificadores pendentes associados a este lease serão marcados como conflito.`)) return;
+    if (!confirm("Tem a certeza? Esta acção é irreversível.\n\nOs números reservados para esta categoria e sector serão libertados. Os identificadores pendentes associados passarão a exigir confirmação manual.")) return;
 
     setReleasing(lease.id);
     setWriteError("");
@@ -511,7 +511,7 @@ function DevicesTab() {
 
       await handleRefresh();
     } catch (e: any) {
-      setWriteError(mapError(e, "Erro ao forçar libertação."));
+      setWriteError(mapError(e, "Não foi possível libertar a reserva de números."));
     } finally {
       setReleasing(null);
     }
@@ -649,14 +649,14 @@ function DevicesTab() {
 
           <div className="docid-panel p-6 space-y-6">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-docid-text">Leases Locais</h3>
+              <h3 className="text-sm font-semibold text-docid-text">Reservas de números</h3>
             </div>
 
             {leases.length === 0 ? (
               <div className="flex flex-col items-center gap-3 py-8 text-center">
                 <Smartphone className="h-8 w-8 text-docid-outline" />
-                <p className="text-sm text-docid-muted">Nenhum lease encontrado neste dispositivo.</p>
-                <p className="text-xs text-docid-muted">Os leases são criados automaticamente ao gerar identificadores offline para categorias fiscais.</p>
+                <p className="text-sm text-docid-muted">Nenhuma reserva de números neste dispositivo.</p>
+                <p className="text-xs text-docid-muted">As reservas são criadas automaticamente ao gerar identificadores offline para documentos fiscais.</p>
               </div>
             ) : (
               <div className="space-y-3">
@@ -666,8 +666,8 @@ function DevicesTab() {
                     <div key={lease.id} className="rounded-lg border border-docid-border p-4 space-y-3">
                       <div className="flex items-start justify-between gap-4">
                         <div className="min-w-0 flex-1">
-                          <p className="text-xs font-mono text-docid-text break-all">{lease.id}</p>
-                          <p className="mt-1 text-sm font-medium">{lease.category_id} · Sector {lease.sector_id}</p>
+                          <p className="text-xs font-semibold text-docid-text">Reserva de números</p>
+                          <p className="mt-1 text-sm font-medium">{lease.category_id}</p>
                         </div>
                         <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ${
                           lease.status === "active" ? "bg-emerald-500/15 text-emerald-500" :
@@ -675,7 +675,7 @@ function DevicesTab() {
                           lease.status === "remote_released" ? "bg-amber-500/15 text-amber-500" :
                           "bg-docid-muted/10 text-docid-muted"
                         }`}>
-                          {lease.status === "active" ? "Activo" : lease.status === "exhausted" ? "Esgotado" : lease.status === "remote_released" ? "Libertado" : lease.status}
+                          {friendlyStatus(lease.status)}
                         </span>
                       </div>
                       <div className="grid grid-cols-3 gap-3 text-xs">
@@ -722,9 +722,9 @@ function DevicesTab() {
             <div className="flex items-start gap-3">
               <AlertTriangle className="h-5 w-5 shrink-0 text-amber-500 mt-0.5" />
               <div className="text-xs text-docid-muted">
-                <p className="font-medium text-amber-500 mb-1">Forçar libertação de um lease</p>
-                <p>Usado quando um dispositivo foi perdido ou nunca mais será reconectado. Liberta os números não usados de volta ao pool da organização, permitindo que outros dispositivos os reutilizem.</p>
-                <p className="mt-1">Os identificadores pendentes associados a este lease serão marcados como conflito e precisarão de resolução manual.</p>
+                <p className="font-medium text-amber-500 mb-1">Libertar uma reserva de números</p>
+                <p>Usado quando um dispositivo foi perdido ou nunca mais será reconectado. Devolve os números não usados à organização, permitindo que outros dispositivos os reutilizem.</p>
+                <p className="mt-1">Os identificadores pendentes associados precisarão de confirmação manual.</p>
                 <p className="mt-1"><strong>Esta acção é irreversível.</strong></p>
               </div>
             </div>
@@ -775,17 +775,17 @@ function NotificationsTab() {
     { key: "approval_pending", label: "Aprovação pendente", desc: "Quando um documento necessita da sua aprovação" },
     { key: "approval_resolved", label: "Aprovação resolvida", desc: "Quando uma aprovação foi concedida ou rejeitada" },
     { key: "document_shared", label: "Documento partilhado", desc: "Quando um documento é partilhado consigo ou com o seu sector" },
-    { key: "sync_complete", label: "Sync completo", desc: "Quando a fila offline envia documentos com sucesso" },
-    { key: "sync_failed", label: "Falha de sync", desc: "Quando um upload da fila offline falha" },
-    { key: "queue_enqueued", label: "Enfileirado offline", desc: "Quando um documento é guardado na fila por falta de rede" },
-    { key: "write_enqueued", label: "Escrita pendente", desc: "Quando uma alteração de dados fica na fila de escritas offline" },
-    { key: "watcher_detected", label: "Ficheiro detectado pelo watcher", desc: "Quando um novo ficheiro é detectado na pasta vigiada" },
+    { key: "sync_complete", label: "Sincronização concluída", desc: "Quando os ficheiros guardados são enviados com sucesso" },
+    { key: "sync_failed", label: "Falha na sincronização", desc: "Quando um ficheiro guardado não é enviado" },
+    { key: "queue_enqueued", label: "Ficheiro guardado para envio", desc: "Quando um ficheiro é guardado por falta de ligação" },
+    { key: "write_enqueued", label: "Alteração pendente", desc: "Quando uma alteração fica guardada até haver ligação" },
+    { key: "watcher_detected", label: "Novo ficheiro detectado", desc: "Quando aparece um ficheiro novo na pasta vigiada" },
   ];
 
   return (
     <div className="docid-panel p-6 space-y-6">
       <h3 className="text-sm font-semibold text-docid-text">Preferências de Notificação</h3>
-      <p className="text-xs text-docid-muted">Seleccione para que eventos pretende ser notificado. Eventos de fila/watcher usam notificações nativas do sistema (Tauri).</p>
+      <p className="text-xs text-docid-muted">Seleccione os avisos que pretende receber. Alguns aparecem directamente no computador.</p>
       {isStale && <OfflineNotice cachedAt={cachedAt} onRetry={refresh} />}
       {error && <p className="text-xs text-docid-error">{error}</p>}
       {items.map(({ key, label, desc }) => (
@@ -959,12 +959,16 @@ function WatcherTab() {
         </div>
       )}
 
-      <p className="text-xs text-docid-muted">Com identificador, «Adicionar agora» anexa já (ou enfileira se estiver offline). Sem identificador, abre Documentos para completar o anexo.</p>
+      <p className="text-xs text-docid-muted">Quando encontra um identificador, «Adicionar agora» anexa o ficheiro (ou guarda-o para envio se não houver ligação). Sem identificador, abre Documentos para completar o anexo.</p>
     </div>
   );
 }
 
 /* ── E-mail dos alertas (configuração por organização) ── */
+
+const EMAIL_PROVIDER_LABELS: Record<string, string> = {
+  smtp: "Servidor da empresa", resend: "Serviço de e-mail A", sendgrid: "Serviço de e-mail B",
+};
 
 export type EmailForm = {
   provider: "smtp" | "resend" | "sendgrid";
@@ -1011,7 +1015,6 @@ const emptyEmailForm: EmailForm = {
 function EmailTab() {
   const [form, setForm] = useState<EmailForm>(emptyEmailForm);
   const [settings, setSettings] = useState<EmailSettingsView | null>(null);
-  const [fallback, setFallback] = useState<string>("platform");
   const [logs, setLogs] = useState<EmailLog[]>([]);
   const [testTo, setTestTo] = useState("");
   const [busy, setBusy] = useState("");
@@ -1025,7 +1028,6 @@ function EmailTab() {
         api.get<{ data: EmailLog[] }>("/email/logs?limit=20"),
       ]);
       setSettings(s.data.settings);
-      setFallback(s.data.fallbackMode);
       setLogs(l.data);
       if (s.data.settings) {
         const v = s.data.settings;
@@ -1043,7 +1045,7 @@ function EmailTab() {
   const run = async (action: string, fn: () => Promise<unknown>, ok: string) => {
     setBusy(action); setError(""); setMessage("");
     try { await fn(); setMessage(ok); await load(); }
-    catch (err: any) { setError(mapError(err, "Falha ao guardar/configurar o e-mail.")); }
+    catch (err: any) { setError(mapError(err, "Não foi possível guardar a configuração de e-mail.")); }
     finally { setBusy(""); }
   };
 
@@ -1053,14 +1055,14 @@ function EmailTab() {
     <div className="space-y-5" data-testid="email-settings">
       <div>
         <h3 className="text-sm font-semibold text-docid-text">Alertas por e-mail</h3>
-        <p className="text-xs text-docid-muted">Configure o envio de avisos quando um documento é aprovado ou partilhado. Sem configuração própria, a empresa usa o modo «{fallback}».</p>
+        <p className="text-xs text-docid-muted">Configure o envio de avisos quando um documento é aprovado ou partilhado. Sem configuração própria, os avisos são enviados pela DocID.</p>
       </div>
 
       <div className="docid-panel p-4 space-y-3">
         <div className="grid grid-cols-2 gap-3">
           <label className="text-xs text-docid-muted">Fornecedor
             <select data-testid="email-provider" className="docid-input mt-1 w-full" value={form.provider} onChange={e => set("provider", e.target.value as EmailForm["provider"])}>
-              <option value="smtp">SMTP</option><option value="resend">Resend</option><option value="sendgrid">SendGrid</option>
+              <option value="smtp">Servidor da empresa</option><option value="resend">Serviço de e-mail A</option><option value="sendgrid">Serviço de e-mail B</option>
             </select>
           </label>
           <label className="text-xs text-docid-muted">Remetente (e-mail)
@@ -1076,7 +1078,7 @@ function EmailTab() {
 
         {form.provider === "smtp" && (
           <div className="grid grid-cols-2 gap-3">
-            <label className="text-xs text-docid-muted">Servidor SMTP
+            <label className="text-xs text-docid-muted">Endereço do servidor de e-mail
               <input data-testid="email-smtp-host" className="docid-input mt-1 w-full" value={form.smtpHost} onChange={e => set("smtpHost", e.target.value)} />
             </label>
             <label className="text-xs text-docid-muted">Porta
@@ -1084,18 +1086,18 @@ function EmailTab() {
             </label>
             <label className="text-xs text-docid-muted">Segurança
               <select className="docid-input mt-1 w-full" value={form.smtpSecurity} onChange={e => set("smtpSecurity", e.target.value as EmailForm["smtpSecurity"])}>
-                <option value="starttls">STARTTLS</option><option value="ssl">SSL/TLS</option><option value="none">Nenhuma</option>
+                <option value="starttls">Segurança padrão</option><option value="ssl">Segurança reforçada</option><option value="none">Sem segurança</option>
               </select>
             </label>
-            <label className="text-xs text-docid-muted">Utilizador SMTP
+            <label className="text-xs text-docid-muted">Utilizador do servidor
               <input className="docid-input mt-1 w-full" value={form.smtpUser} onChange={e => set("smtpUser", e.target.value)} />
             </label>
           </div>
         )}
 
-        <label className="block text-xs text-docid-muted">Palavra-passe / chave de API
+        <label className="block text-xs text-docid-muted">Palavra-passe ou chave de acesso
           <input data-testid="email-secret" type="password" className="docid-input mt-1 w-full" value={form.secret} onChange={e => set("secret", e.target.value)}
-            placeholder={settings?.hasSecret ? "Já guardada — deixe vazio para manter" : "Obrigatório para Resend/SendGrid"} />
+            placeholder={settings?.hasSecret ? "Já guardada — deixe vazio para manter" : "Obrigatório para serviços externos"} />
         </label>
         <label className="flex items-center gap-2 text-xs text-docid-text">
           <input type="checkbox" checked={form.enabled} onChange={e => set("enabled", e.target.checked)} /> Activar notificações
@@ -1109,11 +1111,11 @@ function EmailTab() {
             <Mail className="h-4 w-4" /> Enviar teste
           </button>
           <input className="docid-input w-56" value={testTo} onChange={e => setTestTo(e.target.value)} placeholder="destinatario@empresa.ao" />
-          {settings && <button disabled={!!busy} className="docid-button-secondary text-docid-error" onClick={() => run("remover", () => api.delete("/email/settings"), "Configuração removida; modo plataforma.")}><Trash2 className="h-4 w-4" /> Remover</button>}
+          {settings && <button disabled={!!busy} className="docid-button-secondary text-docid-error" onClick={() => run("remover", () => api.delete("/email/settings"), "Configuração removida. Os avisos voltam a ser enviados pela DocID.")}><Trash2 className="h-4 w-4" /> Remover</button>}
         </div>
         {message && <p data-testid="email-message" className="text-xs text-docid-secondary">{message}</p>}
         {error && <p className="text-xs text-docid-error">{error}</p>}
-        {settings?.lastTestError && <p className="text-xs text-docid-error">Último teste falhou: {settings.lastTestError}</p>}
+        {settings?.lastTestError && <p className="text-xs text-docid-error">O último e-mail de teste não foi enviado. Verifique a configuração.</p>}
       </div>
 
       <div>
@@ -1124,10 +1126,10 @@ function EmailTab() {
               <div key={l.id} data-testid="email-log-row" className="flex items-center justify-between gap-3 px-4 py-2">
                 <div className="min-w-0">
                   <p className="truncate text-sm text-docid-text">{l.subject} <span className="text-docid-muted">→ {l.recipientEmail}</span></p>
-                  <p className="text-xs text-docid-muted">{new Date(l.createdAt).toLocaleString("pt-AO")} · {l.status} · {l.provider ?? "—"}</p>
+                  <p className="text-xs text-docid-muted">{new Date(l.createdAt).toLocaleString("pt-AO")} · {friendlyStatus(l.status)} · {EMAIL_PROVIDER_LABELS[l.provider ?? ""] ?? "Serviço da DocID"}</p>
                 </div>
                 {(l.status === "failed" || l.status === "skipped") && l.eventType !== "test" && (
-                  <button disabled={!!busy} className="docid-button-secondary text-xs py-1" onClick={() => run("reenviar", () => api.post(`/email/logs/${l.id}/retry`), "E-mail reenfileirado.")}>Reenviar</button>
+                  <button disabled={!!busy} className="docid-button-secondary text-xs py-1" onClick={() => run("reenviar", () => api.post(`/email/logs/${l.id}/retry`), "E-mail marcado para reenvio.")}>Reenviar</button>
                 )}
               </div>
             ))}

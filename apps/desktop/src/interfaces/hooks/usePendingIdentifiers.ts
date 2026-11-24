@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from "react";
+import { mapError } from "../../shared/errors/mapError";
 
 export interface PendingIdentifier {
   id: string;
@@ -21,15 +22,15 @@ export interface PendingIdentifier {
 }
 
 const CONFLICT_LABELS: Record<string, string> = {
-  LEASE_FORCE_RELEASED: "Lease revogado por administrador",
-  LEASE_EXPIRED: "Lease expirou",
-  OUT_OF_ORDER: "Sequência fora de ordem",
+  LEASE_FORCE_RELEASED: "Reserva de números cancelada pelo administrador",
+  LEASE_EXPIRED: "A reserva de números expirou",
+  OUT_OF_ORDER: "Números fora de ordem",
   CATEGORY_CHANGED: "Categoria alterada",
-  SERVER_REJECTED: "Rejeitado pelo servidor",
+  SERVER_REJECTED: "Não aceite pelo servidor",
 };
 
 export function conflictLabel(reason: string | null): string {
-  return reason ? CONFLICT_LABELS[reason] || reason : "";
+  return reason ? CONFLICT_LABELS[reason] ?? "Situação não identificada" : "";
 }
 
 export function usePendingIdentifiers() {
@@ -45,7 +46,7 @@ export function usePendingIdentifiers() {
       const result = await invoke<PendingIdentifier[]>("get_pending_identifiers");
       setItems(result);
     } catch (e: any) {
-      setError(e.message || "Erro ao carregar pendentes.");
+      setError(mapError(e, "Não foi possível carregar os identificadores pendentes."));
     } finally {
       setLoading(false);
     }

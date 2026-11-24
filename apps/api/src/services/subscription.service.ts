@@ -70,7 +70,7 @@ export async function getFreePlan(executor?: DB): Promise<typeof plans.$inferSel
   const [plan] = await (executor ?? db).select().from(plans)
     .where(eq(plans.isFree, true))
     .limit(1);
-  if (!plan) throw new Error("Plano free não encontrado. Corra o seed primeiro.");
+  if (!plan) throw new Error("Não foi possível iniciar a renovação. Contacte o suporte.");
   return plan;
 }
 
@@ -86,7 +86,7 @@ export async function checkUserLimit(tenantId: string, executor?: DB): Promise<L
     return row.n >= maxUsers
       ? {
         code: "SUBSCRIPTION_USER_LIMIT",
-        message: "O limite de utilizadores do seu plano foi atingido. Faça upgrade para convidar mais.",
+        message: "O limite de utilizadores do seu plano foi atingido. Actualize o plano para convidar mais utilizadores.",
       }
       : null;
   });
@@ -107,7 +107,7 @@ export async function checkIdentifierQuota(tenantId: string, executor?: DB, isAd
     return row.n >= plan.monthlyOnlineIdentifiers
       ? {
         code: "IDENTIFIER_QUOTA_EXCEEDED",
-        message: "O limite mensal de identificadores do seu plano foi atingido. Faça upgrade para continuar.",
+        message: "O limite mensal de identificadores do seu plano foi atingido. Actualize o plano para continuar.",
       }
       : null;
   });
@@ -139,7 +139,7 @@ export async function checkUploadLimit(
         gte(documentVersions.createdAt, today),
       ));
     return docs.n + versions.n >= 1
-      ? { code: "UPLOAD_LIMIT_REACHED", message: "Subscrição expirada: limite de 1 upload por dia." }
+      ? { code: "UPLOAD_LIMIT_REACHED", message: "A subscrição expirou. Só é possível enviar um ficheiro por dia." }
       : null;
   });
 }

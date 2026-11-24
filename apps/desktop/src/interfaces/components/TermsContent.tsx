@@ -10,12 +10,12 @@ export default function TermsContent() {
         <h3 className="mb-2 font-semibold text-docid-text">1. Introdução e Aceitação</h3>
         <p className="text-docid-muted">
           Estes Termos e Condições de Uso ("Termos") regulam o acesso e a utilização da plataforma DocID
-          ("Plataforma", "Serviço"), incluindo a aplicação desktop, os componentes de sincronização, a API
-          e quaisquer serviços associados, desenvolvidos e operados pela VeranoLabs ("nós", "nossa empresa").
+          ("Plataforma", "Serviço"), incluindo a aplicação no computador, a sincronização
+          e os serviços associados, desenvolvidos e operados pela VeranoLabs ("nós", "nossa empresa").
         </p>
         <p className="mt-2 text-docid-muted">
-          Ao criar uma conta, instalar a aplicação desktop ou utilizar o Serviço em nome de uma organização
-          ("Cliente", "Organização", "Tenant"), o utilizador declara ter lido, compreendido e aceite estes
+          Ao criar uma conta, instalar a aplicação no computador ou utilizar o Serviço em nome de uma organização
+          ("Cliente", "Organização"), o utilizador declara ter lido, compreendido e aceite estes
           Termos, em nome próprio e, se aplicável, em representação da Organização que o autorizou a agir.
           Se não concordar com algum destes Termos, não deve utilizar o Serviço.
         </p>
@@ -24,11 +24,11 @@ export default function TermsContent() {
       <section>
         <h3 className="mb-2 font-semibold text-docid-text">2. Definições</h3>
         <ul className="list-disc space-y-1 pl-5 text-docid-muted">
-          <li><strong>Tenant/Organização:</strong> entidade empresarial que subscreve o Serviço e cujos dados são isolados logicamente das restantes organizações.</li>
-          <li><strong>Utilizador:</strong> pessoa singular com uma conta activa associada a um Tenant.</li>
-          <li><strong>Sector:</strong> unidade organizacional interna do Tenant à qual são atribuídas permissões (RBAC) e visibilidade de documentos.</li>
+          <li><strong>Organização:</strong> entidade empresarial que subscreve o Serviço e cujos dados estão separados dos das restantes organizações.</li>
+          <li><strong>Utilizador:</strong> pessoa singular com uma conta activa associada a uma organização.</li>
+          <li><strong>Sector:</strong> unidade interna da organização à qual são atribuídas permissões e visibilidade de documentos.</li>
           <li><strong>Identificador Fiscalmente Válido:</strong> número sequencial e cronológico atribuído a documentos de categorias fiscais (ex.: Factura, Recibo, Nota de Crédito/Débito), em conformidade com o Decreto Presidencial n.º 292/18 e o Decreto Presidencial n.º 71/25.</li>
-          <li><strong>Dispositivo:</strong> computador ou equipamento onde a aplicação desktop está instalada e registada junto de um Tenant.</li>
+          <li><strong>Dispositivo:</strong> computador onde a aplicação está instalada e registada junto da organização.</li>
           <li><strong>Documento:</strong> qualquer ficheiro, registo ou identificador criado, digitalizado, importado ou processado através do Serviço.</li>
         </ul>
       </section>
@@ -39,13 +39,13 @@ export default function TermsContent() {
           O DocID é uma plataforma de gestão de documentos empresariais que fornece, entre outras funcionalidades:
         </p>
         <ul className="list-disc space-y-1 pl-5 text-docid-muted">
-          <li>Multi-tenancy com isolamento de dados reforçado ao nível da base de dados;</li>
+          <li>Separação reforçada dos dados de cada organização;</li>
           <li>Geração de identificadores fiscalmente válidos, incluindo em modo offline;</li>
           <li>Sincronização automática de documentos e identificadores gerados sem ligação à internet;</li>
           <li>Vigilância de pastas locais para detecção de identificadores em ficheiros;</li>
           <li>Integração com scanner para digitalização de documentos físicos;</li>
           <li>Classificação de documentos assistida por Inteligência Artificial;</li>
-          <li>Controlo de acesso baseado em papéis (RBAC) e por sector;</li>
+          <li>Controlo de acesso por função e por sector;</li>
           <li>Registo de auditoria das acções realizadas na Plataforma.</li>
         </ul>
       </section>
@@ -53,7 +53,7 @@ export default function TermsContent() {
       <section>
         <h3 className="mb-2 font-semibold text-docid-text">4. Contas, Registo e Segurança de Acesso</h3>
         <p className="text-docid-muted">
-          4.1. O acesso ao Serviço depende da criação de uma conta associada a um Tenant e de credenciais de autenticação válidas.
+          4.1. O acesso ao Serviço depende da criação de uma conta associada a uma organização e de credenciais válidas.
         </p>
         <p className="mt-2 text-docid-muted">
           4.2. O Utilizador é responsável por manter a confidencialidade das suas credenciais e por todas as actividades realizadas através da sua conta.
@@ -62,7 +62,7 @@ export default function TermsContent() {
           4.3. O Utilizador compromete-se a notificar-nos de imediato em caso de suspeita de acesso não autorizado à sua conta ou a um Dispositivo registado.
         </p>
         <p className="mt-2 text-docid-muted">
-          4.4. Os administradores da Organização (ORG_ADMIN) são responsáveis pela correcta atribuição de papéis, sectores e permissões aos demais Utilizadores, bem como pela gestão dos pedidos de acesso a documentos restritos.
+          4.4. Os administradores da Organização são responsáveis pela correcta atribuição de papéis, sectores e permissões aos demais Utilizadores, bem como pela gestão dos pedidos de acesso a documentos restritos.
         </p>
       </section>
 
@@ -95,10 +95,10 @@ export default function TermsContent() {
       <section>
         <h3 className="mb-2 font-semibold text-docid-text">7. Classificação de Documentos por Inteligência Artificial</h3>
         <p className="text-docid-muted">
-          7.1. O Serviço pode sugerir automaticamente a categoria de um documento com recurso a um modelo de IA fornecido por um prestador terceiro. Esta sugestão constitui um auxílio à decisão e não substitui a verificação humana.
+          7.1. O Serviço pode sugerir automaticamente a categoria de um documento com recurso a um modelo de inteligência artificial fornecido por um prestador terceiro. Esta sugestão constitui um auxílio à decisão e não substitui a verificação humana.
         </p>
         <p className="mt-2 text-docid-muted">
-          7.2. O Cliente e os seus Utilizadores mantêm sempre a responsabilidade final pela categorização, tratamento e arquivo correcto dos documentos, independentemente da sugestão gerada pela IA.
+          7.2. O Cliente e os seus Utilizadores mantêm sempre a responsabilidade final pela categorização, tratamento e arquivo correcto dos documentos, independentemente da sugestão gerada pelo sistema.
         </p>
         <p className="mt-2 text-docid-muted">
           7.3. Informações adicionais sobre o tratamento de dados no âmbito desta funcionalidade constam da nossa Política de Privacidade.
@@ -118,7 +118,7 @@ export default function TermsContent() {
         <ul className="list-disc space-y-1 pl-5 text-docid-muted">
           <li>Utilizar o Serviço em conformidade com a lei aplicável e com estes Termos;</li>
           <li>Não carregar, processar ou distribuir através do Serviço conteúdo ilícito, fraudulento ou que viole direitos de terceiros;</li>
-          <li>Não tentar contornar os mecanismos de isolamento entre Tenants, RBAC ou auditoria;</li>
+          <li>Não tentar contornar a separação entre organizações, as permissões ou a auditoria;</li>
           <li>Assegurar a exactidão dos dados inseridos na Plataforma, incluindo dados fiscais e de identificação de documentos;</li>
           <li>Cumprir as obrigações legais aplicáveis em matéria fiscal, contabilística e de protecção de dados pessoais relativamente aos documentos que gere através do Serviço.</li>
         </ul>
@@ -137,7 +137,7 @@ export default function TermsContent() {
       <section>
         <h3 className="mb-2 font-semibold text-docid-text">11. Disponibilidade do Serviço</h3>
         <p className="text-docid-muted">
-          Envidamos esforços comercialmente razoáveis para manter o Serviço disponível e operacional, mas não garantimos disponibilidade ininterrupta. Poderão ocorrer períodos de indisponibilidade para manutenção, actualização ou por motivos alheios ao nosso controlo. A funcionalidade offline-first foi desenhada precisamente para mitigar o impacto de indisponibilidade de rede no lado do Cliente, mas não elimina totalmente os riscos associados a falhas técnicas.
+          Envidamos esforços comercialmente razoáveis para manter o Serviço disponível e operacional, mas não garantimos disponibilidade ininterrupta. Poderão ocorrer períodos de indisponibilidade para manutenção, actualização ou por motivos alheios ao nosso controlo. A aplicação foi desenhada para continuar a funcionar quando a ligação à internet falha, mas não elimina totalmente os riscos associados a falhas técnicas.
         </p>
       </section>
 
@@ -184,14 +184,6 @@ export default function TermsContent() {
           Para questões relacionadas com estes Termos, contacte-nos através de: nzilalabs@gmail.com.
         </p>
       </section>
-
-      <div className="border-t border-docid-border pt-4 text-xs text-docid-muted">
-        <p>
-          Este documento é um modelo base e deve ser revisto por um jurista antes da sua publicação e
-          entrada em vigor, de forma a assegurar plena conformidade com a legislação angolana aplicável,
-          incluindo em matéria fiscal e de protecção de dados pessoais.
-        </p>
-      </div>
     </div>
   );
 }

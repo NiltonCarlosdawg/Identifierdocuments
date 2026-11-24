@@ -4,7 +4,7 @@ import { api } from "../../infrastructure/di/container";
 import { PageHeader, Modal, StatusChip, EmptyState, OfflineNotice } from "../components/docid-ui";
 import { useOfflineCache } from "../hooks/useOfflineCache";
 import { useCachedAux } from "../hooks/useCachedAux";
-import { mapError } from "../../shared/errors/mapError";
+import { mapError, friendlyRole } from "../../shared/errors/mapError";
 import { useAuthStore } from "../stores/authStore";
 import { Search, Plus, Shield, RefreshCw, Upload, Download, CheckCircle2, AlertTriangle, Ban, Mail, Eye, X } from "lucide-react";
 
@@ -74,7 +74,7 @@ export default function Users() {
       <PageHeader title="Utilizadores" description="Gerir contas de utilizador da organização" actions={
         <div className="flex gap-2">
           {canManage && <button onClick={() => setShowInvite(true)} className="docid-button-secondary"><Mail className="h-4 w-4" /> Convidar</button>}
-          {isAdmin && <button onClick={() => setShowImport(true)} className="docid-button-secondary"><Upload className="h-4 w-4" /> Importar CSV</button>}
+          {isAdmin && <button onClick={() => setShowImport(true)} className="docid-button-secondary"><Upload className="h-4 w-4" /> Importar lista</button>}
           {canManage && <button onClick={() => setShowCreate(true)} className="docid-button-primary"><Plus className="h-4 w-4" /> Criar utilizador</button>}
         </div>
       } />
@@ -99,7 +99,7 @@ export default function Users() {
                   <th className="w-48">Nome</th>
                   <th className="w-48">Email</th>
                   <th className="w-32">Sector</th>
-                  <th className="w-32">Roles</th>
+                  <th className="w-32">Funções de acesso</th>
                   <th className="w-32">Estado</th>
                   <th className="w-32">Criado em</th>
                   <th className="w-24 text-right"></th>
@@ -111,7 +111,7 @@ export default function Users() {
                     <td className="font-medium text-docid-text">{row.fullName}</td>
                     <td className="text-xs text-docid-muted">{row.email}</td>
                     <td className="text-xs text-docid-text">{row.sectorName || "-"}</td>
-                    <td><div className="flex flex-wrap gap-1">{(row.roles || []).map(r => <span key={r.id} className="rounded-full bg-docid-primary/10 px-2 py-0.5 text-[10px] font-medium text-docid-primary-soft">{r.name}</span>)}</div></td>
+                    <td><div className="flex flex-wrap gap-1">{(row.roles || []).map(r => <span key={r.id} className="rounded-full bg-docid-primary/10 px-2 py-0.5 text-[10px] font-medium text-docid-primary-soft">{friendlyRole(r.name)}</span>)}</div></td>
                     <td><StatusChip tone={row.isActive ? "success" : "error"}>{row.isActive ? "Activo" : "Inactivo"}</StatusChip></td>
                     <td className="text-xs text-docid-muted">{new Date(row.createdAt).toLocaleDateString("pt-AO")}</td>
                     <td className="text-right flex gap-1">
@@ -123,7 +123,7 @@ export default function Users() {
               </tbody>
             </table>
             <div className="mt-4 flex items-center justify-between border-t border-docid-border px-4 py-3 text-sm text-docid-muted">
-              <span>{meta?.total ?? 0} utilizador(es)</span>
+              <span>{meta?.total ?? 0} utilizadores</span>
             </div>
           </>
         )}
@@ -150,7 +150,7 @@ function CreateUserModal({ sectors, onClose, onDone }: { sectors: Sector[]; onCl
     try {
       await api.post("/users", { fullName: fullName.trim(), email: email.trim(), password, sectorId: sectorId || undefined });
       onDone();
-    } catch (err: any) { setError(mapError(err, "Erro ao criar utilizador.")); } finally { setLoading(false); }
+    } catch (err: any) { setError(mapError(err, "Não foi possível criar o utilizador.")); } finally { setLoading(false); }
   };
 
   return (
@@ -158,7 +158,7 @@ function CreateUserModal({ sectors, onClose, onDone }: { sectors: Sector[]; onCl
       <div className="space-y-4">
         {error && <div className="rounded-lg border border-docid-error/30 bg-docid-error/10 p-3 text-sm text-docid-error">{error}</div>}
         <div><label className="mb-1.5 block text-xs font-semibold text-docid-muted">Nome completo</label><input value={fullName} onChange={e => setFullName(e.target.value)} className="docid-input w-full" placeholder="Ex: Maria Santos" autoFocus /></div>
-        <div><label className="mb-1.5 block text-xs font-semibold text-docid-muted">Email</label><input type="email" value={email} onChange={e => setEmail(e.target.value)} className="docid-input w-full" placeholder="maria@empresa.com" /></div>
+        <div><label className="mb-1.5 block text-xs font-semibold text-docid-muted">E-mail</label><input type="email" value={email} onChange={e => setEmail(e.target.value)} className="docid-input w-full" placeholder="maria@empresa.com" /></div>
         <div><label className="mb-1.5 block text-xs font-semibold text-docid-muted">Palavra-passe <span className="font-normal text-docid-outline">(mín. 6 caracteres)</span></label><input type="password" value={password} onChange={e => setPassword(e.target.value)} className="docid-input w-full" placeholder="••••••••" /></div>
         <div><label className="mb-1.5 block text-xs font-semibold text-docid-muted">Sector</label><select value={sectorId} onChange={e => setSectorId(e.target.value)} className="docid-input w-full"><option value="">Seleccionar sector...</option>{sectors.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
       </div>
@@ -186,7 +186,7 @@ function InviteUserModal({ sectors, isAdmin, onClose, onDone }: { sectors: Secto
         role: isAdmin ? role : "MEMBER",
       });
       setResult({ emailed: !!res.data?.emailed, temporaryPassword: res.data?.temporaryPassword });
-    } catch (err: any) { setError(mapError(err, "Erro ao enviar convite.")); } finally { setLoading(false); }
+    } catch (err: any) { setError(mapError(err, "Não foi possível enviar o convite.")); } finally { setLoading(false); }
   };
 
   if (result) {
@@ -194,10 +194,10 @@ function InviteUserModal({ sectors, isAdmin, onClose, onDone }: { sectors: Secto
       <Modal title="Convite enviado" onClose={onDone} footer={<button onClick={onDone} className="docid-button-primary">Concluir</button>}>
         <div className="space-y-3">
           {result.emailed ? (
-            <p className="text-sm text-docid-secondary">O convite foi enviado por email com a password temporária.</p>
+            <p className="text-sm text-docid-secondary">O convite foi enviado por e-mail com a palavra-passe temporária.</p>
           ) : (
             <>
-              <p className="text-sm text-docid-tertiary">SMTP não está configurado. Entregue esta password fora de banda:</p>
+              <p className="text-sm text-docid-tertiary">O e-mail ainda não está configurado. Entregue esta palavra-passe ao utilizador directamente:</p>
               <p className="rounded-lg bg-docid-surface-low p-3 font-mono text-sm">{result.temporaryPassword}</p>
             </>
           )}
@@ -211,13 +211,13 @@ function InviteUserModal({ sectors, isAdmin, onClose, onDone }: { sectors: Secto
       <div className="space-y-4">
         {error && <div className="rounded-lg border border-docid-error/30 bg-docid-error/10 p-3 text-sm text-docid-error">{error}</div>}
         <div><label className="mb-1.5 block text-xs font-semibold text-docid-muted">Nome completo</label><input value={fullName} onChange={e => setFullName(e.target.value)} className="docid-input w-full" placeholder="Ex: Maria Santos" autoFocus /></div>
-        <div><label className="mb-1.5 block text-xs font-semibold text-docid-muted">Email</label><input type="email" value={email} onChange={e => setEmail(e.target.value)} className="docid-input w-full" placeholder="maria@empresa.com" /></div>
+        <div><label className="mb-1.5 block text-xs font-semibold text-docid-muted">E-mail</label><input type="email" value={email} onChange={e => setEmail(e.target.value)} className="docid-input w-full" placeholder="maria@empresa.com" /></div>
         <div><label className="mb-1.5 block text-xs font-semibold text-docid-muted">Sector</label><select value={sectorId} onChange={e => setSectorId(e.target.value)} className="docid-input w-full"><option value="">Seleccionar sector...</option>{sectors.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
         {isAdmin && (
-          <div><label className="mb-1.5 block text-xs font-semibold text-docid-muted">Role</label>
+          <div><label className="mb-1.5 block text-xs font-semibold text-docid-muted">Tipo de acesso</label>
             <select value={role} onChange={e => setRole(e.target.value)} className="docid-input w-full">
-              <option value="MEMBER">MEMBER</option>
-              <option value="SECTOR_SUPERVISOR">SECTOR_SUPERVISOR</option>
+              <option value="MEMBER">Membro</option>
+              <option value="SECTOR_SUPERVISOR">Supervisor de sector</option>
             </select>
           </div>
         )}
@@ -245,26 +245,26 @@ function DetailUserModal({ user, sectors, roles, onClose, onDone }: { user: User
         await api.patch(`/users/${user.id}/sector`, { sectorId: sectorId || null });
       }
       onDone();
-    } catch (err: any) { setError(mapError(err, "Erro ao actualizar utilizador.")); } finally { setLoading(false); }
+    } catch (err: any) { setError(mapError(err, "Não foi possível guardar os dados do utilizador.")); } finally { setLoading(false); }
   };
 
   const handleDeactivate = async () => {
     if (!confirm("Tem a certeza que deseja desactivar este utilizador?")) return;
     setLoading(true);
-    try { await api.delete(`/users/${user.id}`); onDone(); } catch (err: any) { setError(mapError(err, "Erro ao desactivar utilizador.")); setLoading(false); }
+    try { await api.delete(`/users/${user.id}`); onDone(); } catch (err: any) { setError(mapError(err, "Não foi possível desactivar o utilizador.")); setLoading(false); }
   };
 
   const handleAssignRole = async () => {
     if (!roleToAssign) return;
     setBusyRole("assign"); setError("");
     try { await api.post(`/users/${user.id}/roles`, { roleId: roleToAssign }); onDone(); }
-    catch (err: any) { setError(mapError(err, "Erro ao atribuir role.")); setBusyRole(null); }
+    catch (err: any) { setError(mapError(err, "Não foi possível atribuir a função de acesso.")); setBusyRole(null); }
   };
 
   const handleRemoveRole = async (roleId: string) => {
     setBusyRole(roleId); setError("");
     try { await api.delete(`/users/${user.id}/roles/${roleId}`); onDone(); }
-    catch (err: any) { setError(mapError(err, "Erro ao remover role.")); setBusyRole(null); }
+    catch (err: any) { setError(mapError(err, "Não foi possível remover a função de acesso.")); setBusyRole(null); }
   };
 
   return (
@@ -279,7 +279,7 @@ function DetailUserModal({ user, sectors, roles, onClose, onDone }: { user: User
         {editing ? (
           <>
             <div><label className="mb-1.5 block text-xs font-semibold text-docid-muted">Nome completo</label><input value={fullName} onChange={e => setFullName(e.target.value)} className="docid-input w-full" /></div>
-            <div><label className="mb-1.5 block text-xs font-semibold text-docid-muted">Email</label><input type="email" value={email} onChange={e => setEmail(e.target.value)} className="docid-input w-full" /></div>
+            <div><label className="mb-1.5 block text-xs font-semibold text-docid-muted">E-mail</label><input type="email" value={email} onChange={e => setEmail(e.target.value)} className="docid-input w-full" /></div>
             <div><label className="mb-1.5 block text-xs font-semibold text-docid-muted">Sector</label><select value={sectorId} onChange={e => setSectorId(e.target.value)} className="docid-input w-full"><option value="">Sem sector</option>{sectors.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
           </>
         ) : (
@@ -289,19 +289,19 @@ function DetailUserModal({ user, sectors, roles, onClose, onDone }: { user: User
             <div><p className="text-xs text-docid-muted">Estado</p><StatusChip tone={user.isActive ? "success" : "error"}>{user.isActive ? "Activo" : "Inactivo"}</StatusChip></div>
             <div><p className="text-xs text-docid-muted">Criado em</p><p className="font-medium">{new Date(user.createdAt).toLocaleDateString("pt-AO")}</p></div>
             <div className="col-span-2">
-              <p className="text-xs text-docid-muted mb-1">Roles</p>
+              <p className="text-xs text-docid-muted mb-1">Funções de acesso</p>
               <div className="flex flex-wrap gap-1">
                 {(user.roles || []).map(r => (
                   <span key={r.id} className="rounded-full bg-docid-primary/10 px-3 py-1 text-xs font-medium text-docid-primary-soft">
-                    {r.name}
-                    <button title="Remover role" onClick={() => handleRemoveRole(r.id)} disabled={!!busyRole} className="ml-1 text-docid-primary-soft hover:text-docid-error disabled:opacity-40"><X className="h-3 w-3" /></button>
+                    {friendlyRole(r.name)}
+                    <button title="Remover função de acesso" onClick={() => handleRemoveRole(r.id)} disabled={!!busyRole} className="ml-1 text-docid-primary-soft hover:text-docid-error disabled:opacity-40"><X className="h-3 w-3" /></button>
                   </span>
                 ))}
-                {(user.roles || []).length === 0 && <span className="text-xs text-docid-muted">Sem roles</span>}
+                {(user.roles || []).length === 0 && <span className="text-xs text-docid-muted">Sem funções de acesso</span>}
               </div>
               <div className="mt-2 flex gap-2">
                 <select value={roleToAssign} onChange={e => setRoleToAssign(e.target.value)} className="docid-input w-full text-sm">
-                  <option value="">Adicionar role...</option>
+                  <option value="">Adicionar função de acesso...</option>
                   {roles.filter(r => !(user.roles || []).some(a => a.id === r.id)).map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
                 </select>
                 <button onClick={handleAssignRole} disabled={!roleToAssign || !!busyRole} className="docid-button-secondary text-sm">{busyRole === "assign" ? "A atribuir..." : "Atribuir"}</button>
@@ -346,11 +346,11 @@ function ImportUsersModal({ onClose, onDone }: { onClose: () => void; onDone: ()
       const res = await api.post<{ data: ImportReport }>("/users/import", { csv: csvText });
       setReport(res.data);
       if (res.data.created.length > 0) onDone();
-    } catch (err: any) { setError(mapError(err, "Erro ao importar utilizadores.")); } finally { setLoading(false); }
+    } catch (err: any) { setError(mapError(err, "Não foi possível importar os utilizadores.")); } finally { setLoading(false); }
   };
 
   return (
-    <Modal title="Importar Utilizadores (CSV)" onClose={onClose} footer={
+    <Modal title="Importar utilizadores" onClose={onClose} footer={
       report
         ? <button onClick={onClose} className="docid-button-primary">Concluir</button>
         : <><button onClick={onClose} className="docid-button-secondary">Cancelar</button><button onClick={handleImport} disabled={loading || !csvText.trim()} className="docid-button-primary">{loading ? "A importar..." : "Importar"}</button></>
@@ -360,11 +360,11 @@ function ImportUsersModal({ onClose, onDone }: { onClose: () => void; onDone: ()
         {!report && (
           <>
             <div className="rounded-lg border border-docid-tertiary/30 bg-docid-tertiary/10 p-3 text-xs text-docid-tertiary">
-              Formato: <code className="font-mono">email,full_name,sector,role</code>. As colunas <code className="font-mono">sector</code> e <code className="font-mono">role</code> são opcionais. Emails duplicados são ignorados. As passwords geradas são devolvidas no relatório.
+              O ficheiro deve ter quatro colunas: e-mail, nome, sector e função de acesso. O sector e a função de acesso são opcionais. E-mails repetidos são ignorados. As palavras-passes geradas aparecem no relatório.
             </div>
             <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-docid-border bg-docid-surface-low p-6 text-center text-sm text-docid-muted transition hover:border-docid-primary/50">
               <Upload className="h-6 w-6 text-docid-outline" />
-              {fileName || "Escolher ficheiro CSV..."}
+              {fileName || "Escolher ficheiro..."}
               <input type="file" accept=".csv,text/csv" onChange={handleFile} className="hidden" />
             </label>
             {csvText && <textarea value={csvText} onChange={e => { setCsvText(e.target.value); setReport(null); }} className="docid-input h-28 w-full resize-none font-mono text-xs" />}
@@ -385,7 +385,7 @@ function ImportUsersModal({ onClose, onDone }: { onClose: () => void; onDone: ()
               <div>
                 <p className="mb-1 flex items-center gap-1 text-xs font-semibold text-docid-secondary"><CheckCircle2 className="h-3.5 w-3.5" /> Credenciais geradas — distribua aos utilizadores</p>
                 <div className="max-h-40 overflow-auto rounded-lg border border-docid-border">
-                  <table className="docid-table"><thead><tr><th>Email</th><th>Nome</th><th>Password</th></tr></thead><tbody>{report.created.map(u => <tr key={u.email}><td className="text-xs">{u.email}</td><td className="text-xs">{u.fullName}</td><td className="font-mono text-xs">{u.password}</td></tr>)}</tbody></table>
+                  <table className="docid-table"><thead><tr><th>E-mail</th><th>Nome</th><th>Palavra-passe</th></tr></thead><tbody>{report.created.map(u => <tr key={u.email}><td className="text-xs">{u.email}</td><td className="text-xs">{u.fullName}</td><td className="font-mono text-xs">{u.password}</td></tr>)}</tbody></table>
                 </div>
               </div>
             )}

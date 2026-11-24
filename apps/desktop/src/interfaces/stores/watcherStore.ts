@@ -45,7 +45,7 @@ export const useWatcherStore = create<WatcherState>((set, get) => ({
       const [folders, running] = await Promise.all([watcher.getWatchedFolders(), watcher.isRunning()]);
       set({ folders, running });
       await Promise.all([get().refreshFiles(), get().refreshReminders(), get().refreshReport()]);
-    } catch (err: any) { set({ error: err.message }); }
+    } catch (err: any) { set({ error: mapError(err, "Não foi possível concluir a operação na pasta vigiada.") }); }
     finally { set({ loading: false }); }
   },
 
@@ -56,7 +56,7 @@ export const useWatcherStore = create<WatcherState>((set, get) => ({
       await watcher.addWatchedFolder(path);
       const folders = await watcher.getWatchedFolders();
       set({ folders });
-    } catch (err: any) { set({ error: err.message }); }
+    } catch (err: any) { set({ error: mapError(err, "Não foi possível concluir a operação na pasta vigiada.") }); }
   },
 
   removeFolder: async (path) => {
@@ -70,7 +70,7 @@ export const useWatcherStore = create<WatcherState>((set, get) => ({
       }
       const folders = await watcher.getWatchedFolders();
       set({ folders });
-    } catch (err: any) { set({ error: err.message }); }
+    } catch (err: any) { set({ error: mapError(err, "Não foi possível concluir a operação na pasta vigiada.") }); }
   },
 
   start: async () => {
@@ -79,7 +79,7 @@ export const useWatcherStore = create<WatcherState>((set, get) => ({
     try {
       await watcher.startWatcher();
       set({ running: true });
-    } catch (err: any) { set({ error: err.message }); }
+    } catch (err: any) { set({ error: mapError(err, "Não foi possível concluir a operação na pasta vigiada.") }); }
   },
 
   stop: async () => {
@@ -88,22 +88,22 @@ export const useWatcherStore = create<WatcherState>((set, get) => ({
     try {
       await watcher.stopWatcher();
       set({ running: false });
-    } catch (err: any) { set({ error: err.message }); }
+    } catch (err: any) { set({ error: mapError(err, "Não foi possível concluir a operação na pasta vigiada.") }); }
   },
 
   refreshFiles: async () => {
     if (!watcher.isAvailable()) return;
-    try { set({ files: await watcher.getFiles() }); } catch (err: any) { set({ error: err.message }); }
+    try { set({ files: await watcher.getFiles() }); } catch (err: any) { set({ error: mapError(err, "Não foi possível concluir a operação na pasta vigiada.") }); }
   },
 
   refreshReminders: async () => {
     if (!watcher.isAvailable()) return;
-    try { set({ reminders: await watcher.getReminders() }); } catch (err: any) { set({ error: err.message }); }
+    try { set({ reminders: await watcher.getReminders() }); } catch (err: any) { set({ error: mapError(err, "Não foi possível concluir a operação na pasta vigiada.") }); }
   },
 
   refreshReport: async () => {
     if (!watcher.isAvailable()) return;
-    try { set({ report: await watcher.getReport() }); } catch (err: any) { set({ error: err.message }); }
+    try { set({ report: await watcher.getReport() }); } catch (err: any) { set({ error: mapError(err, "Não foi possível concluir a operação na pasta vigiada.") }); }
   },
 
   setFileStatus: async (path, status) => {
@@ -112,11 +112,11 @@ export const useWatcherStore = create<WatcherState>((set, get) => ({
     try {
       await watcher.setFileStatus(path, status);
       await Promise.all([get().refreshFiles(), get().refreshReminders(), get().refreshReport()]);
-    } catch (err: any) { set({ error: err.message }); }
+    } catch (err: any) { set({ error: mapError(err, "Não foi possível concluir a operação na pasta vigiada.") }); }
   },
 
   attachDetectedFile: async (path, identifier) => {
-    if (!watcher.isAvailable()) throw new Error("Watcher não disponível em modo browser.");
+    if (!watcher.isAvailable()) throw new Error("A vigilância de pastas só está disponível na aplicação instalada no computador.");
     set({ error: null });
     const user = useAuthStore.getState().user;
     try {
@@ -135,7 +135,7 @@ export const useWatcherStore = create<WatcherState>((set, get) => ({
         return "queued";
       }
     } catch (err: any) {
-      const message = mapError(err, "Erro ao anexar o ficheiro detectado.");
+      const message = mapError(err, "Não foi possível anexar o ficheiro detectado.");
       set({ error: message });
       throw err;
     }

@@ -29,11 +29,11 @@ export function Checkout() {
     if (token) {
       fetch(`${API}/subscriptions/checkout?token=${encodeURIComponent(token)}`)
         .then(async (r) => {
-          if (!r.ok) throw new Error("Link inválido ou expirado.");
+          if (!r.ok) throw new Error("Não foi possível verificar o link. Tente novamente.");
           const data = await r.json();
           setTenantName(data.tenantName || "");
         })
-        .catch((e) => setError(e.message));
+        .catch(() => setError("Não foi possível verificar o link. Tente novamente."));
     }
     fetch(`${API}/plans`)
       .then((r) => r.json())
@@ -59,11 +59,10 @@ export function Checkout() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error?.message || "Não foi possível enviar o pedido.");
+      if (!res.ok) throw new Error("Não foi possível enviar o pedido. Verifique os dados e tente novamente.");
       setDone(true);
-    } catch (err) {
-      setError((err as Error).message);
+    } catch {
+      setError("Não foi possível enviar o pedido. Verifique os dados e tente novamente.");
     } finally {
       setBusy(false);
     }
@@ -101,7 +100,7 @@ export function Checkout() {
                   <span className="block font-semibold">{p.name}</span>
                   <span className="block text-xs text-docid-muted">{p.maxUsers} utilizadores · {p.monthlyOnlineIdentifiers} identificadores/mês</span>
                 </span>
-                <span className="font-mono text-sm">{p.price.toLocaleString("pt-AO")} AOA</span>
+                <span className="font-mono text-sm">{p.price.toLocaleString("pt-AO")} Kz</span>
               </button>
             ))}
             {plans.length === 0 && !error && <p className="text-sm text-docid-muted">A carregar planos...</p>}
@@ -111,7 +110,7 @@ export function Checkout() {
             {tenantName && <p className="text-sm text-docid-text">Organização: <strong>{tenantName}</strong></p>}
             {!tenantName && (
               <div className="grid gap-3 sm:grid-cols-2">
-                <label className="text-xs text-docid-muted">Slug da organização
+                <label className="text-xs text-docid-muted">Identificador da organização
                   <input data-testid="checkout-slug" value={slug} onChange={(e) => { setSlug(e.target.value); setTenantEmail(""); }} className="docid-input mt-1 w-full" placeholder="minha-empresa" />
                 </label>
                 <label className="text-xs text-docid-muted">E-mail da organização

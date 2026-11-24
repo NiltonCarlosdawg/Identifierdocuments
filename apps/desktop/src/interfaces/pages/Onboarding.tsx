@@ -61,7 +61,7 @@ export default function Onboarding() {
       });
 
       navigate("/login?created=1", { replace: true });
-    } catch (err: any) { setError(mapError(err, "Erro ao criar organização.")); } finally { setLoading(false); }
+    } catch (err: any) { setError(mapError(err, "Não foi possível criar a organização.")); } finally { setLoading(false); }
   };
 
   return (
@@ -93,7 +93,7 @@ export default function Onboarding() {
               <div className="relative"><Building2 className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-docid-outline" /><input value={orgName} onChange={e => handleOrgNameChange(e.target.value)} className="docid-input w-full pl-10" placeholder="Ex: Minha Empresa" autoFocus /></div>
             </div>
             <div>
-              <label className="mb-1.5 block text-xs font-semibold text-docid-muted">Slug <span className="font-normal text-docid-outline">(URL da organização)</span></label>
+              <label className="mb-1.5 block text-xs font-semibold text-docid-muted">Endereço da organização</label>
               <input value={slug} onChange={e => { setSlug(e.target.value); setAutoSlug(false); }} className="docid-input w-full font-mono text-xs" placeholder="minha-empresa" />
               {autoSlug && <p className="mt-1 text-xs text-docid-muted">Gerado automaticamente.</p>}
             </div>
@@ -140,7 +140,7 @@ export default function Onboarding() {
               <h3 className="flex items-center gap-2 text-sm font-semibold text-docid-text"><Building2 className="h-4 w-4 text-docid-primary-soft" /> Organização</h3>
               <div className="grid grid-cols-2 gap-2 text-sm">
                 <div><p className="text-xs text-docid-muted">Nome</p><p className="font-medium">{orgName}</p></div>
-                <div><p className="text-xs text-docid-muted">Slug</p><p className="font-mono text-xs">{slug}</p></div>
+                <div><p className="text-xs text-docid-muted">Endereço</p><p className="font-mono text-xs">{slug}</p></div>
                 <div><p className="text-xs text-docid-muted">Prefixo</p><p className="font-mono text-xs">{prefix}</p></div>
               </div>
               <div className="border-t border-docid-border pt-3">

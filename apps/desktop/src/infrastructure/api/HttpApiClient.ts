@@ -1,6 +1,7 @@
 import type { IApiClient } from "../../application/ports/IApiClient";
 import type { IAuthRepository } from "../../domain/repositories/IAuthRepository";
 import type { ISyncService } from "../../application/ports/ISyncService";
+import { friendlyMessage, statusMessage } from "../../shared/errors/mapError";
 
 export class HttpApiClient implements IApiClient {
   private defaultBaseUrl = "https://didall.milvendas.ao";
@@ -84,7 +85,7 @@ export class HttpApiClient implements IApiClient {
     } catch {
       if (this.isMutationMethod(method)) {
         if (options.body instanceof FormData) {
-          throw new Error("Sem ligação ao servidor. Uploads de ficheiro offline requerem a app desktop (fila nativa).");
+          throw new Error("Para enviar ficheiros sem ligação, use a aplicação instalada no computador.");
         }
         const queued = await this.enqueueOfflineWrite(method, path, options.body);
         if (queued) {
@@ -99,11 +100,11 @@ export class HttpApiClient implements IApiClient {
         const newToken = this.authRepo.getToken();
         headers["Authorization"] = `Bearer ${newToken}`;
         res = await fetch(`${this.baseUrl}${path}`, { ...options, headers });
-      } else { this.authRepo.clearSession(); throw new Error("Sessão expirada"); }
+      } else { this.authRepo.clearSession(); throw new Error(statusMessage(401)); }
     }
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      throw new Error(body.message || body.error?.message || `Erro ${res.status}`);
+      throw new Error(friendlyMessage(body.message || body.error?.message, statusMessage(res.status)));
     }
     const ct = res.headers.get("content-type");
     if (ct?.includes("application/json")) return res.json();
@@ -117,12 +118,12 @@ export class HttpApiClient implements IApiClient {
     let res = await fetch(`${this.baseUrl}${path}`, { headers });
     if (res.status === 401) {
       const refreshed = await this.refreshToken();
-      if (!refreshed) { this.authRepo.clearSession(); throw new Error("Sessão expirada"); }
+      if (!refreshed) { this.authRepo.clearSession(); throw new Error(statusMessage(401)); }
       headers["Authorization"] = `Bearer ${this.authRepo.getToken()}`;
       res = await fetch(`${this.baseUrl}${path}`, { headers });
     }
     if (res.status === 204) return null;
-    if (!res.ok) throw new Error(`Erro ${res.status}`);
+    if (!res.ok) throw new Error(statusMessage(res.status));
     return res.blob();
   }
 

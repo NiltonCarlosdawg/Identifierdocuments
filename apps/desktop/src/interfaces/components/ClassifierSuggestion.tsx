@@ -3,6 +3,7 @@ import { api } from "../../infrastructure/di/container";
 import { useClassifier } from "../hooks/useClassifier";
 import { useOfflineCache } from "../hooks/useOfflineCache";
 import type { ClassifierResult } from "../hooks/useClassifier";
+import { friendlyMessage } from "../../shared/errors/mapError";
 import { Sparkles, Check, X, RefreshCw, Brain } from "lucide-react";
 
 interface Category { id: string; name: string; group: string; prefix: string; }
@@ -59,7 +60,7 @@ export default function ClassifierSuggestion({ text, filename, onSelect, onCance
 
   if (error) return (
     <div className="rounded-lg border border-docid-error/30 bg-docid-error/10 p-4 space-y-3">
-      <div className="flex items-center gap-2 text-sm text-docid-error"><X className="h-4 w-4" /> Classificador indisponível</div>
+      <div className="flex items-center gap-2 text-sm text-docid-error"><X className="h-4 w-4" /> Não foi possível analisar este documento</div>
       <p className="text-xs text-docid-muted">{error}</p>
       <div className="flex gap-2">
         <button onClick={handleRetry} className="docid-button-secondary text-xs py-1.5"><RefreshCw className="h-3 w-3" /> Tentar novamente</button>
@@ -78,7 +79,7 @@ export default function ClassifierSuggestion({ text, filename, onSelect, onCance
           <Sparkles className="h-4 w-4 text-docid-tertiary" />
           {selectedManual ? "Seleccionar categoria manualmente" : "Categoria não identificada"}
         </div>
-        {!selectedManual && <p className="text-xs text-docid-muted">{data.reasoning}</p>}
+        {!selectedManual && <p className="text-xs text-docid-muted">{friendlyMessage(data.reasoning, "Não foi possível identificar a categoria.")}</p>}
         <div>
           <select value={manualId} onChange={e => setManualId(e.target.value)} className="docid-input w-full">
             <option value="">Seleccionar categoria...</option>
@@ -103,11 +104,11 @@ export default function ClassifierSuggestion({ text, filename, onSelect, onCance
   return (
     <div className="rounded-lg border border-docid-primary/20 bg-docid-primary/5 p-4 space-y-3">
       <div className="flex items-center gap-2 text-sm font-medium text-docid-text">
-        <Sparkles className="h-4 w-4 text-docid-primary-soft" /> Sugestão do classificador
+        <Sparkles className="h-4 w-4 text-docid-primary-soft" /> Categoria sugerida
       </div>
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-base font-semibold text-docid-text">{data.categoryName || data.categoryId}</p>
+          <p className="text-base font-semibold text-docid-text">{data.categoryName || "Categoria"}</p>
           {data.group && <p className="text-xs text-docid-muted">{data.group}</p>}
         </div>
         <div className={`rounded-full border px-3 py-1 text-xs font-semibold ${
@@ -116,7 +117,7 @@ export default function ClassifierSuggestion({ text, filename, onSelect, onCance
           "border-docid-border bg-docid-surface-high text-docid-muted"
         }`}>{confidencePct}%</div>
       </div>
-      {data.reasoning && <p className="text-xs text-docid-muted italic">"{data.reasoning}"</p>}
+      {data.reasoning && <p className="text-xs text-docid-muted italic">"{friendlyMessage(data.reasoning, "Categoria identificada a partir do documento.")}"</p>}
       <div className="h-1.5 w-full overflow-hidden rounded-full bg-docid-surface-high">
         <div className={`h-full rounded-full transition-all duration-500 ${
           confidenceTone === "success" ? "bg-docid-secondary" :

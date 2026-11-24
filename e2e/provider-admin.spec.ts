@@ -58,13 +58,13 @@ test.describe("Painel da provedora", () => {
 
     await page.getByTestId("tab-licenses").click();
     const licenseRow = page.locator("tr[data-testid='license-row']").filter({ hasText: licenseNumber });
-    await expect(licenseRow).toContainText("active");
+    await expect(licenseRow).toContainText("Activa");
     await expect(licenseRow).toContainText("20");
 
     await licenseRow.getByTestId("license-suspend").click();
-    await expect(licenseRow).toContainText("suspended");
+    await expect(licenseRow).toContainText("Suspensa");
 
     await licenseRow.getByRole("button", { name: "Activar" }).click();
-    await expect(licenseRow).toContainText("active");
+    await expect(licenseRow).toContainText("Activa");
   });
 });

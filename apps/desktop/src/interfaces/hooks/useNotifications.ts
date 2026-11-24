@@ -41,7 +41,8 @@ export function useNotifications() {
   const addToast = useCallback((type: string, payload: Record<string, unknown>) => {
     const id = crypto.randomUUID();
     const identifier = payload.identifier as string | undefined;
-    const message = identifier ? `${notificationLabel(type)}: ${identifier}` : notificationLabel(type);
+    const label = NOTIFICATION_LABELS[type] ?? "Nova notificação";
+    const message = identifier ? `${label}: ${identifier}` : label;
     setToasts(prev => [...prev, { id, type, message }]);
     setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 5000);
   }, []);

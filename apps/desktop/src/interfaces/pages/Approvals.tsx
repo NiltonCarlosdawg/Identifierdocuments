@@ -9,7 +9,7 @@ interface ApprovalRow { id: string; type: string; status: string; notes: string 
 
 const TYPE_LABELS: Record<string, string> = {
   access_request: "Pedido de Acesso",
-  cross_sector: "Partilha Cross-Sector",
+  cross_sector: "Partilha entre sectores",
 };
 
 function SkeletonApproval() {
@@ -103,7 +103,7 @@ function ApprovalCard({ row, onResolved }: { row: ApprovalRow; onResolved: () =>
       const res = await api.get<{ data: ApprovalRow }>(`/approvals/${row.id}`);
       setDetail(res.data);
     } catch (err: unknown) {
-      setDetailError(mapError(err, "Erro ao carregar detalhe."));
+      setDetailError(mapError(err, "Não foi possível carregar os detalhes."));
     } finally {
       setDetailLoading(false);
     }
@@ -115,11 +115,11 @@ function ApprovalCard({ row, onResolved }: { row: ApprovalRow; onResolved: () =>
       await api.patch(`/approvals/${row.id}`, { status: action, notes: notes || undefined });
       setShowResolve(false);
       onResolved();
-    } catch (err: any) { setError(mapError(err, "Erro ao resolver aprovação.")); } finally { setLoading(false); }
+    } catch (err: any) { setError(mapError(err, "Não foi possível concluir a aprovação.")); } finally { setLoading(false); }
   };
 
-  const label = row.type === "access_request" ? "Pedido de Acesso" : row.type === "cross_sector" ? "Partilha Cross-Sector" : "Aprovação";
-  const docId = row.document?.identifier?.identifier || row.document?.id?.slice(0, 8) || "-";
+  const label = row.type === "access_request" ? "Pedido de Acesso" : row.type === "cross_sector" ? "Partilha entre sectores" : "Aprovação";
+  const docId = row.document?.identifier?.identifier || "Documento";
 
   const statusTone = row.status === "pending" ? "warning" as const : row.status === "approved" ? "success" as const : "error" as const;
 
@@ -158,10 +158,10 @@ function ApprovalCard({ row, onResolved }: { row: ApprovalRow; onResolved: () =>
           {detailError && <p className="text-docid-error">{detailError}</p>}
           {detail && (
             <div className="grid grid-cols-2 gap-3">
-              <div><p className="text-docid-outline">Tipo</p><p className="font-medium text-docid-text">{TYPE_LABELS[detail.type] || detail.type}</p></div>
-              <div><p className="text-docid-outline">Requerente</p><p className="font-medium text-docid-text">{detail.requesterId || "-"}</p></div>
-              <div><p className="text-docid-outline">Documento</p><p className="font-medium text-docid-text">{detail.document?.identifier?.identifier || detail.document?.id || "-"}</p></div>
-              <div><p className="text-docid-outline">Categoria</p><p className="font-medium text-docid-text">{detail.document?.identifier?.category?.name || "-"}</p></div>
+              <div><p className="text-docid-outline">Tipo</p><p className="font-medium text-docid-text">{TYPE_LABELS[detail.type] ?? "Pedido"}</p></div>
+              <div><p className="text-docid-outline">Requerente</p><p className="font-medium text-docid-text">{detail.requesterId ? "Utilizador da organização" : "Não identificado"}</p></div>
+              <div><p className="text-docid-outline">Documento</p><p className="font-medium text-docid-text">{detail.document?.identifier?.identifier || "Documento"}</p></div>
+              <div><p className="text-docid-outline">Categoria</p><p className="font-medium text-docid-text">{detail.document?.identifier?.category?.name || "Não indicada"}</p></div>
               <div><p className="text-docid-outline">Resolvido em</p><p className="font-medium text-docid-text">{detail.resolvedAt ? new Date(detail.resolvedAt).toLocaleString("pt-AO") : "-"}</p></div>
               <div><p className="text-docid-outline">Notas</p><p className="font-medium text-docid-text">{detail.notes || "-"}</p></div>
             </div>

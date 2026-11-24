@@ -126,14 +126,14 @@ export function Features() {
             <Tile>
               <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
                 <div className="max-w-[52ch]">
-                  <TileTitle>Sincronização por leases</TileTitle>
+                  <TileTitle>Sincronização com reserva automática</TileTitle>
                   <p className="mt-3 text-sm leading-relaxed text-docid-muted">
                     Rede instável não trava o trabalho. O DocID reserva o documento, sincroniza as alterações e liberta
                     a reserva. Dois postos não gravam por cima um do outro.
                   </p>
                 </div>
                 <ol className="flex flex-wrap items-center gap-2 font-mono text-[10px] uppercase tracking-[0.12em] sm:justify-end">
-                  {["reservado", "sincronizado", "liberto"].map((state, i) => (
+                  {["reservado", "sincronizado", "libertado"].map((state, i) => (
                     <li key={state} className="flex items-center gap-2">
                       {i > 0 && <span aria-hidden="true" className="text-docid-outline">→</span>}
                       <span

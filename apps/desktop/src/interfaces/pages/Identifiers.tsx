@@ -3,20 +3,13 @@ import { api, sync } from "../../infrastructure/di/container";
 import { useGenerateIdentifier } from "../hooks/useGenerateIdentifier";
 import { usePendingIdentifiers, conflictLabel } from "../hooks/usePendingIdentifiers";
 import { useOfflineCache } from "../hooks/useOfflineCache";
-import { mapError } from "../../shared/errors/mapError";
+import { mapError, friendlyStatus, friendlyMessage } from "../../shared/errors/mapError";
 import { useAuthStore } from "../stores/authStore";
 import { PageHeader, Modal, StatusChip, EmptyState, OfflineNotice } from "../components/docid-ui";
 import { Fingerprint, Plus, Copy, Ban, Search, WifiOff, RefreshCw, AlertTriangle, Trash2, RotateCcw, Clock, Smartphone, Lock, Globe, Monitor, FileText, ChevronDown } from "lucide-react";
 
 interface Category { id: string; name: string; group: string; prefix: string; requiresSequential: boolean; }
 interface IdentifierRow { id: string; identifier: string; categoryId: string; category: { id: string; name: string; group: string; prefix: string }; status: string; origin: string; visibility: string; issuedTo: string | null; description: string | null; createdAt: string; sector: { id: string; name: string } | null; document: { id: string; filename: string } | null; createdByUser: { id: string; fullName: string } | null; restricted?: boolean; }
-
-const STATUS_LABELS: Record<string, string> = {
-  draft: "Rascunho",
-  active: "Activo",
-  attached: "Anexado",
-  cancelled: "Cancelado",
-};
 
 const STATUS_TONES: Record<string, "success" | "warning" | "error" | "info" | "neutral"> = {
   draft: "neutral",
@@ -156,8 +149,8 @@ export default function Identifiers() {
                     {filteredRows.map(row => (
                       <tr key={row.id} className="cursor-pointer hover:bg-docid-surface-high transition-colors" onClick={() => setSelected(row)}>
                         <td className="font-mono text-xs font-medium text-docid-text">{row.identifier}{row.restricted && <span className="ml-2 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-docid-tertiary/10 px-1 text-[10px] font-bold text-docid-tertiary" title="Restrito"><Lock className="h-2.5 w-2.5" /></span>}</td>
-                        <td className="text-xs text-docid-text">{row.category?.name || row.categoryId}</td>
-                        <td><StatusChip tone={STATUS_TONES[row.status] ?? "neutral"}>{STATUS_LABELS[row.status] || row.status}</StatusChip></td>
+                        <td className="text-xs text-docid-text">{row.category?.name || "Categoria"}</td>
+                        <td><StatusChip tone={STATUS_TONES[row.status] ?? "neutral"}>{friendlyStatus(row.status)}</StatusChip></td>
                         <td className="text-xs">{row.origin === "digital" ? <span className="inline-flex items-center gap-1.5"><Monitor className="h-3.5 w-3.5 text-docid-muted" /> Digital</span> : <span className="inline-flex items-center gap-1.5"><FileText className="h-3.5 w-3.5 text-docid-muted" /> Físico</span>}</td>
                         <td className="text-xs text-docid-muted">{row.sector?.name || "-"}</td>
                         <td className="text-xs text-docid-muted">{new Date(row.createdAt).toLocaleDateString("pt-AO")}</td>
@@ -167,7 +160,7 @@ export default function Identifiers() {
                   </tbody>
                 </table>
                 <div className="mt-4 flex items-center justify-between border-t border-docid-border px-4 py-3 text-sm text-docid-muted">
-                  <span>{meta.total} identificador(es)</span>
+                  <span>{meta.total} identificadores</span>
                 </div>
               </>
             )}
@@ -216,7 +209,7 @@ function PendingPanel({ items, loading, error, onRefresh, onRetry, onDelete, pen
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Tem a certeza? Esta acção remove o registo local pendente. Se ainda não foi sincronizado, o identificador será perdido.")) return;
+    if (!confirm("Tem a certeza? Este identificador será removido deste dispositivo. Se ainda não foi sincronizado, não poderá ser recuperado.")) return;
     setDeleting(id);
     try { await onDelete(id); } finally { setDeleting(null); }
   };
@@ -266,7 +259,7 @@ function PendingPanel({ items, loading, error, onRefresh, onRetry, onDelete, pen
                     </StatusChip>
                   </div>
                   <p className="mt-1 text-xs text-docid-muted">
-                    {item.categoryId} · Sector {item.sectorId}
+                    Identificador gerado neste dispositivo
                     {item.issuedTo && <> · {item.issuedTo}</>}
                   </p>
                 </div>
@@ -284,7 +277,7 @@ function PendingPanel({ items, loading, error, onRefresh, onRetry, onDelete, pen
                   <AlertTriangle className="h-4 w-4 shrink-0 text-amber-500 mt-0.5" />
                   <div>
                     <p className="text-xs font-medium text-amber-500">{conflictLabel(item.conflictReason)}</p>
-                    {item.lastError && <p className="mt-0.5 text-xs text-docid-muted">{item.lastError}</p>}
+                    {item.lastError && <p className="mt-0.5 text-xs text-docid-muted">{friendlyMessage(item.lastError, "A sincronização falhou. Tentaremos novamente.")}</p>}
                   </div>
                 </div>
               )}
@@ -293,8 +286,8 @@ function PendingPanel({ items, loading, error, onRefresh, onRetry, onDelete, pen
                 <div className="flex items-start gap-2 rounded-lg border border-docid-error/20 bg-docid-error/5 p-3">
                   <AlertTriangle className="h-4 w-4 shrink-0 text-docid-error mt-0.5" />
                   <div>
-                    <p className="text-xs font-medium text-docid-error">Erro após 3 tentativas</p>
-                    <p className="mt-0.5 text-xs text-docid-muted">{item.lastError}</p>
+                    <p className="text-xs font-medium text-docid-error">Não foi possível sincronizar</p>
+                    <p className="mt-0.5 text-xs text-docid-muted">{friendlyMessage(item.lastError, "Tentaremos novamente mais tarde.")}</p>
                   </div>
                 </div>
               )}
@@ -302,7 +295,7 @@ function PendingPanel({ items, loading, error, onRefresh, onRetry, onDelete, pen
               {item.status === "pending" && item.lastError && (
                 <div className="flex items-start gap-2 rounded-lg border border-docid-border/20 bg-docid-surface-low p-3">
                   <Clock className="h-4 w-4 shrink-0 text-docid-muted mt-0.5" />
-                  <p className="text-xs text-docid-muted">{item.lastError}</p>
+                  <p className="text-xs text-docid-muted">{friendlyMessage(item.lastError, "Aguardando nova tentativa de sincronização.")}</p>
                 </div>
               )}
 
@@ -311,7 +304,7 @@ function PendingPanel({ items, loading, error, onRefresh, onRetry, onDelete, pen
                   <button onClick={() => handleRetry(item.id)} disabled={retrying === item.id}
                     className="docid-button-secondary text-xs">
                     <RotateCcw className={`h-3 w-3 ${retrying === item.id ? "animate-spin" : ""}`} />
-                    {retrying === item.id ? "A re-sincronizar..." : "Re-sincronizar"}
+                    {retrying === item.id ? "A sincronizar..." : "Sincronizar"}
                   </button>
                 )}
                 <button onClick={() => handleDelete(item.id)} disabled={deleting === item.id}
@@ -366,7 +359,7 @@ function CategoryCombobox({ categories, value, onChange }: { categories: Categor
         aria-expanded={open}
       >
         <span className={selected ? "text-docid-text" : "text-docid-muted"}>
-          {selected ? `${selected.name} (${selected.id})` : "Seleccionar categoria..."}
+          {selected ? selected.name : "Seleccionar categoria..."}
         </span>
         <ChevronDown className={`h-4 w-4 shrink-0 text-docid-outline transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
@@ -384,7 +377,7 @@ function CategoryCombobox({ categories, value, onChange }: { categories: Categor
                   if (e.key === "Escape") { setOpen(false); setQuery(""); }
                   if (e.key === "Enter") { e.preventDefault(); const first = matches[0]; if (first) select(first.id); }
                 }}
-                placeholder="Pesquisar por nome, código ou grupo..."
+                placeholder="Pesquisar por nome ou grupo..."
                 className="docid-input w-full py-1.5 pl-8 text-xs"
               />
             </div>
@@ -404,7 +397,7 @@ function CategoryCombobox({ categories, value, onChange }: { categories: Categor
                     className={`flex w-full items-center justify-between gap-2 rounded-md px-3 py-1.5 text-left text-sm transition ${c.id === value ? "bg-docid-primary/10 text-docid-primary-soft" : "text-docid-text hover:bg-docid-surface-high"}`}
                   >
                     <span className="truncate">{c.name}</span>
-                    <span className="shrink-0 font-mono text-[11px] text-docid-muted">{c.id}{c.requiresSequential ? "" : " *"}</span>
+                    <span className="shrink-0 font-mono text-[11px] text-docid-muted">{c.prefix}</span>
                   </button>
                 ))}
               </div>
@@ -548,7 +541,7 @@ function DetailModal({ row, onClose, onCancelled }: { row: IdentifierRow; onClos
     let cancelled = false;
     api.get<{ data: IdentifierRow }>(`/identifiers/${encodeURIComponent(row.identifier)}`)
       .then(res => { if (!cancelled && res.data) setDetail(prev => ({ ...prev, ...res.data })); })
-      .catch((err: unknown) => { if (!cancelled) setDetailError(mapError(err, "Erro ao carregar detalhe.")); });
+      .catch((err: unknown) => { if (!cancelled) setDetailError(mapError(err, "Não foi possível carregar os detalhes.")); });
     return () => { cancelled = true; };
   }, [row.identifier]);
 
@@ -558,7 +551,7 @@ function DetailModal({ row, onClose, onCancelled }: { row: IdentifierRow; onClos
     try {
       await api.patch(`/identifiers/${detail.identifier}/cancel`, { reason: cancelReason });
       onCancelled();
-    } catch (err: any) { setError(mapError(err, "Erro ao cancelar.")); } finally { setLoading(false); }
+    } catch (err: any) { setError(mapError(err, "Não foi possível cancelar o identificador.")); } finally { setLoading(false); }
   };
 
   const statusTone = detail.status === "active" ? "success" as const : detail.status === "cancelled" ? "error" as const : detail.status === "attached" ? "info" as const : "neutral" as const;
@@ -567,9 +560,9 @@ function DetailModal({ row, onClose, onCancelled }: { row: IdentifierRow; onClos
     <Modal title="Detalhe do Identificador" onClose={onClose} footer={detail.status === "active" && !showCancel ? <button onClick={() => setShowCancel(true)} className="docid-button-secondary text-docid-error"><Ban className="h-4 w-4" /> Cancelar</button> : undefined}>
       <div className="space-y-5">
         {detailError && <div className="rounded-lg border border-docid-error/30 bg-docid-error/10 p-3 text-sm text-docid-error">{detailError}</div>}
-        <div className="flex items-center justify-between"><span className="font-mono text-lg font-bold">{detail.identifier}</span><StatusChip tone={statusTone}>{STATUS_LABELS[detail.status] || detail.status}</StatusChip></div>
+        <div className="flex items-center justify-between"><span className="font-mono text-lg font-bold">{detail.identifier}</span><StatusChip tone={statusTone}>{friendlyStatus(detail.status)}</StatusChip></div>
         <div className="grid grid-cols-2 gap-4 text-sm">
-          <div><p className="text-xs text-docid-muted">Categoria</p><p className="font-medium">{detail.category?.name || detail.categoryId}</p></div>
+          <div><p className="text-xs text-docid-muted">Categoria</p><p className="font-medium">{detail.category?.name || "Categoria"}</p></div>
           <div><p className="text-xs text-docid-muted">Origem</p><p className="font-medium">{detail.origin === "digital" ? "Digital" : "Físico"}</p></div>
           <div><p className="text-xs text-docid-muted">Visibilidade</p><p className="font-medium">{detail.visibility === "sector_only" ? "Apenas sector" : "Público"}</p></div>
           <div><p className="text-xs text-docid-muted">Sector</p><p className="font-medium">{detail.sector?.name || "-"}</p></div>
@@ -617,7 +610,7 @@ function HistorySection({ identifierId }: { identifierId: string }) {
         const res = await api.get<{ data: HistoryEvent[] }>(`/audit?resource=identifiers&resourceId=${encodeURIComponent(identifierId)}&limit=20`);
         if (!cancelled) setEvents(res.data || []);
       } catch (err: any) {
-        if (!cancelled) setError(err.message || "Erro ao carregar histórico.");
+        if (!cancelled) setError(mapError(err, "Não foi possível carregar o histórico."));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -650,7 +643,7 @@ function HistorySection({ identifierId }: { identifierId: string }) {
             <li key={ev.id} className="relative">
               <span className="absolute -left-[21px] top-1 h-2.5 w-2.5 rounded-full border-2 border-docid-primary bg-docid-surface" />
               <div className="flex items-baseline justify-between gap-3">
-                <p className="text-xs font-medium text-docid-text">{ACTION_LABELS[ev.action] ?? ev.action}</p>
+                <p className="text-xs font-medium text-docid-text">{ACTION_LABELS[ev.action] ?? "Acção registada"}</p>
                 <p className="shrink-0 text-[11px] text-docid-muted">{new Date(ev.createdAt).toLocaleString("pt-AO")}</p>
               </div>
               <p className="mt-0.5 text-[11px] text-docid-muted">

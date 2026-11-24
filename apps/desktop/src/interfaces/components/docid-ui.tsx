@@ -38,7 +38,7 @@ export function Modal({ title, children, footer, onClose, maxWidth = "max-w-2xl"
       <div className={`docid-panel max-h-[90vh] w-full overflow-hidden ${maxWidth}`}>
         <div className="flex items-center justify-between border-b border-docid-border bg-docid-surface-high/60 px-6 py-4">
           <h2 className="text-lg font-semibold text-docid-text">{title}</h2>
-          <button onClick={onClose} className="rounded-lg p-2 text-docid-muted transition hover:bg-docid-surface-high hover:text-docid-text"><X className="h-4 w-4" /></button>
+          <button onClick={onClose} aria-label="Fechar" className="rounded-lg p-2 text-docid-muted transition hover:bg-docid-surface-high hover:text-docid-text"><X className="h-4 w-4" /></button>
         </div>
         <div className="max-h-[calc(90vh-9rem)] overflow-y-auto p-6">{children}</div>
         {footer && <div className="flex justify-end gap-3 border-t border-docid-border bg-docid-surface-high/50 px-6 py-4">{footer}</div>}
@@ -56,7 +56,7 @@ export function OfflineNotice({ cachedAt, onRetry }: { cachedAt: string | null; 
     <div className="mb-4 flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-500">
       <WifiOff className="h-4 w-4 shrink-0" />
       <span>
-        Sem ligação à API — a mostrar dados em cache
+        Sem ligação ao servidor — a mostrar dados guardados
         {cachedAt ? ` de ${new Date(cachedAt).toLocaleString("pt-AO")}` : ""}.
       </span>
       <button onClick={onRetry} className="ml-auto shrink-0 underline">Tentar novamente</button>

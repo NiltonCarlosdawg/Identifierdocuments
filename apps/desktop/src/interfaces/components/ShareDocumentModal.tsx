@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "../../infrastructure/di/container";
 import { Modal } from "./docid-ui";
 import { useCachedAux } from "../hooks/useCachedAux";
+import { mapError } from "../../shared/errors/mapError";
 
 interface Props { identifier: string; onClose: () => void; onShared: () => void; }
 
@@ -23,7 +24,7 @@ export default function ShareDocumentModal({ identifier, onClose, onShared }: Pr
   const handleShare = async () => {
     setError(""); setLoading(true);
     try { await api.post(`/documents/${identifier}/share`, { sectorId: mode === "sector" ? sectorId : undefined, userId: mode === "user" ? userId : undefined }); onShared(); onClose(); }
-    catch (err: any) { setError(err.message || "Erro ao partilhar"); } finally { setLoading(false); }
+    catch (err: any) { setError(mapError(err, "Não foi possível partilhar o documento.")); } finally { setLoading(false); }
   };
 
   return (
@@ -36,7 +37,7 @@ export default function ShareDocumentModal({ identifier, onClose, onShared }: Pr
           <button onClick={() => setMode("user")} className={`flex-1 rounded-lg px-3 py-1.5 text-sm font-medium transition ${mode === "user" ? "bg-docid-primary text-white" : "border border-docid-border text-docid-muted hover:bg-docid-surface-high"}`}>Utilizador</button>
         </div>
         {mode === "sector" ? (
-          <select value={sectorId} onChange={e => setSectorId(e.target.value)} className="docid-input w-full"><option value="">Seleccionar sector</option>{sectors.map((s: any) => <option key={s.id} value={s.id}>{s.name} ({s.code})</option>)}</select>
+          <select value={sectorId} onChange={e => setSectorId(e.target.value)} className="docid-input w-full"><option value="">Seleccionar sector</option>{sectors.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
         ) : (
           <select value={userId} onChange={e => setUserId(e.target.value)} className="docid-input w-full"><option value="">Seleccionar utilizador</option>{users.map((u: any) => <option key={u.id} value={u.id}>{u.fullName} — {u.email}</option>)}</select>
         )}

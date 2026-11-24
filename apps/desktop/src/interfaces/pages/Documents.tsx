@@ -3,7 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { api, sync, watcher } from "../../infrastructure/di/container";
 import { PageHeader, Modal, StatusChip, EmptyState, OfflineNotice } from "../components/docid-ui";
 import { useOfflineCache } from "../hooks/useOfflineCache";
-import { mapError, isNetworkError } from "../../shared/errors/mapError";
+import { mapError, isNetworkError, friendlyStatus, friendlyMime } from "../../shared/errors/mapError";
 import { useAuthStore } from "../stores/authStore";
 import { useQueueStore } from "../stores/queueStore";
 import ShareDocumentModal from "../components/ShareDocumentModal";
@@ -150,13 +150,13 @@ export default function Documents() {
     if (!sync.isAvailable()) {
       try {
         const blob = await api.getBlob(`/documents/${row.id}/download`);
-        if (!blob) throw new Error("Ficheiro vazio.");
+        if (!blob) throw new Error("O ficheiro está vazio.");
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url; a.download = row.filename || "documento"; a.click();
         setTimeout(() => URL.revokeObjectURL(url), 5000);
       } catch (err: any) {
-        setDownloadError(mapError(err, "Erro ao descarregar."));
+        setDownloadError(mapError(err, "Não foi possível descarregar o ficheiro."));
       }
       return;
     }
@@ -164,13 +164,13 @@ export default function Documents() {
       const path = await sync.downloadOffline(row.id, row.filename);
       if (path) { await sync.openLocalFile(path); return; }
       const blob = await api.getBlob(`/documents/${row.id}/download`);
-      if (!blob) throw new Error("Ficheiro vazio.");
+      if (!blob) throw new Error("O ficheiro está vazio.");
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url; a.download = row.filename || "documento"; a.click();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
     } catch (err: any) {
-      setDownloadError(err?.message || "Documento não disponível offline.");
+      setDownloadError(mapError(err, "Não foi possível abrir o documento offline."));
     }
   };
 
@@ -212,7 +212,7 @@ export default function Documents() {
             {[...Array(4)].map((_, index) => <SkeletonDocRow key={index} />)}
           </div>
         ) : listRows.length === 0 ? (
-          <EmptyState>{viewMode === "perfis" ? "Nenhum contrato/perfil encontrado (CPS, CPF, CTR, CLA)." : "Nenhum documento encontrado."}</EmptyState>
+          <EmptyState>{viewMode === "perfis" ? "Nenhum contrato ou perfil encontrado." : "Nenhum documento encontrado."}</EmptyState>
         ) : viewMode === "perfis" ? (
           <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
             {listRows.map(row => (
@@ -223,14 +223,14 @@ export default function Documents() {
                 className="rounded-xl border border-docid-outline/20 bg-docid-surface-low p-4 text-left transition hover:border-docid-primary/40 hover:bg-docid-surface"
               >
                 <div className="mb-2 flex items-start justify-between gap-2">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-docid-primary-soft">{row.identifier?.categoryId}</p>
-                  <StatusChip tone={row.status === "active" || row.status === "attached" ? "success" : "neutral"}>{row.status}</StatusChip>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-docid-primary-soft">{row.identifier?.categoryName || "Perfil"}</p>
+                  <StatusChip tone={row.status === "active" || row.status === "attached" ? "success" : "neutral"}>{friendlyStatus(row.status)}</StatusChip>
                 </div>
                 <p className="mb-1 truncate text-sm font-medium">{row.filename || "Sem ficheiro"}</p>
                 <p className="mb-3 font-mono text-[11px] text-docid-muted">{row.identifier?.identifier}</p>
                 <div className="flex flex-wrap gap-1">
                   {(row.tags || []).length === 0 ? (
-                    <span className="text-[10px] text-docid-outline">Sem tags</span>
+                    <span className="text-[10px] text-docid-outline">Sem etiquetas</span>
                   ) : (row.tags || []).slice(0, 4).map(tag => (
                     <span key={tag} className="rounded-full bg-docid-surface-high px-2 py-0.5 text-[10px] text-docid-muted">{tag}</span>
                   ))}
@@ -259,8 +259,8 @@ export default function Documents() {
                   <td className="max-w-48 truncate font-medium text-docid-text">{row.filename}</td>
                   <td className="font-mono text-xs text-docid-text">{row.identifier?.identifier || "-"}</td>
                   <td className="text-xs text-docid-muted">{row.identifier?.categoryName || "-"}</td>
-                  <td><StatusChip tone={row.status === "active" || row.status === "attached" ? "success" : row.status === "cancelled" ? "error" : "neutral"}>{row.status}</StatusChip></td>
-                  <td className="text-xs text-docid-muted">{row.uploadedBy || "-"}</td>
+                  <td><StatusChip tone={row.status === "active" || row.status === "attached" ? "success" : row.status === "cancelled" ? "error" : "neutral"}>{friendlyStatus(row.status)}</StatusChip></td>
+                  <td className="text-xs text-docid-muted">{row.uploadedBy || "—"}</td>
                   <td className="text-xs text-docid-muted">{new Date(row.createdAt).toLocaleDateString("pt-AO")}</td>
                   <td className="text-right"><button onClick={e => { e.stopPropagation(); handleOpen(row); }} className="rounded p-1 text-docid-muted hover:text-docid-text hover:bg-docid-surface-high transition-colors" title="Descarregar"><Download className="h-4 w-4" /></button></td>
                 </tr>
@@ -268,7 +268,7 @@ export default function Documents() {
             </tbody>
             </table>
             <div className="mt-4 flex items-center justify-between border-t border-docid-border px-4 py-3 text-sm text-docid-muted">
-              <span>{meta.total} documento(s)</span>
+              <span>{meta.total} documentos</span>
             </div>
           </>
         )}
@@ -311,7 +311,7 @@ function UploadModal({ onClose, onDone, initialPath = "", initialIdentifier = ""
         const text = await invoke<string>("extract_text_command", { path: initialPath });
         setClassifierText(text.slice(0, 4000));
       } catch (err: unknown) {
-        setError(mapError(err, "Erro ao extrair ficheiro."));
+        setError(mapError(err, "Não foi possível ler o ficheiro."));
       } finally {
         setExtracting(false);
       }
@@ -349,7 +349,7 @@ function UploadModal({ onClose, onDone, initialPath = "", initialIdentifier = ""
       }
     } catch (err: any) {
       setExtracting(false);
-      setError(mapError(err, "Erro ao seleccionar ou extrair ficheiro."));
+      setError(mapError(err, "Não foi possível seleccionar ou ler o ficheiro."));
     }
   };
 
@@ -446,10 +446,10 @@ function UploadModal({ onClose, onDone, initialPath = "", initialIdentifier = ""
       if (row.status === "ok" || row.status === "queued") continue;
       try {
         const result = await uploadOne(row, uploadMode);
-        updateRow(row.key, { status: result.status, message: result.status === "queued" ? "Na fila offline" : "OK" });
+        updateRow(row.key, { status: result.status, message: result.status === "queued" ? "Guardado na fila" : "Enviado" });
         anyOk = true;
       } catch (err: any) {
-        updateRow(row.key, { status: "error", message: mapError(err, "Falha no upload.") });
+        updateRow(row.key, { status: "error", message: mapError(err, "Não foi possível enviar o ficheiro.") });
       }
     }
 
@@ -472,8 +472,8 @@ function UploadModal({ onClose, onDone, initialPath = "", initialIdentifier = ""
         {error && <div className="rounded-lg border border-docid-error/30 bg-docid-error/10 p-3 text-sm text-docid-error">{error}</div>}
 
         <div className="flex gap-2">
-          <button type="button" onClick={() => setMode("batch")} className={`docid-button-secondary text-xs ${mode === "batch" ? "ring-1 ring-docid-primary" : ""}`}>Lote (IDs distintos)</button>
-          <button type="button" onClick={() => setMode("attachments")} className={`docid-button-secondary text-xs ${mode === "attachments" ? "ring-1 ring-docid-primary" : ""}`}>Anexos ao mesmo ID</button>
+          <button type="button" onClick={() => setMode("batch")} className={`docid-button-secondary text-xs ${mode === "batch" ? "ring-1 ring-docid-primary" : ""}`}>Vários documentos</button>
+          <button type="button" onClick={() => setMode("attachments")} className={`docid-button-secondary text-xs ${mode === "attachments" ? "ring-1 ring-docid-primary" : ""}`}>Anexos ao mesmo documento</button>
         </div>
 
         {mode === "attachments" && (
@@ -502,7 +502,7 @@ function UploadModal({ onClose, onDone, initialPath = "", initialIdentifier = ""
         )}
 
         {feedbackSent && mode === "batch" && (
-          <div className="rounded-lg border border-docid-secondary/30 bg-docid-secondary/10 p-3 text-xs text-docid-secondary">Classificação registada. Pode prosseguir com o upload.</div>
+          <div className="rounded-lg border border-docid-secondary/30 bg-docid-secondary/10 p-3 text-xs text-docid-secondary">Classificação registada. Pode continuar com o envio.</div>
         )}
 
         {rows.length > 0 && (
@@ -513,7 +513,7 @@ function UploadModal({ onClose, onDone, initialPath = "", initialIdentifier = ""
                   <p className="truncate text-xs font-medium">{row.filename}</p>
                   {row.status !== "pending" && (
                     <span className={`shrink-0 text-[10px] font-medium ${row.status === "error" ? "text-docid-error" : "text-docid-secondary"}`}>
-                      {row.status === "ok" ? "OK" : row.status === "queued" ? "Fila" : "Erro"}
+                      {row.status === "ok" ? "Enviado" : row.status === "queued" ? "Na fila" : "Falhou"}
                     </span>
                   )}
                 </div>
@@ -553,7 +553,7 @@ function DetailModal({ row, onClose, onDone, onDownload, profileMode = false }: 
   const [customTag, setCustomTag] = useState("");
   const [savingTags, setSavingTags] = useState(false);
   const isProfile = profileMode || PROFILE_CATEGORY_IDS.has(row.identifier?.categoryId || "");
-  const identCode = row.identifier?.identifier || row.id;
+  const identCode = row.identifier?.identifier || "Documento";
   const selectedPrinter = usePrinterStore(s => s.selectedPrinter);
   const loadPrinters = usePrinterStore(s => s.loadPrinters);
   const printFile = usePrinterStore(s => s.printFile);
@@ -572,7 +572,7 @@ function DetailModal({ row, onClose, onDone, onDownload, profileMode = false }: 
       setDetail(res.data);
       if (Array.isArray(res.data.tags)) setTags(res.data.tags);
     } catch (err: any) {
-      setDetailError(mapError(err, "Erro ao carregar detalhe."));
+      setDetailError(mapError(err, "Não foi possível carregar os detalhes."));
     }
   };
 
@@ -583,7 +583,7 @@ function DetailModal({ row, onClose, onDone, onDownload, profileMode = false }: 
       setTags(res.data.tags);
       onDone();
     } catch (err: any) {
-      setDetailError(mapError(err, "Erro ao guardar tags."));
+      setDetailError(mapError(err, "Não foi possível guardar as etiquetas."));
     } finally {
       setSavingTags(false);
     }
@@ -642,7 +642,7 @@ function DetailModal({ row, onClose, onDone, onDownload, profileMode = false }: 
       if (!path) throw new Error("Documento não disponível para impressão. Descarregue primeiro.");
       await printFile(path);
     } catch (err: unknown) {
-      setPrintError(mapError(err, "Erro ao imprimir."));
+      setPrintError(mapError(err, "Não foi possível imprimir."));
     } finally {
       setPrinting(false);
     }
@@ -686,7 +686,7 @@ function DetailModal({ row, onClose, onDone, onDownload, profileMode = false }: 
       await loadDetail();
       onDone();
     } catch (err: any) {
-      setDetailError(mapError(err, "Erro ao criar versão."));
+      setDetailError(mapError(err, "Não foi possível criar a nova versão."));
     } finally {
       setBusy(false);
     }
@@ -718,7 +718,7 @@ function DetailModal({ row, onClose, onDone, onDownload, profileMode = false }: 
       await loadDetail();
       onDone();
     } catch (err: any) {
-      setDetailError(mapError(err, "Erro ao adicionar anexo."));
+      setDetailError(mapError(err, "Não foi possível adicionar o anexo."));
     } finally {
       setBusy(false);
     }
@@ -771,13 +771,13 @@ function DetailModal({ row, onClose, onDone, onDownload, profileMode = false }: 
                   </span>
                 )}
               </div>
-              <p className="text-xs text-docid-muted">{fileSize ? `${(fileSize / 1024 / 1024).toFixed(2)} MB · ${mimeType}` : mimeType}</p>
+              <p className="text-xs text-docid-muted">{fileSize ? `${(fileSize / 1024 / 1024).toFixed(2)} MB · ${friendlyMime(mimeType)}` : friendlyMime(mimeType)}</p>
             </div>
           </div>
 
           {isProfile && (
             <div className="rounded-lg border border-docid-outline/20 bg-docid-surface-low p-3">
-              <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-docid-muted"><Tag className="h-3.5 w-3.5" /> Tags do perfil</p>
+              <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-docid-muted"><Tag className="h-3.5 w-3.5" /> Etiquetas do perfil</p>
               <div className="mb-2 flex flex-wrap gap-1.5">
                 {DOCUMENT_PRESET_TAGS.map(tag => (
                   <button
@@ -797,7 +797,7 @@ function DetailModal({ row, onClose, onDone, onDownload, profileMode = false }: 
                   onChange={e => setCustomTag(e.target.value)}
                   onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addCustomTag(); } }}
                   className="docid-input flex-1 text-xs"
-                  placeholder="Tag personalizada…"
+                  placeholder="Etiqueta personalizada…"
                   disabled={savingTags}
                 />
                 <button type="button" onClick={addCustomTag} disabled={savingTags || !customTag.trim()} className="docid-button-secondary text-xs">Adicionar</button>
@@ -836,10 +836,10 @@ function DetailModal({ row, onClose, onDone, onDownload, profileMode = false }: 
           )}
 
           <div className="grid grid-cols-2 gap-4 text-sm">
-            <div><p className="text-xs text-docid-muted">Identificador</p><p className="font-mono text-xs font-medium">{row.identifier?.identifier || "-"}</p></div>
-            <div><p className="text-xs text-docid-muted">Categoria</p><p className="font-medium">{row.identifier?.categoryName || "-"}</p></div>
-            <div><p className="text-xs text-docid-muted">Estado</p><StatusChip tone={row.status === "active" || row.status === "attached" ? "success" : "neutral"}>{row.status}</StatusChip></div>
-            <div><p className="text-xs text-docid-muted">Carregado por</p><p className="font-medium">{row.uploadedBy || "-"}</p></div>
+            <div><p className="text-xs text-docid-muted">Identificador</p><p className="font-mono text-xs font-medium">{row.identifier?.identifier || "—"}</p></div>
+            <div><p className="text-xs text-docid-muted">Categoria</p><p className="font-medium">{row.identifier?.categoryName || "—"}</p></div>
+            <div><p className="text-xs text-docid-muted">Estado</p><StatusChip tone={row.status === "active" || row.status === "attached" ? "success" : "neutral"}>{friendlyStatus(row.status)}</StatusChip></div>
+            <div><p className="text-xs text-docid-muted">Carregado por</p><p className="font-medium">{row.uploadedBy || "—"}</p></div>
             <div className="col-span-2"><p className="text-xs text-docid-muted">Criado em</p><p className="font-medium">{new Date(row.createdAt).toLocaleString("pt-AO")}</p></div>
           </div>
 
@@ -873,7 +873,7 @@ function DetailModal({ row, onClose, onDone, onDownload, profileMode = false }: 
                 {attachments.map(a => (
                   <li key={a.id} className="flex items-center justify-between gap-2 rounded border border-docid-outline/15 px-2 py-1.5 text-xs">
                     <div>
-                      <span className="font-medium">{a.label || a.filename || a.id}</span>
+                      <span className="font-medium">{a.label || a.filename || "Anexo"}</span>
                       {a.fileSize != null && <span className="ml-2 text-docid-muted">{(a.fileSize / 1024).toFixed(0)} KB</span>}
                     </div>
                     <div className="flex gap-1">
@@ -911,7 +911,7 @@ function RequestAccessModal({ identifier, onClose, onDone }: { identifier: strin
       await api.post(`/documents/${identifier}/request-access`, { reason: reason.trim() || undefined });
       setSuccess(true);
     } catch (err: any) {
-      setError(err?.error?.message || err.message || "Erro ao solicitar acesso.");
+      setError(mapError(err, "Não foi possível enviar o pedido de acesso."));
     } finally { setLoading(false); }
   };
 

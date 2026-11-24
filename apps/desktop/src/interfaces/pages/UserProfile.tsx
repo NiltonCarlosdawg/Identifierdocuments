@@ -4,6 +4,7 @@ import { api } from "../../infrastructure/di/container";
 import { PageHeader, StatusChip, OfflineNotice } from "../components/docid-ui";
 import { useOfflineCache } from "../hooks/useOfflineCache";
 import { useAuthStore } from "../stores/authStore";
+import { friendlyRole } from "../../shared/errors/mapError";
 import { ArrowLeft, Mail, Shield, Building2 } from "lucide-react";
 
 interface UserProfileData {
@@ -90,11 +91,11 @@ export default function UserProfile() {
               <p className="font-medium">{new Date(profile.createdAt).toLocaleString("pt-AO")}</p>
             </div>
             <div className="col-span-2">
-              <p className="text-xs text-docid-muted flex items-center gap-1 mb-1.5"><Shield className="h-3 w-3" /> Roles</p>
+              <p className="text-xs text-docid-muted flex items-center gap-1 mb-1.5"><Shield className="h-3 w-3" /> Funções de acesso</p>
               <div className="flex flex-wrap gap-1">
                 {(profile.roles || []).length === 0 && <span className="text-docid-muted">—</span>}
                 {(profile.roles || []).map(r => (
-                  <span key={r.id} className="rounded-full bg-docid-primary/10 px-3 py-1 text-xs font-medium text-docid-primary-soft">{r.name}</span>
+                  <span key={r.id} className="rounded-full bg-docid-primary/10 px-3 py-1 text-xs font-medium text-docid-primary-soft">{friendlyRole(r.name)}</span>
                 ))}
               </div>
             </div>

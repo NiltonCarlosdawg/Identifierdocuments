@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useAuthStore } from "../stores/authStore";
 import { useAppConfigStore } from "../stores/configStore";
 import { api } from "../../infrastructure/di/container";
-import { mapError } from "../../shared/errors/mapError";
+import { mapError, friendlyRole } from "../../shared/errors/mapError";
 import { PageHeader } from "../components/docid-ui";
 import { User, Lock, Save, Sun, Moon } from "lucide-react";
 
@@ -31,23 +31,23 @@ export default function Profile() {
       const updatedName = res.data?.fullName ?? res.fullName ?? fullName.trim();
       if (user) setUser({ ...user, fullName: updatedName });
       setSaveMsg("Nome actualizado.");
-    } catch (err: any) { setSaveMsg(mapError(err, "Erro ao actualizar.")); } finally { setSaving(false); }
+    } catch (err: any) { setSaveMsg(mapError(err, "Não foi possível guardar o nome.")); } finally { setSaving(false); }
   };
 
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setPwError(""); setPwSuccess("");
-    if (newPassword !== confirmPassword) { setPwError("As passwords não coincidem."); return; }
-    if (newPassword.length < 6) { setPwError("A nova password deve ter pelo menos 6 caracteres."); return; }
+    if (newPassword !== confirmPassword) { setPwError("As palavras-passe não coincidem."); return; }
+    if (newPassword.length < 6) { setPwError("A nova palavra-passe deve ter pelo menos 6 caracteres."); return; }
     setPwLoading(true);
     try {
       const res = await api.patch<{ token?: string; data?: { token?: string } }>("/auth/me/password", { currentPassword, newPassword });
       // O servidor termina todas as sessões antigas e devolve um token novo para esta.
       const newToken = res?.token ?? res?.data?.token;
       if (newToken && user) useAuthStore.getState().login(newToken, user);
-      setPwSuccess("Password alterada com sucesso.");
+      setPwSuccess("Palavra-passe alterada com sucesso.");
       setCurrentPassword(""); setNewPassword(""); setConfirmPassword("");
-    } catch (err: any) { setPwError(mapError(err, "Erro ao alterar password.")); } finally { setPwLoading(false); }
+    } catch (err: any) { setPwError(mapError(err, "Não foi possível alterar a palavra-passe.")); } finally { setPwLoading(false); }
   };
 
   if (!user) return <div className="flex items-center justify-center py-16 text-sm text-docid-muted">A carregar perfil...</div>;
@@ -70,11 +70,11 @@ export default function Profile() {
           </div>
           <div>
             <p className="text-xs text-docid-muted">Sector</p>
-            <p className="font-medium">{user.sectorName || user.sectorId || "-"}</p>
+            <p className="font-medium">{user.sectorName || "—"}</p>
           </div>
           <div className="col-span-2">
-            <p className="text-xs text-docid-muted">Roles</p>
-            <p className="font-medium">{user.roles.join(", ") || "-"}</p>
+            <p className="text-xs text-docid-muted">Funções de acesso</p>
+            <p className="font-medium">{user.roles.map(friendlyRole).join(", ") || "—"}</p>
           </div>
         </div>
       </div>
@@ -89,14 +89,14 @@ export default function Profile() {
       </div>
 
       <div className="docid-panel p-6">
-        <h2 className="flex items-center gap-2 text-base font-semibold mb-4"><Lock className="h-4 w-4" /> Alterar Password</h2>
+        <h2 className="flex items-center gap-2 text-base font-semibold mb-4"><Lock className="h-4 w-4" /> Alterar palavra-passe</h2>
         <form onSubmit={handleChangePassword} className="space-y-4 max-w-sm">
-          <div><label className="mb-1.5 block text-xs font-semibold text-docid-muted">Password actual</label><input type="password" value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} className="docid-input w-full" required /></div>
-          <div><label className="mb-1.5 block text-xs font-semibold text-docid-muted">Nova password</label><input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} className="docid-input w-full" required minLength={6} /></div>
-          <div><label className="mb-1.5 block text-xs font-semibold text-docid-muted">Confirmar nova password</label><input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} className="docid-input w-full" required /></div>
+          <div><label className="mb-1.5 block text-xs font-semibold text-docid-muted">Palavra-passe actual</label><input type="password" value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} className="docid-input w-full" required /></div>
+          <div><label className="mb-1.5 block text-xs font-semibold text-docid-muted">Nova palavra-passe</label><input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} className="docid-input w-full" required minLength={6} /></div>
+          <div><label className="mb-1.5 block text-xs font-semibold text-docid-muted">Confirmar nova palavra-passe</label><input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} className="docid-input w-full" required /></div>
           {pwError && <p className="text-xs text-docid-error">{pwError}</p>}
           {pwSuccess && <p className="text-xs text-docid-secondary">{pwSuccess}</p>}
-          <button type="submit" disabled={pwLoading || !currentPassword || !newPassword || !confirmPassword} className="docid-button-primary">{pwLoading ? "A alterar..." : "Alterar Password"}</button>
+          <button type="submit" disabled={pwLoading || !currentPassword || !newPassword || !confirmPassword} className="docid-button-primary">{pwLoading ? "A alterar..." : "Alterar palavra-passe"}</button>
         </form>
       </div>
 

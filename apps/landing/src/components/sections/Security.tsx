@@ -3,7 +3,7 @@ import { Reveal } from "@/components/Reveal";
 const FACTS = [
   {
     title: "Isolamento por organização",
-    body: "Cada organização tem o seu próprio espaço na base de dados, com políticas de acesso ao nível da linha. Uma consulta de outra organização não devolve registos.",
+    body: "Cada organização tem o seu próprio espaço na base de dados, com regras de acesso por registo. Uma consulta de outra organização não devolve registos.",
   },
   {
     title: "Permissões por sector",

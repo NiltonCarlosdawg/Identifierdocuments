@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { printer } from "../../infrastructure/di/container";
 import { useAppConfigStore } from "./configStore";
+import { mapError } from "../../shared/errors/mapError";
 import type { PrinterDevice } from "../../domain/entities/Printer";
 
 interface PrinterState {
@@ -33,7 +34,7 @@ export const usePrinterStore = create<PrinterState>((set, get) => ({
         loading: false,
       });
     } catch (err: any) {
-      set({ error: err.message || "Erro ao listar impressoras.", loading: false });
+      set({ error: mapError(err, "Não foi possível encontrar impressoras."), loading: false });
     }
   },
 

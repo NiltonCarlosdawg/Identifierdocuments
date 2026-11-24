@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useScannerStore } from "../stores/scannerStore";
 import { usePrinterStore } from "../stores/printerStore";
 import { scanner } from "../../infrastructure/di/container";
-import { mapError } from "../../shared/errors/mapError";
+import { mapError, friendlyMessage } from "../../shared/errors/mapError";
 import { PageHeader } from "../components/docid-ui";
 import { Scan, Camera, RefreshCw, Download, Trash2, ChevronLeft, ChevronRight, Plus, Printer } from "lucide-react";
 
@@ -53,10 +53,10 @@ export default function Scanner() {
     setPrinting(true);
     try {
       const msg = await printBytes(page, options.format);
-      setPrintInfo(msg);
+      setPrintInfo(friendlyMessage(msg, "Documento enviado para impressão."));
     } catch (err: unknown) {
       setPrintInfo("");
-      useScannerStore.setState({ error: mapError(err, "Erro ao imprimir.") });
+      useScannerStore.setState({ error: mapError(err, "Não foi possível imprimir.") });
     } finally {
       setPrinting(false);
     }
@@ -73,7 +73,7 @@ export default function Scanner() {
       } />
       {error && <div className="rounded-lg border border-docid-error/30 bg-docid-error/10 px-4 py-3 text-sm text-docid-error">{error}</div>}
       {printInfo && <div className="rounded-lg border border-docid-secondary/30 bg-docid-secondary/10 px-4 py-3 text-sm text-docid-secondary">{printInfo}</div>}
-      {!available && <div className="rounded-lg border border-docid-tertiary/30 bg-docid-tertiary/10 px-4 py-3 text-sm text-docid-tertiary">Scanner apenas disponível no ambiente desktop (Tauri).</div>}
+      {!available && <div className="rounded-lg border border-docid-tertiary/30 bg-docid-tertiary/10 px-4 py-3 text-sm text-docid-tertiary">A digitalização só está disponível na aplicação instalada no computador.</div>}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="docid-panel p-5 space-y-5 lg:col-span-1">
           <h3 className="text-sm font-semibold text-docid-text">Dispositivo</h3>
@@ -120,9 +120,9 @@ export default function Scanner() {
               ) : (
                 <div className="space-y-2">
                   <object data={previewUrl} type="application/pdf" className="h-[500px] w-full rounded-lg border border-docid-border bg-docid-surface-low">
-                    <div className="flex h-full items-center justify-center p-8 text-sm text-docid-muted">A WebView não conseguiu mostrar o PDF. Use o download para visualizar.</div>
+                    <div className="flex h-full items-center justify-center p-8 text-sm text-docid-muted">Não foi possível mostrar o ficheiro aqui. Descarregue-o para o abrir.</div>
                   </object>
-                  <p className="text-xs text-docid-muted">Se o preview estiver em branco (comum no WebKit/Linux), descarregue o ficheiro para o abrir no leitor do sistema.</p>
+                  <p className="text-xs text-docid-muted">Se a pré-visualização estiver em branco, descarregue o ficheiro para o abrir no leitor do sistema.</p>
                 </div>
               )}
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-docid-surface-low p-3 text-sm">

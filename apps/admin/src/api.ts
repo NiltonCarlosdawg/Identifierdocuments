@@ -2,6 +2,16 @@ const BASE = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/
 const TOKEN_KEY = "docid-provider-token";
 const PLATFORM_TOKEN_KEY = "docid-platform-token";
 
+const messageFor = (status: number) =>
+  status === 401 ? "A sua sessão terminou. Entre novamente."
+  : status === 429 ? "Muitas tentativas. Aguarde um momento."
+  : "Não foi possível concluir o pedido. Tente novamente.";
+
+class ApiError extends Error {}
+
+export const friendlyError = (e: unknown) =>
+  e instanceof ApiError ? e.message : "Não foi possível concluir o pedido. Tente novamente.";
+
 export type Plan = {
   id: string; name: string; price: number; maxUsers: number;
   monthlyOnlineIdentifiers: number; offlineBudgetPerMachine: number;
@@ -56,12 +66,12 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const body = text ? JSON.parse(text) : null;
   if (!res.ok) {
     if (res.status === 401) clearToken();
-    throw new Error(body?.error?.message || `Erro ${res.status}`);
+    throw new ApiError(messageFor(res.status));
   }
   return body as T;
 }
 
-// Token da plataforma é distinto do Bearer da provedora: um 401 aqui não invalida a sessão.
+// A chave da plataforma é distinta da sessão da provedora: um 401 aqui não invalida a sessão.
 async function platformRequest<T>(path: string, token: string, init: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = { ...(init.headers as Record<string, string>) };
   headers["x-platform-admin-token"] = token;
@@ -69,7 +79,7 @@ async function platformRequest<T>(path: string, token: string, init: RequestInit
   const res = await fetch(`${BASE}${path}`, { ...init, headers });
   const text = await res.text();
   const body = text ? JSON.parse(text) : null;
-  if (!res.ok) throw new Error(body?.error?.message || `Erro ${res.status}`);
+  if (!res.ok) throw new ApiError(messageFor(res.status));
   return body as T;
 }
 

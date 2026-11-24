@@ -35,7 +35,7 @@ export default function DocumentAccessRequestsModal({ identifier, onClose, onCha
       const res = await api.get<{ data: AccessRequest[] }>(endpoint);
       setRequests(res.data || []);
     } catch (err) {
-      setError(mapError(err, "Erro ao carregar pedidos de acesso."));
+      setError(mapError(err, "Não foi possível carregar os pedidos de acesso."));
     } finally {
       setLoading(false);
     }
@@ -50,7 +50,7 @@ export default function DocumentAccessRequestsModal({ identifier, onClose, onCha
       setRequests(prev => prev.map(r => r.id === res.data.id ? { ...r, ...res.data } : r));
       onChanged?.();
     } catch (err) {
-      setError(mapError(err, "Erro ao resolver pedido de acesso."));
+      setError(mapError(err, "Não foi possível responder ao pedido de acesso."));
     } finally {
       setBusyId(null);
     }
@@ -63,7 +63,7 @@ export default function DocumentAccessRequestsModal({ identifier, onClose, onCha
       setRequests(prev => prev.map(r => r.id === res.data.id ? { ...r, ...res.data } : r));
       onChanged?.();
     } catch (err) {
-      setError(mapError(err, "Erro ao cancelar pedido de acesso."));
+      setError(mapError(err, "Não foi possível cancelar o pedido."));
     } finally {
       setBusyId(null);
     }
@@ -86,7 +86,7 @@ export default function DocumentAccessRequestsModal({ identifier, onClose, onCha
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <p className="text-sm font-medium text-docid-text">{request.requester?.fullName || "Requerente"}</p>
-                      <StatusChip tone={STATUS_TONES[request.status] || "neutral"}>{STATUS_LABELS[request.status] || request.status}</StatusChip>
+                      <StatusChip tone={STATUS_TONES[request.status] || "neutral"}>{STATUS_LABELS[request.status] ?? "Por confirmar"}</StatusChip>
                     </div>
                     <p className="mt-1 text-[11px] text-docid-muted">
                       {new Date(request.createdAt).toLocaleString("pt-AO")}

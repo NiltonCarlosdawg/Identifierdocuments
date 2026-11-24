@@ -4,11 +4,11 @@ import { Reveal } from "@/components/Reveal";
 const QUESTIONS = [
   {
     q: "Preciso de internet para usar o DocID?",
-    a: "Sim, para entrar e sincronizar. O trabalho em curso é reservado por leases, por isso uma falha de rede não duplica documentos nem deixa dois postos a gravar por cima um do outro.",
+    a: "Sim, para entrar e sincronizar. O trabalho em curso fica reservado enquanto decorre a sincronização, por isso uma falha de rede não duplica documentos nem deixa dois postos a gravar por cima um do outro.",
   },
   {
     q: "Onde ficam os dados da minha empresa?",
-    a: "Na base de dados da organização, com isolamento por organização ao nível da linha. Cada pedido é autenticado e limitado à organização a que pertence.",
+    a: "Na base de dados da organização, com cada registo separado por organização. Cada pedido é autenticado e limitado à organização a que pertence.",
   },
   {
     q: "Quantas pessoas podem usar?",
@@ -16,7 +16,7 @@ const QUESTIONS = [
   },
   {
     q: "Funciona em Mac ou Linux?",
-    a: "Sim, em Linux: há um pacote .deb para Ubuntu 22.04 e compatíveis (amd64). Windows 10 e 11, 64 bits, tem instalador completo. A versão para macOS está em preparação e será publicada na mesma página.",
+    a: "Sim, em Linux: há um pacote .deb para Ubuntu 22.04 e compatíveis (64 bits). Windows 10 e 11, 64 bits, tem instalador completo. A versão para macOS está em preparação e será publicada na mesma página.",
   },
   {
     q: "Como actualizo a aplicação?",
@@ -24,7 +24,7 @@ const QUESTIONS = [
   },
   {
     q: "O que é um identificador DocID?",
-    a: "Um código único com o prefixo da organização, a categoria, a data e uma sequência diária. Por exemplo, VL-PROP-2026-1118-001: organização VL, categoria PROP, 18 de Novembro de 2026, primeiro documento do dia.",
+    a: "Um código único com o prefixo da organização, a categoria, a data e uma sequência diária. Por exemplo, VL-PROP-2026-1118-001: organização VL, categoria Propostas, 18 de Novembro de 2026, primeiro documento do dia.",
   },
 ];
 

@@ -52,7 +52,7 @@ export function Footer() {
         {
           title: "Descarregar",
           links: [
-            { label: "Windows · instalador 1.2.2", href: DOWNLOADS.installer.href },
+            { label: "Windows · instalador", href: DOWNLOADS.installer.href },
             { label: "Estado do serviço", href: API_HEALTH },
           ],
         },

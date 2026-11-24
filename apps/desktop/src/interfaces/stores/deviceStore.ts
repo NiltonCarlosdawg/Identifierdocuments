@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { mapError } from "../../shared/errors/mapError";
 
 interface DeviceState {
   deviceId: string | null;
@@ -25,7 +26,7 @@ export const useDeviceStore = create<DeviceState>()((set, get) => ({
       const result = await invoke<{ device_id: string; device_name: string }>("get_or_register_device_id");
       set({ deviceId: result.device_id, deviceName: result.device_name, initialized: true, deviceIdError: null });
     } catch (e: any) {
-      const msg = e?.message || e?.toString() || "Erro desconhecido";
+      const msg = mapError(e, "Não foi possível identificar este dispositivo. Ligue-se à internet e tente novamente.");
       set({ deviceIdError: msg, initialized: true });
     }
   },
