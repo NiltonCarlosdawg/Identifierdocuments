@@ -183,6 +183,20 @@
       "when": 1795700000000,
       "tag": "0025_email_notifications",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1795800000026,
+      "tag": "0026_tenant_license_number",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1795800000027,
+      "tag": "0027_license_enforcement",
+      "breakpoints": true
     }
   ]
 }

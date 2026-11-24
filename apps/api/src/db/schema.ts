@@ -21,6 +21,12 @@ export const organizations = pgTable("organizations", {
   planId: uuid("plan_id").notNull().references(() => plans.id),
   subscriptionStatus: text("subscription_status", { enum: ["free","paid","expired","suspended"] }).notNull().default("free"),
   subscriptionExpiresAt: timestamp("subscription_expires_at", { withTimezone: true }),
+  licenseNumber: text("license_number"),
+  licenseIssuedAt: timestamp("license_issued_at", { withTimezone: true }),
+  licenseValidUntil: timestamp("license_valid_until", { withTimezone: true }),
+  licenseMaxUsers: integer("license_max_users"),
+  licenseStatus: text("license_status", { enum: ["active", "suspended"] }).notNull().default("active"),
+  licenseUpdatedAt: timestamp("license_updated_at", { withTimezone: true }),
   isActive: boolean("is_active").notNull().default(true),
   termsAccepted: boolean("terms_accepted").notNull().default(false),
   termsAcceptedAt: timestamp("terms_accepted_at"),
@@ -369,7 +375,8 @@ export const notifications = pgTable("notifications", {
   index("notifications_read_idx").on(t.isRead),
 ] }) );
 
-export const organizationRelations = relations(organizations, ({ many }) => ({
+export const organizationRelations = relations(organizations, ({ one, many }) => ({
+  plan: one(plans, { fields: [organizations.planId], references: [plans.id] }),
   sectors: many(sectors),
   users: many(users),
   identifiers: many(identifiers),

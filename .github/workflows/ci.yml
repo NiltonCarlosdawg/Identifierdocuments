@@ -56,7 +56,7 @@ jobs:
       - name: Typecheck
         run: bunx tsc --noEmit
       - name: Unit tests
-        run: bun test src/__tests__/classifier-cache.test.ts src/__tests__/notification.service.test.ts src/__tests__/document-tags.test.ts src/__tests__/access-decision.test.ts src/__tests__/attachment-admin.test.ts src/__tests__/migrate-fresh.test.ts src/__tests__/auth-lookup.integration.test.ts src/__tests__/session-hardening.test.ts src/__tests__/cors-origins.test.ts src/__tests__/email-notifications.test.ts src/__tests__/license.test.ts src/__tests__/license.service.test.ts src/__tests__/license-flow.test.ts
+        run: bun test src/__tests__/classifier-cache.test.ts src/__tests__/notification.service.test.ts src/__tests__/document-tags.test.ts src/__tests__/access-decision.test.ts src/__tests__/attachment-admin.test.ts src/__tests__/migrate-fresh.test.ts src/__tests__/auth-lookup.integration.test.ts src/__tests__/session-hardening.test.ts src/__tests__/cors-origins.test.ts src/__tests__/email-notifications.test.ts src/__tests__/license-enforcement.test.ts src/__tests__/license.integration.test.ts src/__tests__/license.test.ts src/__tests__/license.service.test.ts src/__tests__/license-flow.test.ts
 
   desktop:
     name: Desktop (typecheck + unit tests)

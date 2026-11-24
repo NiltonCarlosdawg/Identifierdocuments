@@ -4,6 +4,8 @@ const PG_ERROR_MAP: Record<string, string> = {
   "23502": "Operação inválida: campo obrigatório em falta.",
   "42P01": "Erro interno: tabela não encontrada.",
   "22P02": "Formato de dados inválido.",
+  LIC01: "Limite de utilizadores da licença atingido.",
+  LIC02: "A licença só pode ser alterada pela plataforma DocID.",
 };
 
 const PG_UNIQUE_PATTERN = /duplicate key (?:value|error)/i;

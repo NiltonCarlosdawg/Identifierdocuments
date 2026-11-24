@@ -1,51 +1,73 @@
 import { useEffect, useState } from "react";
-import { AlertTriangle } from "lucide-react";
 import { api } from "../../infrastructure/di/container";
 
-type LicenseInfo = {
-  licenseNumber: string | null;
-  state: "trial" | "active" | "grace" | "read_only" | "suspended" | "none";
-  status: string | null;
-  planName: string | null;
-  maxUsers: number | null;
+/** Estado da licença devolvido por GET /tenants/me (campo `license`). */
+export interface LicenseInfo {
+  licenseNumber: string;
+  plan: string;
+  state: "active" | "grace" | "expired" | "suspended";
+  canWrite: boolean;
   validUntil: string | null;
-};
+  graceUntil: string | null;
+  daysLeft: number | null;
+  maxUsers: number | null;
+  activeUsers: number;
+}
 
-const DAY = 86_400_000;
+const REFRESH_MS = 15 * 60 * 1000;
+const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString("pt-PT") : "");
 
-function message(info: LicenseInfo): string | null {
-  const days = info.validUntil ? Math.ceil((new Date(info.validUntil).getTime() - Date.now()) / DAY) : null;
-  if (info.state === "suspended") return "Licença suspensa. A aplicação está em modo só consulta.";
-  if (info.state === "read_only") return "Licença expirada. A aplicação está em modo só consulta até renovar.";
-  if (info.state === "grace") return `Licença expirada. Tem mais ${Math.max(0, days ?? 0)} dias de tolerância antes de passar a só consulta.`;
-  if (info.state === "trial" && days != null && days <= 7) return `Período de teste termina em ${Math.max(0, days)} dia(s). Renove para não perder o acesso.`;
+/** Texto e estilo do aviso, ou null quando não há nada a mostrar. Exportado para testes. */
+export function licenseNotice(l: LicenseInfo | null): { tone: "info" | "warning" | "error"; text: string } | null {
+  if (!l) return null;
+  if (l.state === "suspended") {
+    return { tone: "error", text: `A licença ${l.licenseNumber} está suspensa. Modo só consulta: pode ver e descarregar documentos, mas não criar, carregar ou partilhar.` };
+  }
+  if (l.state === "expired") {
+    return { tone: "error", text: `A licença ${l.licenseNumber} expirou em ${fmt(l.validUntil)}. Modo só consulta: pode ver e descarregar documentos, mas não criar, carregar ou partilhar. Contacte o suporte para renovar.` };
+  }
+  if (l.state === "grace") {
+    return { tone: "warning", text: `A licença ${l.licenseNumber} expirou em ${fmt(l.validUntil)}. Tudo continua a funcionar até ${fmt(l.graceUntil)}; depois a organização passa a só consulta. Renove para evitar a interrupção.` };
+  }
+  if (l.daysLeft !== null) {
+    if (l.plan === "trial" && l.daysLeft <= 7) {
+      const dias = l.daysLeft <= 1 ? "termina hoje" : `faltam ${l.daysLeft} dias`;
+      return { tone: "info", text: `Período de teste: ${dias} (até ${fmt(l.validUntil)}). Número de licença ${l.licenseNumber}.` };
+    }
+    if (l.plan !== "trial" && l.daysLeft <= 15) {
+      return { tone: "info", text: `A licença ${l.licenseNumber} termina em ${l.daysLeft} dia${l.daysLeft === 1 ? "" : "s"} (${fmt(l.validUntil)}).` };
+    }
+  }
   return null;
 }
 
+const TONE: Record<string, string> = {
+  info: "border-docid-primary/30 bg-docid-primary/10 text-docid-text",
+  warning: "border-docid-tertiary/40 bg-docid-tertiary/10 text-docid-text",
+  error: "border-docid-error/30 bg-docid-error/10 text-docid-error",
+};
+
+/** Faixa no topo da app com o estado da licença da organização. */
 export default function LicenseBanner() {
-  const [info, setInfo] = useState<LicenseInfo | null>(null);
+  const [license, setLicense] = useState<LicenseInfo | null>(null);
 
   useEffect(() => {
     let alive = true;
-    const load = async () => {
-      try {
-        const res = await api.get<{ data: LicenseInfo }>("/tenants/me/license");
-        if (alive) setInfo(res.data);
-      } catch { /* aviso não bloqueia a aplicação */ }
+    const load = () => {
+      api.get<{ data?: { license?: LicenseInfo | null } }>("/tenants/me")
+        .then((res) => { if (alive) setLicense(res?.data?.license ?? null); })
+        .catch(() => { /* offline ou sem sessão: mantém o último estado conhecido */ });
     };
-    void load();
-    const timer = setInterval(load, 15 * 60 * 1000);
-    return () => { alive = false; clearInterval(timer); };
+    load();
+    const id = setInterval(load, REFRESH_MS);
+    return () => { alive = false; clearInterval(id); };
   }, []);
 
-  const text = info ? message(info) : null;
-  if (!text) return null;
-
+  const notice = licenseNotice(license);
+  if (!notice) return null;
   return (
-    <div data-testid="license-banner" className="flex items-center gap-2 border-b border-amber-500/30 bg-amber-500/10 px-6 py-2 text-xs text-amber-300">
-      <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
-      <span>{text}</span>
-      {info?.licenseNumber && <span className="ml-auto font-mono text-[10px] text-amber-300/70">{info.licenseNumber}</span>}
+    <div role={notice.tone === "error" ? "alert" : "status"} className={`mb-5 rounded-lg border px-4 py-3 text-sm ${TONE[notice.tone]}`}>
+      {notice.text}
     </div>
   );
 }

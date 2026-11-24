@@ -4,6 +4,7 @@ import { cors } from "@elysiajs/cors";
 import { node } from "@elysiajs/node";
 import { authMiddleware } from "./middleware/auth";
 import { tenantMiddleware } from "./middleware/tenant";
+import { licenseGuard } from "./middleware/licenseGuard";
 import { authModule } from "./modules/auth.module";
 import { tenantsModule } from "./modules/tenants.module";
 import { sectorsModule } from "./modules/sectors.module";
@@ -26,6 +27,7 @@ import { logger } from "./lib/logger";
 import { startWorkers } from "./jobs/workers";
 import { startEmailWorker } from "./jobs/email-worker";
 import { emailModule, emailLinksModule } from "./modules/email.module";
+import { platformModule } from "./modules/platform.module";
 import { getClientIp } from "./lib/ip";
 import { ALLOWED_ORIGINS } from "./lib/cors";
 
@@ -76,6 +78,7 @@ if (enableSwagger) {
         { name: "Notificações", description: "SSE em tempo real" },
         { name: "Classificador", description: "Classificação por IA (Groq)" },
         { name: "E-mail", description: "Notificações por e-mail por organização" },
+        { name: "Plataforma", description: "Gestão de licenças (token da plataforma)" },
       ],
       servers: [{ url: `http://localhost:${PORT}`, description: "Desenvolvimento" }],
     },
@@ -86,6 +89,7 @@ if (enableSwagger) {
 app
   .use(authMiddleware)
   .use(tenantMiddleware)
+  .use(licenseGuard)
   .derive(({ request }: { request: Request }) => ({ clientIp: getClientIp(request) }))
   .onRequest(({ request }) => {
     requestTimings.set(request, performance.now());
@@ -134,6 +138,7 @@ app
   .use(devicesModule)
   .use(classifierModule)
   .use(emailModule)
+  .use(platformModule)
   .use(notificationSSEModule)
   .onError((ctx: any) => {
     const { code, error, set, request } = ctx;

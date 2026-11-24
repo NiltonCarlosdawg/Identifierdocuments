@@ -13,6 +13,7 @@ import { collectStats } from "./stats.module";
 import { safeError } from "../lib/errors";
 import { getClientIp } from "../lib/ip";
 import { getFreePlan, getSubscriptionContext } from "../services/subscription.service";
+import { getTenantLicense } from "../services/license-enforcement.service";
 import { getLicenseContext, issueLicense, trialLicenseInput } from "../services/license.service";
 
 export const tenantsModule = new (Elysia as any)({ prefix: "/tenants" })
@@ -141,9 +142,11 @@ export const tenantsModule = new (Elysia as any)({ prefix: "/tenants" })
       return { error: { code: "NOT_FOUND", message: "Organização não encontrada." } };
     }
     const { plan, status } = await getSubscriptionContext(auth!.tenantId);
+    const license = await getTenantLicense(auth!.tenantId);
     return {
       data: {
         ...org,
+        license,
         subscription: {
           status,
           planName: plan.name,

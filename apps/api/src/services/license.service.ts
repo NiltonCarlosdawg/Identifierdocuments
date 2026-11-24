@@ -1,8 +1,9 @@
 import { randomBytes } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db, type DB } from "../db";
 import { withTenant } from "../db/withTenant";
-import { licenses, plans } from "../db/schema";
+import { licenses, plans, organizations } from "../db/schema";
+import { invalidateLicenseCache } from "./license-enforcement.service";
 import { formatLicenseNumber, licenseState, type LicenseState, type LicenseStatus } from "../lib/license";
 
 const ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -81,8 +82,28 @@ export async function issueLicense(
   };
   if (existing) {
     const [updated] = await tx.update(licenses).set(values).where(eq(licenses.id, existing.id)).returning();
+    await syncOrgLicense(tx, input, values);
     return updated;
   }
   const [created] = await tx.insert(licenses).values(values).returning();
+  await syncOrgLicense(tx, input, values);
   return created;
+}
+
+/** Ponte: a tabela licenses continua a ser a fonte de verdade; espelha as
+ * alterações nos campos de licença da organizations usados pelo licenseGuard. */
+async function syncOrgLicense(
+  tx: DB,
+  input: { tenantId: string; maxUsers?: number | null; validUntil?: Date | null; status?: LicenseStatus },
+  values: { maxUsers: number | null; validUntil: Date | null; status: string },
+) {
+  const patch: Partial<typeof organizations.$inferInsert> = {
+    licenseStatus: values.status === "suspended" || values.status === "expired" ? "suspended" : "active",
+    licenseUpdatedAt: new Date(),
+  };
+  if (input.maxUsers !== undefined) patch.licenseMaxUsers = values.maxUsers;
+  if (input.validUntil !== undefined) patch.licenseValidUntil = values.validUntil;
+  await tx.execute(sql`SELECT set_config('app.license_admin', 'on', true)`);
+  await tx.update(organizations).set(patch).where(eq(organizations.id, input.tenantId));
+  invalidateLicenseCache(input.tenantId);
 }
