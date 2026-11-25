@@ -3,8 +3,13 @@
 set -euo pipefail
 
 BASE="${BASE:-https://docid.milvendas.ao/downloads}"
-FILE="DocID_1.1.6_x64-setup-WebView2.exe"
 SOURCE="apps/landing/src/components/ui/download-section.tsx"
+FILE=$(python3 - "$SOURCE" <<'PY'
+import re, sys
+src = open(sys.argv[1], encoding="utf-8").read()
+print(re.search(r'/downloads/([^"]+)', src).group(1))
+PY
+)
 
 expected=$(python3 - "$SOURCE" <<'PY'
 import re, sys
