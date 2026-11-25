@@ -32,7 +32,7 @@ export default function Settings() {
         {isAdmin && <TabBtn active={tab === "notificacoes"} onClick={() => setTab("notificacoes")}><Bell className="h-4 w-4" /> Notificações</TabBtn>}
         {isAdmin && <TabBtn active={tab === "email"} onClick={() => setTab("email")}><Mail className="h-4 w-4" /> E-mail</TabBtn>}
       </div>
-      <div className="max-w-2xl">
+      <div className="w-full">
         {tab === "server" ? <ServerTab /> : tab === "appearance" ? <AppearanceTab /> : tab === "watcher" ? <WatcherTab /> : tab === "organizacao" ? <OrganizationTab /> : tab === "dispositivos" ? <DevicesTab /> : tab === "email" ? <EmailTab /> : <NotificationsTab />}
       </div>
     </div>
@@ -286,10 +286,10 @@ function OrganizationTab() {
     }
   };
 
-  if (loading) return <div className="docid-panel p-6 max-w-xl"><div className="text-sm text-docid-muted">A carregar...</div></div>;
+  if (loading) return <div className="docid-panel p-6"><div className="text-sm text-docid-muted">A carregar...</div></div>;
 
   return (
-    <div className="space-y-6 max-w-xl">
+    <div className="space-y-6">
       {isStale && <OfflineNotice cachedAt={cachedAt} onRetry={refresh} />}
       <div className="docid-panel p-6 space-y-6">
         <h3 className="text-sm font-semibold text-docid-text">Dados da Organização</h3>
@@ -518,7 +518,7 @@ function DevicesTab() {
   };
 
   return (
-    <div className="space-y-6 max-w-xl">
+    <div className="space-y-6">
       {isStale && <OfflineNotice cachedAt={cachedAt} onRetry={refresh} />}
       {(loadError || writeError) && <div className="rounded-lg border border-docid-error/30 bg-docid-error/10 p-3 text-sm text-docid-error">{loadError || writeError}</div>}
 
@@ -769,7 +769,7 @@ function NotificationsTab() {
     }
   };
 
-  if (loading) return <div className="docid-panel p-6 max-w-xl"><div className="text-sm text-docid-muted">A carregar...</div></div>;
+  if (loading) return <div className="docid-panel p-6"><div className="text-sm text-docid-muted">A carregar...</div></div>;
 
   const items = [
     { key: "approval_pending", label: "Aprovação pendente", desc: "Quando um documento necessita da sua aprovação" },
@@ -868,7 +868,7 @@ function WatcherTab() {
   };
 
   return (
-    <div className="space-y-6 max-w-2xl">
+    <div className="space-y-6">
       {error && <div className="rounded-lg border border-docid-error/30 bg-docid-error/10 p-3 text-sm text-docid-error">{error}</div>}
       {actionInfo && <div className="rounded-lg border border-docid-secondary/30 bg-docid-secondary/10 p-3 text-sm text-docid-secondary">{actionInfo}</div>}
       <div className="flex items-center gap-3">
@@ -887,7 +887,7 @@ function WatcherTab() {
       </div>
 
       {report && (
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
           {reportCards.map(c => (
             <div key={c.label} className="rounded-lg bg-docid-surface-low p-3 text-center">
               <p className={`text-xl font-bold ${c.tone}`}>{c.value}</p>
@@ -1059,7 +1059,7 @@ function EmailTab() {
       </div>
 
       <div className="docid-panel p-4 space-y-3">
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
           <label className="text-xs text-docid-muted">Fornecedor
             <select data-testid="email-provider" className="docid-input mt-1 w-full" value={form.provider} onChange={e => set("provider", e.target.value as EmailForm["provider"])}>
               <option value="smtp">Servidor da empresa</option><option value="resend">Serviço de e-mail A</option><option value="sendgrid">Serviço de e-mail B</option>
@@ -1077,7 +1077,7 @@ function EmailTab() {
         </div>
 
         {form.provider === "smtp" && (
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
             <label className="text-xs text-docid-muted">Endereço do servidor de e-mail
               <input data-testid="email-smtp-host" className="docid-input mt-1 w-full" value={form.smtpHost} onChange={e => set("smtpHost", e.target.value)} />
             </label>
