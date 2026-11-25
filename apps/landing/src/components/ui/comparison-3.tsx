@@ -185,7 +185,7 @@ export default function ComparisonBlock() {
                         variant={plan.highlighted ? "default" : "secondary"}
                         className="w-full"
                       >
-                        <a href={plan.name === "Empresarial" ? "mailto:geralverano@verano.sbs" : "#pedido"}>
+                        <a href={plan.name === "Empresarial" ? "mailto:geralverano@verano.sbs" : `/?plano=${encodeURIComponent(plan.name)}#pedido`}>
                           {plan.name === "Empresarial" ? "Falar com a equipa" : "Escolher"}
                           <RiArrowRightLine data-icon="inline-end" />
                         </a>

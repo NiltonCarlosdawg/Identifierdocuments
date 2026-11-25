@@ -38,7 +38,13 @@ export function Checkout() {
     }
     fetch(`${API}/plans`)
       .then((r) => r.json())
-      .then((d) => setPlans((d.plans || []).filter((p: Plan) => p.price > 0)))
+      .then((d) => {
+        const available: Plan[] = (d.plans || []).filter((p: Plan) => p.price > 0);
+        setPlans(available);
+        const chosen = new URLSearchParams(window.location.search).get("plano");
+        const match = available.find((p) => p.name.toLowerCase() === (chosen || "").toLowerCase());
+        if (match) setPlanId(match.id);
+      })
       .catch(() => setError("Não foi possível carregar os planos."));
   }, []);
 
@@ -74,9 +80,9 @@ export function Checkout() {
     <Reveal className="mx-auto max-w-5xl px-6 py-20" delay={0.04}>
       <div className="mb-10 text-center">
         <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-docid-secondary">Planos</p>
-        <h2 className="mt-3 text-[clamp(1.9rem,3.8vw,2.9rem)] font-semibold">Escolha o plano para a sua organização</h2>
+        <h2 className="mt-3 text-[clamp(1.9rem,3.8vw,2.9rem)] font-semibold">Pedido de subscrição</h2>
         <p className="mx-auto mt-3 max-w-[60ch] text-sm leading-relaxed text-docid-muted">
-          Envie o pedido; a MilVendas confirma o pagamento e activa a licença. Todos os valores em kwanzas.
+          Compare os planos abaixo, escolha o que pretende e envie o pedido. A MilVendas confirma o pagamento e activa a licença. Todos os valores em kwanzas.
         </p>
       </div>
 
@@ -88,23 +94,15 @@ export function Checkout() {
         </div>
       ) : (
         <form id="pedido" onSubmit={submit} className="grid gap-6 lg:grid-cols-[1.2fr_1fr]" data-testid="checkout-form">
-          <div className="space-y-3">
-            {plans.map((p) => (
-              <button
-                type="button"
-                key={p.id}
-                data-testid="checkout-plan"
-                onClick={() => setPlanId(p.id)}
-                className={`docid-panel flex w-full items-center justify-between gap-4 p-4 text-left transition ${planId === p.id ? "border-docid-secondary ring-1 ring-docid-secondary" : ""}`}
-              >
-                <span>
-                  <span className="block font-semibold">{p.name}</span>
-                  <span className="block text-xs text-docid-muted">{p.maxUsers} utilizadores · {p.monthlyOnlineIdentifiers} identificadores/mês</span>
-                </span>
-                <span className="font-mono text-sm">{p.price.toLocaleString("pt-AO")} Kz</span>
-              </button>
-            ))}
-            {plans.length === 0 && !error && <p className="text-sm text-docid-muted">A carregar planos...</p>}
+          <div className="docid-panel space-y-2 p-5">
+            <p className="text-xs font-semibold uppercase tracking-wider text-docid-muted">Plano escolhido</p>
+            {planId ? (
+              <p data-testid="checkout-selected-plan" className="text-lg font-semibold text-docid-text">
+                {plans.find((p) => p.id === planId)?.name ?? "Plano seleccionado"}
+              </p>
+            ) : (
+              <p className="text-sm text-docid-muted">Escolha um plano na tabela comparativa abaixo.</p>
+            )}
           </div>
 
           <div className="docid-panel space-y-4 p-5">
