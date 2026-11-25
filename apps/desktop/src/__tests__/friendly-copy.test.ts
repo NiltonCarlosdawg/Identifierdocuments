@@ -32,6 +32,9 @@ describe("textos amigáveis", () => {
       .toBe("Este identificador já possui um documento principal.");
     expect(mapError(new Error("ORG_ADMIN"), "Não foi possível concluir.")).toBe("Não foi possível concluir.");
     expect(mapError(new Error("category_id inválido"), "Não foi possível concluir.")).toBe("Não foi possível concluir.");
+    const licenseHint = "A licença DOCID-2026-AAAA-BBBB-CCCC expirou. A organização está em modo só consulta: pode ver e descarregar documentos, mas não criar, carregar ou partilhar. Contacte o suporte para renovar.";
+    expect(mapError(new Error(licenseHint), "Não foi possível concluir.")).toBe(licenseHint);
+    expect(mapError(new Error("Não tem permissão para continuar."), "Não foi possível concluir.")).toBe("Não tem permissão para continuar.");
   });
 
   test("funções de acesso", () => {

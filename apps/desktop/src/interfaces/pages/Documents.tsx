@@ -441,6 +441,7 @@ function UploadModal({ onClose, onDone, initialPath = "", initialIdentifier = ""
     setError(""); setLoading(true); setDoneSummary(false);
     const uploadMode = mode === "attachments" ? "attachment" : "attach";
     let anyOk = false;
+    let firstError = "";
 
     for (const row of rows) {
       if (row.status === "ok" || row.status === "queued") continue;
@@ -449,10 +450,13 @@ function UploadModal({ onClose, onDone, initialPath = "", initialIdentifier = ""
         updateRow(row.key, { status: result.status, message: result.status === "queued" ? "Guardado na fila" : "Enviado" });
         anyOk = true;
       } catch (err: any) {
-        updateRow(row.key, { status: "error", message: mapError(err, "Não foi possível enviar o ficheiro.") });
+        const message = mapError(err, "Não foi possível enviar o ficheiro.");
+        if (!firstError) firstError = message;
+        updateRow(row.key, { status: "error", message });
       }
     }
 
+    if (firstError) setError(firstError);
     setLoading(false);
     setDoneSummary(true);
   };
@@ -526,7 +530,7 @@ function UploadModal({ onClose, onDone, initialPath = "", initialIdentifier = ""
                     disabled={loading || doneSummary}
                   />
                 )}
-                {row.message && <p className="mt-1 text-[10px] text-docid-muted">{row.message}</p>}
+                {row.message && <p className={`mt-1 text-xs ${row.status === "error" ? "text-docid-error" : "text-docid-muted"}`}>{row.message}</p>}
               </div>
             ))}
           </div>

@@ -5,7 +5,7 @@ const NETWORK_PATTERNS = /network|failed to fetch|sem ligação ao servidor|sem 
 
 // Mensagens do servidor que são detalhes técnicos e não devem chegar a quem usa a aplicação.
 const TECHNICAL_MESSAGE = /Erro\s*\d{3}|\b\d{3}\b|\b(?:ORG_ADMIN|SECTOR_SUPERVISOR|MEMBER|SMTP|HTTP|HTTPS|API|JSON|CSV|UUID|URL|Tauri|WebView|WebKit|Resend|SendGrid|PATCH|POST|PUT|DELETE|lease)\b|[a-z]+_[a-z_]+|\[object Object\]/i;
-const UPPERCASE_CODE = /[A-Z][A-Z0-9_]{3,}/;
+const UPPERCASE_CODE = /^[A-Z][A-Z0-9_]{3,}$/;
 
 const STATUS_MESSAGES: Record<number, string> = {
   400: "Verifique os dados e tente novamente.",
