@@ -21,6 +21,7 @@ export const licenseGuard = new (Elysia as any)()
       return;
     }
     if (!info || info.canWrite) return;
+    logger.warn({ tenantId: ctx.auth.tenantId, state: info.state, licenseNumber: info.licenseNumber }, "[LICENSE] escrita bloqueada");
     ctx.set.status = 403;
     return {
       error: {
