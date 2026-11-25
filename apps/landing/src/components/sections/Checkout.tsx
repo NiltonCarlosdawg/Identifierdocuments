@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Check, CreditCard, Loader2 } from "lucide-react";
+import ComparisonBlock from "@/components/ui/comparison-3";
 import { Reveal } from "@/components/Reveal";
 
 const API = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, "") || "https://didall.milvendas.ao";
@@ -86,7 +87,7 @@ export function Checkout() {
           <p className="mt-2 text-sm text-docid-muted">A MilVendas vai confirmar o pagamento e activar a sua licença. Receberá um e-mail com a confirmação.</p>
         </div>
       ) : (
-        <form onSubmit={submit} className="grid gap-6 lg:grid-cols-[1.2fr_1fr]" data-testid="checkout-form">
+        <form id="pedido" onSubmit={submit} className="grid gap-6 lg:grid-cols-[1.2fr_1fr]" data-testid="checkout-form">
           <div className="space-y-3">
             {plans.map((p) => (
               <button
@@ -146,6 +147,7 @@ export function Checkout() {
           </div>
         </form>
       )}
+      <div className="mt-10"><ComparisonBlock /></div>
     </Reveal>
     </section>
   );

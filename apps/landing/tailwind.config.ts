@@ -10,6 +10,18 @@ export default {
   theme: {
     extend: {
       colors: {
+        background: token("bg"),
+        foreground: token("text"),
+        card: { DEFAULT: token("surface"), foreground: token("text") },
+        popover: { DEFAULT: token("surface"), foreground: token("text") },
+        primary: { DEFAULT: token("primary"), foreground: "#ffffff" },
+        secondary: { DEFAULT: token("surface-low"), foreground: token("text") },
+        muted: { DEFAULT: token("surface-low"), foreground: token("muted") },
+        accent: { DEFAULT: token("surface-high"), foreground: token("text") },
+        destructive: { DEFAULT: token("error"), foreground: "#ffffff" },
+        border: token("border"),
+        input: token("border"),
+        ring: token("primary"),
         docid: {
           bg: token("bg"),
           surface: token("surface"),

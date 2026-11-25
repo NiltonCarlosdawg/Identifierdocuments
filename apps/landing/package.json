@@ -9,6 +9,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@radix-ui/react-slot": "^1.5.0",
+    "@remixicon/react": "^4.9.0",
+    "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.0",
     "framer-motion": "^11.11.0",
     "lucide-react": "^0.436.0",
