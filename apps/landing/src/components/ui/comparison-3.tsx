@@ -94,7 +94,7 @@ function Cell({ value, highlighted }: { value: CellValue; highlighted: boolean }
   );
 }
 
-export default function ComparisonBlock() {
+export default function ComparisonBlock({ onChoosePlan }: { onChoosePlan?: (name: string) => void } = {}) {
   return (
     <section className="flex w-full justify-center bg-background px-6 py-10 text-foreground">
       <div className="mx-auto w-full max-w-5xl">
@@ -185,7 +185,14 @@ export default function ComparisonBlock() {
                         variant={plan.highlighted ? "default" : "secondary"}
                         className="w-full"
                       >
-                        <a href={plan.name === "Empresarial" ? "mailto:geralverano@verano.sbs" : `/?plano=${encodeURIComponent(plan.name)}#pedido`}>
+                        <a
+                          href={plan.name === "Empresarial" ? "mailto:geralverano@verano.sbs" : `/?plano=${encodeURIComponent(plan.name)}#pedido`}
+                          onClick={(e) => {
+                            if (!onChoosePlan || plan.name === "Empresarial") return;
+                            e.preventDefault();
+                            onChoosePlan(plan.name);
+                          }}
+                        >
                           {plan.name === "Empresarial" ? "Falar com a equipa" : "Escolher"}
                           <RiArrowRightLine data-icon="inline-end" />
                         </a>

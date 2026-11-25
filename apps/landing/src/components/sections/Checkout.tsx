@@ -48,6 +48,14 @@ export function Checkout() {
       .catch(() => setError("Não foi possível carregar os planos."));
   }, []);
 
+  const choosePlan = (name: string) => {
+    const match = plans.find((p) => p.name.toLowerCase() === name.toLowerCase());
+    if (!match) return;
+    setPlanId(match.id);
+    window.history.replaceState(null, "", `?plano=${encodeURIComponent(name)}#pedido`);
+    document.getElementById("pedido")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
   const submit = async (e: FormEvent) => {
     e.preventDefault(); setError(""); setBusy(true);
     const token = new URLSearchParams(window.location.search).get("pedido");
@@ -86,7 +94,7 @@ export function Checkout() {
         </p>
       </div>
 
-      <ComparisonBlock />
+      <ComparisonBlock onChoosePlan={choosePlan} />
 
       <div className="mx-auto mt-12 max-w-3xl">
         {done ? (
