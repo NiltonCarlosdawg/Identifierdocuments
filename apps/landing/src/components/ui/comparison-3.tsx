@@ -95,6 +95,14 @@ function Cell({ value, highlighted }: { value: CellValue; highlighted: boolean }
 }
 
 export default function ComparisonBlock({ onChoosePlan }: { onChoosePlan?: (name: string) => void } = {}) {
+  const planHref = (plan: (typeof plans)[number]) =>
+    plan.name === "Empresarial" ? "mailto:geral@milvendas.ao" : `/?plano=${encodeURIComponent(plan.name)}#pedido`;
+  const planClick = (e: React.MouseEvent<HTMLAnchorElement>, plan: (typeof plans)[number]) => {
+    if (!onChoosePlan || plan.name === "Empresarial") return;
+    e.preventDefault();
+    onChoosePlan(plan.name);
+  };
+
   return (
     <section className="flex w-full justify-center bg-background px-6 py-10 text-foreground">
       <div className="mx-auto w-full max-w-5xl">
@@ -114,11 +122,11 @@ export default function ComparisonBlock({ onChoosePlan }: { onChoosePlan?: (name
         <div className="relative">
           <Badge
             variant="default"
-            className="absolute bottom-full left-[68%] z-20 mb-2 -translate-x-1/2"
+            className="absolute bottom-full left-[68%] z-20 mb-2 hidden -translate-x-1/2 sm:block"
           >
             Mais escolhido
           </Badge>
-          <div className="overflow-x-auto border border-border">
+          <div className="hidden overflow-x-auto border border-border sm:block">
             <Table className="table-fixed text-sm">
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
@@ -186,12 +194,8 @@ export default function ComparisonBlock({ onChoosePlan }: { onChoosePlan?: (name
                         className="w-full"
                       >
                         <a
-                          href={plan.name === "Empresarial" ? "mailto:geralverano@verano.sbs" : `/?plano=${encodeURIComponent(plan.name)}#pedido`}
-                          onClick={(e) => {
-                            if (!onChoosePlan || plan.name === "Empresarial") return;
-                            e.preventDefault();
-                            onChoosePlan(plan.name);
-                          }}
+                          href={planHref(plan)}
+                          onClick={(e) => planClick(e, plan)}
                         >
                           {plan.name === "Empresarial" ? "Falar com a equipa" : "Escolher"}
                           <RiArrowRightLine data-icon="inline-end" />
@@ -202,6 +206,44 @@ export default function ComparisonBlock({ onChoosePlan }: { onChoosePlan?: (name
                 </TableRow>
               </TableBody>
             </Table>
+          </div>
+
+          <div className="space-y-5 sm:hidden">
+            {plans.map((plan) => (
+              <div key={plan.name} className={cn("rounded-xl border border-border p-5", plan.highlighted && "border-primary bg-primary/5")}>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-semibold text-foreground">{plan.name}</p>
+                    <p className="mt-1 text-2xl font-bold text-foreground">{plan.price}</p>
+                    <p className="text-xs text-muted-foreground">{plan.cadence}</p>
+                  </div>
+                  {plan.highlighted && <Badge variant="default">Mais escolhido</Badge>}
+                </div>
+
+                <div className="mt-5 space-y-4">
+                  {groups.map((group) => (
+                    <div key={group.section}>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-foreground">{group.section}</p>
+                      <ul className="mt-2 space-y-2">
+                        {group.features.map((feature) => (
+                          <li key={feature.label} className="flex items-start justify-between gap-4 text-sm">
+                            <span className="text-muted-foreground">{feature.label}</span>
+                            <Cell value={feature.values[plans.indexOf(plan)]} highlighted={plan.highlighted} />
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
+                </div>
+
+                <Button asChild size="sm" variant={plan.highlighted ? "default" : "secondary"} className="mt-6 w-full">
+                  <a href={planHref(plan)} onClick={(e) => planClick(e, plan)}>
+                    {plan.name === "Empresarial" ? "Falar com a equipa" : "Escolher"}
+                    <RiArrowRightLine data-icon="inline-end" />
+                  </a>
+                </Button>
+              </div>
+            ))}
           </div>
         </div>
       </div>

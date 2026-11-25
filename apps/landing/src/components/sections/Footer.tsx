@@ -61,7 +61,7 @@ export function Footer() {
         { label: "Ver o produto", href: "#produto", icon: "paper", variant: "outline" },
         { label: "Descarregar para Windows", href: DOWNLOADS.installer.href, icon: "laptop", variant: "solid" },
       ]}
-      copyright="© 2026 Verano Labs · Luanda, Angola"
+      copyright="© 2026 MilVendas · Luanda, Angola"
       legal={[]}
       socials={[]}
       crew={CREW}
