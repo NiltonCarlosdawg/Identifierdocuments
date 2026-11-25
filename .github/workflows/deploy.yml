@@ -2,6 +2,8 @@ name: Deploy DocID
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
 
 permissions:
   contents: read
@@ -45,36 +47,7 @@ jobs:
           scp -i /tmp/deploy_key -o StrictHostKeyChecking=no /tmp/api.tgz /tmp/landing.tgz /tmp/admin.tgz milvendas@135.181.34.42:/tmp/docid-deploy/
           echo "upload ok"
 
-      - name: Download installer 1.2.2
-        run: |
-          curl -fsSL --retry 3 --max-time 900 \
-            -o /tmp/installer.exe \
-            https://github.com/NiltonCarlosdawg/Identifierdocuments/releases/download/desktop-v1.2.2/DocID_1.2.2_x64-setup.exe
-          sha256sum /tmp/installer.exe | cut -d' ' -f1 > /tmp/installer.sha
-
-      - name: Upload installer
-        run: |
-          SSH="ssh -i /tmp/deploy_key -o StrictHostKeyChecking=no milvendas@135.181.34.42"
-          $SSH 'mkdir -p /mnt/homer2/milvendas/docid.milvendas.ao/downloads'
-          scp -i /tmp/deploy_key -o StrictHostKeyChecking=no /tmp/installer.exe milvendas@135.181.34.42:/mnt/homer2/milvendas/docid.milvendas.ao/downloads/DocID_1.2.2_x64-setup.exe
-          HASH=$(cat /tmp/installer.sha)
-          $SSH "cd /mnt/homer2/milvendas/docid.milvendas.ao/downloads && printf '%s  DocID_1.2.2_x64-setup.exe\\n' '$HASH' > SHA256SUMS && sha256sum -c SHA256SUMS"
-
-      - name: Deploy API
-        run: |
-          SSH="ssh -i /tmp/deploy_key -o StrictHostKeyChecking=no milvendas@135.181.34.42"
-          $SSH 'cd /mnt/homer2/milvendas/didall.milvendas.ao && tar xzf /tmp/docid-deploy/api.tgz && grep -q "^ADMIN_ORIGIN=" .env || echo "ADMIN_ORIGIN=https://docid.milvendas.ao" >> .env; echo api-code-ok'
-
-      - name: Migrate and seed
-        run: |
-          SSH="ssh -i /tmp/deploy_key -o StrictHostKeyChecking=no milvendas@135.181.34.42"
-          $SSH 'cd /mnt/homer2/milvendas/didall.milvendas.ao && export PATH=/opt/alt/alt-nodejs22/root/usr/bin:$PATH && set -a && . ./.env && set +a && timeout 90 node --import tsx src/db/migrate.ts | tail -1 && timeout 90 node --import tsx src/db/seed.ts | tail -1 || true; psql "$DATABASE_URL" -Atc "select count(*) from pg_tables where tablename in ('"'"'plans'"'"','"'"'provider_users'"'"','"'"'licenses'"'")"'
-
-      - name: Deploy landing and admin
-        run: |
-          SSH="ssh -i /tmp/deploy_key -o StrictHostKeyChecking=no milvendas@135.181.34.42"
-          $SSH 'mkdir -p /mnt/homer2/milvendas/docid.milvendas.ao/admin && tar xzf /tmp/docid-deploy/landing.tgz -C /mnt/homer2/milvendas/docid.milvendas.ao && tar xzf /tmp/docid-deploy/admin.tgz -C /mnt/homer2/milvendas/docid.milvendas.ao/admin && echo static-ok'
-
+      # Os instaladores são publicados pelo workflow Build & Release (tags desktop-v*).
       - name: Restart API
         run: |
           SSH="ssh -i /tmp/deploy_key -o StrictHostKeyChecking=no milvendas@135.181.34.42"
