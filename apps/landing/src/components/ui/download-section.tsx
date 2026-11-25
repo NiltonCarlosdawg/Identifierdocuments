@@ -9,12 +9,12 @@ export const DOWNLOADS = {
   installer: {
     href: "/downloads/DocID_1.2.2_x64-setup.exe",
     size: "290 MB",
-    sha256: "9f16192bae3a9d9e984fd9ce1bffe54cdc820a73a2b5195986ad2d3dfa0d3d55",
+    sha256: "348f18e5d5264ebec413062ca98d29f72f7c06aae7f5cd3a7a8b41ea8fd342b0",
   },
   linux: {
     href: "/downloads/DocID_1.2.2_amd64.deb",
     size: "10 MB",
-    sha256: "b9479826b526cf22b74c4abba5c7b708351776b74b00b17811bbda8d31113ccc",
+    sha256: "e8fbf1b5b4b3d54ebe88b3a62206102ddbb88cfdec9d1ff4c55d6dbcb83937c4",
   },
 } as const;
 
