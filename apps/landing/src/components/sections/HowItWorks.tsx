@@ -32,7 +32,7 @@ export function HowItWorks() {
           {STEPS.map((step, i) => (
             <li key={step.title}>
               <Reveal delay={i * 0.08}>
-                <span className="font-mono text-xs text-docid-outline">{String(i + 1).padStart(2, "0")}</span>
+                <span className="font-mono text-xs text-docid-muted">{String(i + 1).padStart(2, "0")}</span>
                 <h3 className="mt-3 font-display text-lg font-semibold tracking-tight text-docid-text">{step.title}</h3>
                 <p className="mt-2 max-w-[36ch] text-sm leading-relaxed text-docid-muted">{step.body}</p>
               </Reveal>
