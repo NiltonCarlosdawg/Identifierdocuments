@@ -191,4 +191,28 @@ describe("Anexos e versionamento", () => {
     const currentText = await current.text();
     expect(currentText).toContain("Versão 2");
   });
+  test("documento principal é aceite sem o identificador no conteúdo", async () => {
+    const gen = await api<any>("/identifiers/generate", {
+      method: "POST",
+      token: adminToken,
+      body: JSON.stringify({ categoryId: "PROP", origin: "digital" }),
+    });
+    expect(gen.status).toBe(200);
+    const semId = gen.body.data.identifier;
+
+    const form = new FormData();
+    form.append("identifier", semId);
+    form.append("file", new File(["Documento sem qualquer identificador no texto"], "sem-id.txt", { type: "text/plain" }));
+
+    const res = await fetch(`${BASE}/documents/attach`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${adminToken}` },
+      body: form,
+    });
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.document.identifier.identifier).toBe(semId);
+  });
+
 });

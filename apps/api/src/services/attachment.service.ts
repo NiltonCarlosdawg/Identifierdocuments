@@ -218,22 +218,13 @@ export async function attachDocument(
 
     const { finalPath, safeName } = await writeUploadFile(file, identifier);
 
-    let verification: Awaited<ReturnType<typeof verifyDocumentContainsIdentifier>>;
+    // A verificação é apenas informativa: o documento já não precisa de conter
+    // o identificador no seu conteúdo para ser anexado.
+    let verification: Awaited<ReturnType<typeof verifyDocumentContainsIdentifier>> | null = null;
     try {
       verification = await verifyDocumentContainsIdentifier(finalPath, file.type || "application/octet-stream", identifier);
-    } catch (err: any) {
-      fs.unlinkSync(finalPath);
-      throw new Error(`Erro na verificação: ${err.message}`);
-    }
-
-    if (!verification.found) {
-      fs.unlinkSync(finalPath);
-      await tx.insert(auditLogs).values({
-        tenantId: auth.tenantId, userId: auth.userId, action: "ATTACH_FAILED",
-        resource: "documents", resourceId: idRow.id,
-        metadata: JSON.stringify({ filename: file.name, reason: "identifier_not_found" }), ip,
-      } as any);
-      return { success: false, message: `O documento não contém o identificador '${identifier}'.`, verification };
+    } catch {
+      verification = null;
     }
 
     let doc: typeof documents.$inferSelect;
@@ -255,7 +246,7 @@ export async function attachDocument(
           mimeType: file.type || "application/octet-stream",
           filePath: finalPath,
           fileSize: file.size,
-          extractedText: verification.excerpt ?? null,
+          extractedText: verification?.excerpt ?? null,
           uploadedBy: auth.userId,
           uploadSource,
           isCurrent: true,
@@ -281,7 +272,7 @@ export async function attachDocument(
     await tx.insert(auditLogs).values({
       tenantId: auth.tenantId, userId: auth.userId, action: "ATTACH",
       resource: "documents", resourceId: doc.id,
-      metadata: JSON.stringify({ identifier, filename: safeName, method: verification.method }), ip,
+      metadata: JSON.stringify({ identifier, filename: safeName, method: verification?.method ?? "none" }), ip,
     } as any);
 
     const fullDoc = await tx.query.documents.findFirst({
@@ -322,22 +313,13 @@ export async function createDocumentVersion(
     const identifier = doc.identifier.identifier;
     const { finalPath, safeName } = await writeUploadFile(file, identifier);
 
+  // Verificação informativa: não bloqueia a nova versão nem exige o identificador no ficheiro.
   let verification: Awaited<ReturnType<typeof verifyDocumentContainsIdentifier>> | null = null;
   if (doc.kind === "primary") {
     try {
       verification = await verifyDocumentContainsIdentifier(finalPath, file.type || "application/octet-stream", identifier);
-    } catch (err: any) {
-      fs.unlinkSync(finalPath);
-      throw new Error(`Erro na verificação: ${err.message}`);
-    }
-    if (!verification.found) {
-      fs.unlinkSync(finalPath);
-      await tx.insert(auditLogs).values({
-        tenantId: auth.tenantId, userId: auth.userId, action: "VERSION_FAILED",
-        resource: "documents", resourceId: doc.id,
-        metadata: JSON.stringify({ filename: file.name, reason: "identifier_not_found" }), ip,
-      });
-      return { success: false, message: `O documento não contém o identificador '${identifier}'.`, verification };
+    } catch {
+      verification = null;
     }
   }
 
