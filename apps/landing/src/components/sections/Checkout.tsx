@@ -86,66 +86,81 @@ export function Checkout() {
         </p>
       </div>
 
-      {done ? (
-        <div data-testid="checkout-success" className="docid-panel mx-auto max-w-xl p-8 text-center">
-          <Check className="mx-auto h-8 w-8 text-docid-secondary" aria-hidden="true" />
-          <h3 className="mt-4 text-lg font-semibold">Pedido recebido</h3>
-          <p className="mt-2 text-sm text-docid-muted">A MilVendas vai confirmar o pagamento e activar a sua licença. Receberá um e-mail com a confirmação.</p>
-        </div>
-      ) : (
-        <form id="pedido" onSubmit={submit} className="grid gap-6 lg:grid-cols-[1.2fr_1fr]" data-testid="checkout-form">
-          <div className="docid-panel space-y-2 p-5">
-            <p className="text-xs font-semibold uppercase tracking-wider text-docid-muted">Plano escolhido</p>
-            {planId ? (
-              <p data-testid="checkout-selected-plan" className="text-lg font-semibold text-docid-text">
-                {plans.find((p) => p.id === planId)?.name ?? "Plano seleccionado"}
-              </p>
-            ) : (
-              <p className="text-sm text-docid-muted">Escolha um plano na tabela comparativa abaixo.</p>
-            )}
-          </div>
+      <ComparisonBlock />
 
-          <div className="docid-panel space-y-4 p-5">
-            {tenantName && <p className="text-sm text-docid-text">Organização: <strong>{tenantName}</strong></p>}
-            {!tenantName && (
-              <div className="grid gap-3 sm:grid-cols-2">
-                <label className="text-xs text-docid-muted">Identificador da organização
-                  <input data-testid="checkout-slug" value={slug} onChange={(e) => { setSlug(e.target.value); setTenantEmail(""); }} className="docid-input mt-1 w-full" placeholder="minha-empresa" />
-                </label>
-                <label className="text-xs text-docid-muted">E-mail da organização
-                  <input data-testid="checkout-tenant-email" type="email" value={tenantEmail} onChange={(e) => { setTenantEmail(e.target.value); setSlug(""); }} className="docid-input mt-1 w-full" placeholder="admin@empresa.com" />
-                </label>
-              </div>
-            )}
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="text-xs text-docid-muted">Telefone
-                <input data-testid="checkout-phone" value={phone} onChange={(e) => setPhone(e.target.value)} className="docid-input mt-1 w-full" required />
-              </label>
-              <label className="text-xs text-docid-muted">E-mail de contacto
-                <input data-testid="checkout-email" type="email" value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} className="docid-input mt-1 w-full" required />
-              </label>
-            </div>
-            <div className="space-y-2">
-              <p className="text-xs font-semibold uppercase tracking-wider text-docid-muted">Forma de pagamento</p>
-              <div className="flex flex-wrap gap-2">
-                {(["transfer", "multicaixa", "send_order"] as Method[]).map((m) => (
-                  <button type="button" key={m} data-testid="checkout-method" onClick={() => setMethod(m)}
-                    className={`rounded-lg border px-3 py-2 text-xs transition ${method === m ? "border-docid-secondary bg-docid-secondary/10 text-docid-text" : "border-docid-border text-docid-muted hover:text-docid-text"}`}>
-                    {m === "transfer" ? "Transferência" : m === "multicaixa" ? "Referência Multicaixa" : "Enviar pedido"}
-                  </button>
-                ))}
-              </div>
-            </div>
-            {error && <p data-testid="checkout-error" className="text-xs text-docid-error">{error}</p>}
-            <button data-testid="checkout-submit" type="submit" disabled={busy || !planId || (!tenantName && !slug && !tenantEmail)}
-              className="btn-primary flex w-full items-center justify-center gap-2">
-              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
-              {busy ? "A enviar..." : "Enviar pedido"}
-            </button>
+      <div className="mx-auto mt-12 max-w-3xl">
+        {done ? (
+          <div data-testid="checkout-success" className="docid-panel p-8 text-center">
+            <Check className="mx-auto h-8 w-8 text-docid-secondary" aria-hidden="true" />
+            <h3 className="mt-4 text-lg font-semibold">Pedido recebido</h3>
+            <p className="mt-2 text-sm text-docid-muted">A MilVendas vai confirmar o pagamento e activar a sua licença. Receberá um e-mail com a confirmação.</p>
           </div>
-        </form>
-      )}
-      <div className="mt-10"><ComparisonBlock /></div>
+        ) : (
+          <form id="pedido" onSubmit={submit} className="space-y-5" data-testid="checkout-form">
+            <div className="docid-panel p-5 sm:p-6">
+              <p className="text-xs font-semibold uppercase tracking-wider text-docid-muted">Plano escolhido</p>
+              {planId ? (
+                <p data-testid="checkout-selected-plan" className="mt-1.5 text-xl font-semibold text-docid-text">
+                  {plans.find((p) => p.id === planId)?.name ?? "Plano seleccionado"}
+                </p>
+              ) : (
+                <p className="mt-1.5 text-sm text-docid-muted">Escolha um plano na tabela comparativa acima.</p>
+              )}
+            </div>
+
+            <div className="docid-panel space-y-5 p-5 sm:p-6">
+              <div>
+                <h3 className="text-base font-semibold text-docid-text">Dados para o pedido</h3>
+                <p className="mt-1 text-xs text-docid-muted">Indique a organização e como quer ser contactado.</p>
+              </div>
+
+              {tenantName && <p className="rounded-lg bg-docid-surface-low px-4 py-3 text-sm text-docid-text">Organização: <strong>{tenantName}</strong></p>}
+              {!tenantName && (
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="block">
+                    <span className="mb-1.5 block text-xs font-medium text-docid-text">Identificador da organização</span>
+                    <input data-testid="checkout-slug" value={slug} onChange={(e) => { setSlug(e.target.value); setTenantEmail(""); }} className="docid-input" placeholder="minha-empresa" />
+                  </label>
+                  <label className="block">
+                    <span className="mb-1.5 block text-xs font-medium text-docid-text">E-mail da organização</span>
+                    <input data-testid="checkout-tenant-email" type="email" value={tenantEmail} onChange={(e) => { setTenantEmail(e.target.value); setSlug(""); }} className="docid-input" placeholder="admin@empresa.com" />
+                  </label>
+                </div>
+              )}
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="block">
+                  <span className="mb-1.5 block text-xs font-medium text-docid-text">Telefone</span>
+                  <input data-testid="checkout-phone" value={phone} onChange={(e) => setPhone(e.target.value)} className="docid-input" placeholder="9XX XXX XXX" required />
+                </label>
+                <label className="block">
+                  <span className="mb-1.5 block text-xs font-medium text-docid-text">E-mail de contacto</span>
+                  <input data-testid="checkout-email" type="email" value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} className="docid-input" placeholder="nome@empresa.com" required />
+                </label>
+              </div>
+
+              <fieldset className="space-y-2">
+                <legend className="text-xs font-semibold uppercase tracking-wider text-docid-muted">Forma de pagamento</legend>
+                <div className="flex flex-wrap gap-2">
+                  {(["transfer", "multicaixa", "send_order"] as Method[]).map((m) => (
+                    <button key={m} type="button" data-testid="checkout-method" onClick={() => setMethod(m)}
+                      className={`min-h-11 rounded-lg border px-4 text-sm font-medium transition ${method === m ? "border-docid-primary bg-docid-primary/10 text-docid-text ring-1 ring-docid-primary" : "border-docid-border bg-docid-surface-lowest text-docid-muted hover:border-docid-primary/50 hover:text-docid-text"}`}>
+                      {m === "transfer" ? "Transferência" : m === "multicaixa" ? "Referência Multicaixa" : "Enviar pedido"}
+                    </button>
+                  ))}
+                </div>
+              </fieldset>
+
+              {error && <p data-testid="checkout-error" className="text-sm text-docid-error">{error}</p>}
+              <button data-testid="checkout-submit" type="submit" disabled={busy || !planId || (!tenantName && !slug && !tenantEmail)}
+                className="btn-primary flex w-full items-center justify-center gap-2">
+                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
+                {busy ? "A enviar..." : "Enviar pedido"}
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
     </Reveal>
     </section>
   );

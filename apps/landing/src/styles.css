@@ -144,6 +144,18 @@
     min-height: 44px;
   }
 
+  .docid-panel {
+    @apply rounded-xl border border-docid-border bg-docid-surface;
+  }
+
+  .docid-input {
+    @apply w-full rounded-lg border border-docid-border bg-docid-surface-lowest px-4 py-2.5
+           text-sm text-docid-text outline-none transition
+           placeholder:text-docid-outline
+           focus:border-docid-primary focus:ring-2 focus:ring-docid-primary/20;
+    min-height: 44px;
+  }
+
   .btn-primary {
     /* Fixed brand blue, not --docid-primary: white text on the lighter dark-mode
        blue (#3b76ec) only reaches 4.0:1. */
