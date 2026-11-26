@@ -9,7 +9,7 @@ import { eq, sql } from "drizzle-orm";
 
 import { db } from "../db";
 import { withTenant } from "../db/withTenant";
-import { auditLogs, documents, documentVersions, identifiers, organizations, plans, roles, rolePermissions, sectors, users, userRoles , licenses } from "../db/schema";
+import { auditLogs, devices, documents, documentVersions, identifiers, organizations, plans, roles, rolePermissions, sectors, users, userRoles , licenses } from "../db/schema";
 
 const API_ROOT = join(import.meta.dir, "..", "..");
 const TEST_PORT = process.env.SUBSCRIPTION_WIRING_PORT || "3104";
@@ -104,6 +104,7 @@ async function cleanupTenant(id: string) {
     await tx.delete(documents).where(eq(documents.tenantId, id));
     await tx.delete(auditLogs).where(eq(auditLogs.tenantId, id));
     await tx.delete(identifiers).where(eq(identifiers.tenantId, id));
+    await tx.delete(devices).where(eq(devices.tenantId, id));
     await tx.delete(userRoles).where(
       sql`${userRoles.userId} IN (SELECT ${users.id} FROM ${users} WHERE ${users.tenantId} = ${id})`,
     );
@@ -320,6 +321,22 @@ describe("quota mensal de identificadores no wiring", () => {
     expect(res.body.error?.message).toBe(
       "O limite mensal de identificadores do seu plano foi atingido. Actualize o plano para continuar.",
     );
+  });
+
+  test("register-offline-loose respeita o mesmo teto mensal (2/2): 403 IDENTIFIER_QUOTA_EXCEEDED", async () => {
+    const device = await api<any>("/devices", {
+      method: "POST",
+      token: adminToken,
+      body: JSON.stringify({ name: `wiring-loose-${RUN_ID}` }),
+    });
+    expect(device.status).toBe(200);
+    const res = await api<any>("/identifiers/register-offline-loose", {
+      method: "POST",
+      token: adminToken,
+      body: JSON.stringify({ deviceId: device.body.data.id, categoryId: "MEM", origin: "digital", sectorId }),
+    });
+    expect(res.status).toBe(403);
+    expect(res.body.error?.code).toBe("IDENTIFIER_QUOTA_EXCEEDED");
   });
 
   test("tenant suspenso, MEMBER: 403 SUBSCRIPTION_RESTRICTED", async () => {
