@@ -71,15 +71,24 @@ export async function verifyDocumentContainsIdentifier(
     throw new Error(`Falha ao extrair texto do documento: ${err.message}`);
   }
 
-  const found = text.includes(identifier);
+  // Ocorrência isolada: "VL-PROP-2026-0101-100" não pode bater dentro de "…-1000"
+  // nem de "XVL-PROP-…" (outra organização com prefixo que termina igual).
+  const idx = findIdentifierIndex(text, identifier);
+  const found = idx >= 0;
 
   let excerpt: string | undefined;
   if (found) {
-    const idx = text.indexOf(identifier);
     const start = Math.max(0, idx - 40);
     const end = Math.min(text.length, idx + identifier.length + 40);
     excerpt = text.slice(start, end).replace(/\n+/g, " ").trim();
   }
 
   return { found, identifier, mimeType, method, excerpt };
+}
+
+/** Posição da primeira ocorrência isolada do identificador no texto, ou -1. */
+export function findIdentifierIndex(text: string, identifier: string): number {
+  const escaped = identifier.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = new RegExp(`(?<![A-Z0-9])${escaped}(?![0-9])`).exec(text);
+  return match ? match.index : -1;
 }
