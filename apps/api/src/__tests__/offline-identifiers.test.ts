@@ -6,6 +6,7 @@ import { eq, and, sql } from "drizzle-orm";
 import { organizations, sectors, users, roles, userRoles, categories, devices, identifierLeases, identifierReleasePool, identifiers, auditLogs, idempotencyRecords, plans } from "../db/schema";
 import { generateIdentifier } from "../services/identifier.service";
 import { leaseIdentifiers, releaseLease, forceReleaseLease, registerOfflineIdentifiers } from "../services/lease.service";
+import { identifierDateParts } from "../lib/identifier-date";
 
 const rng = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 const tag = rng();
@@ -405,6 +406,30 @@ describe("M2 — Offline Identifiers (lease/release/force-release/register-offli
             identifiers: [{ sequence: 3 }],
           })),
       ).rejects.toThrow("fora de ordem");
+    });
+
+    test("identificador emitido offline é registado com a data em que foi emitido", async () => {
+      const y = identifierDateParts(new Date(Date.now() - 86_400_000));
+      const ymd = `${y.year}-${String(y.month).padStart(2, "0")}${String(y.day).padStart(2, "0")}`;
+      const emitted = `VL-${catSeqId}-${ymd}-002`;
+      const result = await withTenant(orgId, (tx) =>
+        registerOfflineIdentifiers(tx, authUser(), {
+          deviceId: deviceIdA, leaseId,
+          identifiers: [{ sequence: 2, identifier: emitted }],
+        }));
+      expect(result[0].identifier).toBe(emitted);
+    });
+
+    test("identificador offline com data inexistente ou formato errado é rejeitado", async () => {
+      for (const bad of [`VL-${catSeqId}-2026-0230-003`, `XX-${catSeqId}-2026-0101-003`, `VL-${catSeqId}-2026-0101-004`]) {
+        await expect(
+          withTenant(orgId, (tx) =>
+            registerOfflineIdentifiers(tx, authUser(), {
+              deviceId: deviceIdA, leaseId,
+              identifiers: [{ sequence: 3, identifier: bad }],
+            })),
+        ).rejects.toThrow("inválido");
+      }
     });
 
     test("rejeita device inactivo", async () => {

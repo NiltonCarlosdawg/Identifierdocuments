@@ -349,6 +349,9 @@ struct LooseIdentifierPayload {
 #[serde(rename_all = "camelCase")]
 struct IdentifierPayload {
     sequence: i32,
+    /// Identificador tal como foi emitido offline (e impresso no documento): a API usa a
+    /// data que ele contém, em vez da data do dia em que a sincronização acontece.
+    identifier: String,
     issued_to: Option<String>,
     description: Option<String>,
     visibility: String,
@@ -420,6 +423,7 @@ async fn sync_identifier_batch_http(
                     })?;
                     Ok(IdentifierPayload {
                         sequence: seq,
+                        identifier: item.identifier.clone(),
                         issued_to: item.issued_to.clone(),
                         description: item.description.clone(),
                         visibility: item.visibility.clone(),

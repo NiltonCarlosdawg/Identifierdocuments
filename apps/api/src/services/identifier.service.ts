@@ -4,6 +4,7 @@ import { eq, and, or, desc, sql, isNull } from "drizzle-orm";
 import type { AuthPayload } from "../middleware/auth";
 import { getFreshRoles } from "../middleware/auth";
 import { takeFromReleasePool } from "./release-pool.service";
+import { identifierDateParts } from "../lib/identifier-date";
 
 function buildIdentifier(orgPrefix: string, catPrefix: string, year: number, month: number, day: number, seq: number): string {
   const mmdd = `${String(month).padStart(2, "0")}${String(day).padStart(2, "0")}`;
@@ -86,10 +87,7 @@ export async function generateIdentifier(tx: DB, auth: AuthPayload, opts: {
   const cat = await tx.query.categories.findFirst({ where: eq(categories.id, opts.categoryId) });
   if (!cat) throw new Error(`Categoria '${opts.categoryId}' não encontrada.`);
 
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = now.getMonth() + 1;
-  const day = now.getDate();
+  const { year, month, day } = identifierDateParts();
 
   const org = await tx.query.organizations.findFirst({ where: eq(organizations.id, auth.tenantId) });
   const orgPrefix = org?.identifierPrefix || "VL";

@@ -122,6 +122,7 @@ export const identifiersModule = new (Elysia as any)({ prefix: "/identifiers" })
       leaseId: t.String(),
       identifiers: t.Array(t.Object({
         sequence: t.Integer(),
+        identifier: t.Optional(t.String({ maxLength: 120 })),
         issuedTo: t.Optional(t.String()),
         description: t.Optional(t.String()),
         visibility: t.Optional(t.Union([t.Literal("public"), t.Literal("sector_only")])),
