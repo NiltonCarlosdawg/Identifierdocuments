@@ -175,7 +175,7 @@ export const providerModule = new (Elysia as any)({ prefix: "/provider" })
   })
 
   .get("/tenants", async () => {
-    // organizations/plans são tabelas globais; users é contada por tenant (superuser lê cross-tenant).
+    // Leitura cross-tenant pelo pool de lookup (app.auth_lookup), sem depender de BYPASSRLS.
     const rows = await db.select({
       id: organizations.id,
       name: organizations.name,
