@@ -8,28 +8,45 @@ on:
 permissions:
   contents: read
 
+# Dois deploys ao mesmo tempo pisavam-se no servidor.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      SSH_TARGET: milvendas@135.181.34.42
+      SITE_DIR: /mnt/homer2/milvendas/docid.milvendas.ao
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
 
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      - name: Build API bundle
+        working-directory: apps/api
+        # O servidor corre `node dist/index.js` (o Bun não arranca no CloudLinux). As
+        # dependências ficam de fora: vêm do node_modules do servidor. Sem o --define o
+        # bundler fixa NODE_ENV como "development" e a API em produção expunha o Swagger.
+        run: |
+          bun build src/index.ts --target=node --packages=external \
+            --define 'process.env.NODE_ENV="production"' --outdir dist
+          grep -q 'var isProduction = true' dist/index.js
+
       - name: Build landing
         working-directory: apps/landing
-        run: |
-          bun install
-          VITE_API_URL=https://didall.milvendas.ao bun run build
+        run: VITE_API_URL=https://didall.milvendas.ao bun run build
 
       - name: Build admin
         working-directory: apps/admin
-        run: |
-          bun install
-          VITE_API_URL=https://didall.milvendas.ao bun run build
+        run: VITE_API_URL=https://didall.milvendas.ao bun run build
 
       - name: Pack artifacts
         run: |
-          tar czf /tmp/api.tgz -C apps/api src package.json
+          tar czf /tmp/api.tgz -C apps/api src dist scripts package.json
           tar czf /tmp/landing.tgz -C apps/landing/dist .
           tar czf /tmp/admin.tgz -C apps/admin/dist .
 
@@ -42,13 +59,35 @@ jobs:
 
       - name: Upload files
         run: |
-          SSH="ssh -i /tmp/deploy_key -o StrictHostKeyChecking=no -o ConnectTimeout=30 milvendas@135.181.34.42"
+          SSH="ssh -i /tmp/deploy_key -o StrictHostKeyChecking=no -o ConnectTimeout=30 $SSH_TARGET"
           $SSH 'mkdir -p /tmp/docid-deploy'
-          scp -i /tmp/deploy_key -o StrictHostKeyChecking=no /tmp/api.tgz /tmp/landing.tgz /tmp/admin.tgz milvendas@135.181.34.42:/tmp/docid-deploy/
-          echo "upload ok"
+          scp -i /tmp/deploy_key -o StrictHostKeyChecking=no /tmp/api.tgz /tmp/landing.tgz /tmp/admin.tgz "$SSH_TARGET:/tmp/docid-deploy/"
 
-      # Os instaladores são publicados pelo workflow Build & Release (tags desktop-v*).
-      - name: Restart API
+      # Instala o código, aplica migrações, reinicia e confirma o /health; repõe o código
+      # anterior se algo falhar. Ver apps/api/scripts/deploy-server.sh.
+      - name: Deploy API
         run: |
-          SSH="ssh -i /tmp/deploy_key -o StrictHostKeyChecking=no milvendas@135.181.34.42"
-          $SSH 'PID=$(cat /mnt/homer2/milvendas/didall.milvendas.ao/docid-api.pid); kill -9 "$PID" 2>/dev/null || true; echo restart-signal'
+          ssh -i /tmp/deploy_key -o StrictHostKeyChecking=no "$SSH_TARGET" '
+            set -e
+            rm -rf /tmp/docid-deploy/api-new && mkdir -p /tmp/docid-deploy/api-new
+            tar xzf /tmp/docid-deploy/api.tgz -C /tmp/docid-deploy/api-new
+            bash /tmp/docid-deploy/api-new/scripts/deploy-server.sh /tmp/docid-deploy/api-new'
+
+      - name: Deploy landing and admin
+        run: |
+          ssh -i /tmp/deploy_key -o StrictHostKeyChecking=no "$SSH_TARGET" "
+            set -e
+            mkdir -p $SITE_DIR/admin
+            tar xzf /tmp/docid-deploy/landing.tgz -C $SITE_DIR
+            tar xzf /tmp/docid-deploy/admin.tgz -C $SITE_DIR/admin
+            echo static-ok"
+
+      - name: Check public endpoints
+        run: |
+          curl -fsS -m 20 https://didall.milvendas.ao/health
+          echo
+          # Em produção o Swagger tem de estar desligado (só com ENABLE_SWAGGER=true).
+          code=$(curl -s -m 20 -o /dev/null -w '%{http_code}' https://didall.milvendas.ao/docs)
+          echo "/docs -> $code"
+          [ "$code" = "404" ]
+          curl -fsS -m 20 -o /dev/null https://docid.milvendas.ao/
