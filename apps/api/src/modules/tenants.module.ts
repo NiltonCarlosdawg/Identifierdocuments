@@ -193,11 +193,21 @@ export const tenantsModule = new (Elysia as any)({ prefix: "/tenants" })
       if (body.name !== undefined) updates.name = body.name;
       if (body.identifierPrefix !== undefined) updates.identifierPrefix = body.identifierPrefix;
 
-      const [org] = await db
+      if (Object.keys(updates).length === 0) {
+        set.status = 400;
+        return { error: { code: "UPDATE_ERROR", message: "Nada para actualizar." } };
+      }
+      // organizations tem RLS forçado: sem withTenant a actualização afectava 0 linhas
+      // (e devolvia data: undefined) com um utilizador da BD sem BYPASSRLS.
+      const [org] = await withTenant(auth!.tenantId, (tx) => tx
         .update(organizations)
         .set(updates)
         .where(eq(organizations.id, auth!.tenantId))
-        .returning();
+        .returning());
+      if (!org) {
+        set.status = 404;
+        return { error: { code: "NOT_FOUND", message: "Organização não encontrada." } };
+      }
       return { data: org };
     } catch (err: any) {
       set.status = 400;
