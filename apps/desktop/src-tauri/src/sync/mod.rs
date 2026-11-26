@@ -40,6 +40,59 @@ impl Drop for ZeroizeString {
 const MAX_ATTEMPTS: i32 = 3;
 const MAX_WRITE_ATTEMPTS: i32 = 5;
 
+/// Dono de um item das filas locais: organização + utilizador da sessão que o criou.
+/// As filas só são enviadas com a sessão desse dono — num computador partilhado, o que
+/// um utilizador deixou pendente nunca é enviado em nome de outro.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Owner {
+    pub tenant_id: String,
+    pub user_id: String,
+}
+
+/// Lê `tenantId`/`userId` do payload do JWT. Não verifica a assinatura: serve só para
+/// escolher que itens locais pertencem à sessão; o servidor continua a validar o token.
+pub(crate) fn token_owner(token: &str) -> Option<Owner> {
+    let payload = token.split('.').nth(1)?;
+    let bytes = base64url_decode(payload)?;
+    let v: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    let tenant_id = v.get("tenantId")?.as_str()?.to_string();
+    let user_id = v.get("userId")?.as_str()?.to_string();
+    if tenant_id.is_empty() || user_id.is_empty() {
+        return None;
+    }
+    Some(Owner { tenant_id, user_id })
+}
+
+fn base64url_decode(input: &str) -> Option<Vec<u8>> {
+    let mut out = Vec::with_capacity(input.len() * 3 / 4);
+    let (mut buf, mut bits) = (0u32, 0u32);
+    for c in input.bytes() {
+        let v = match c {
+            b'A'..=b'Z' => c - b'A',
+            b'a'..=b'z' => c - b'a' + 26,
+            b'0'..=b'9' => c - b'0' + 52,
+            b'-' | b'+' => 62,
+            b'_' | b'/' => 63,
+            b'=' => break,
+            _ => return None,
+        } as u32;
+        buf = (buf << 6) | v;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((buf >> bits) as u8);
+            buf &= (1 << bits) - 1;
+        }
+    }
+    Some(out)
+}
+
+fn state_owner(state: &SyncState) -> Option<Owner> {
+    let guard = state.auth_token.lock().ok()?;
+    let token = guard.as_ref()?.clone_inner();
+    token_owner(&token)
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct UploadOutcome {
     pub new_status: String,
@@ -1046,6 +1099,8 @@ pub struct WriteItem {
     pub attempts: i32,
     pub last_error: Option<String>,
     pub created_at: String,
+    pub tenant_id: Option<String>,
+    pub user_id: Option<String>,
 }
 
 pub struct SyncState {
@@ -1079,6 +1134,7 @@ fn row_to_item(row: &rusqlite::Row<'_>) -> rusqlite::Result<QueueItem> {
     })
 }
 
+#[cfg(test)]
 fn fetch_all(conn: &Connection) -> Result<Vec<QueueItem>, String> {
     let mut stmt = conn
         .prepare(
@@ -1140,20 +1196,23 @@ fn row_to_write_item(row: &rusqlite::Row<'_>) -> rusqlite::Result<WriteItem> {
         attempts: row.get(7)?,
         last_error: row.get(8)?,
         created_at: row.get(9)?,
+        tenant_id: row.get(10)?,
+        user_id: row.get(11)?,
     })
 }
 
-fn fetch_writes_pending(conn: &Connection) -> Result<Vec<WriteItem>, String> {
+fn fetch_writes_pending(conn: &Connection, owner: &Owner) -> Result<Vec<WriteItem>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT id, method, path, body, idempotency_key, resource_key, status, attempts, last_error, created_at
+            "SELECT id, method, path, body, idempotency_key, resource_key, status, attempts, last_error, created_at, tenant_id, user_id
              FROM local_write_queue
              WHERE status IN ('pending', 'failed') AND attempts < ?1
+               AND tenant_id = ?2 AND user_id = ?3
              ORDER BY created_at ASC",
         )
         .map_err(|e| e.to_string())?;
     let rows = stmt
-        .query_map(params![MAX_WRITE_ATTEMPTS], row_to_write_item)
+        .query_map(params![MAX_WRITE_ATTEMPTS, owner.tenant_id, owner.user_id], row_to_write_item)
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
@@ -1162,6 +1221,7 @@ fn fetch_writes_pending(conn: &Connection) -> Result<Vec<WriteItem>, String> {
 
 fn insert_write(
     conn: &Connection,
+    owner: &Owner,
     method: &str,
     path: &str,
     body: Option<String>,
@@ -1171,9 +1231,9 @@ fn insert_write(
     let id = Uuid::new_v4().to_string();
     let created_at = Utc::now().to_rfc3339();
     conn.execute(
-        "INSERT INTO local_write_queue (id, method, path, body, idempotency_key, resource_key, status, attempts, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'pending', 0, ?7)",
-        params![id, method, path, body, idempotency_key, resource_key, created_at],
+        "INSERT INTO local_write_queue (id, method, path, body, idempotency_key, resource_key, status, attempts, created_at, tenant_id, user_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'pending', 0, ?7, ?8, ?9)",
+        params![id, method, path, body, idempotency_key, resource_key, created_at, owner.tenant_id, owner.user_id],
     )
     .map_err(|e| e.to_string())?;
 
@@ -1188,6 +1248,8 @@ fn insert_write(
         attempts: 0,
         last_error: None,
         created_at,
+        tenant_id: Some(owner.tenant_id.clone()),
+        user_id: Some(owner.user_id.clone()),
     })
 }
 
@@ -1383,10 +1445,13 @@ pub async fn replay_write_queue(
     api_base_url: &str,
     token: &str,
 ) -> Result<usize, String> {
+    let Some(owner) = token_owner(token) else {
+        return Ok(0);
+    };
     let conn = state.conn()?;
     let _ = reset_stuck_writes(&conn);
 
-    let items = fetch_writes_pending(&conn)?;
+    let items = fetch_writes_pending(&conn, &owner)?;
     if items.is_empty() {
         return Ok(0);
     }
@@ -1472,6 +1537,9 @@ async fn run_sync_cycle_inner(app: &AppHandle, state: &SyncState) -> Result<usiz
         Some(t) if !t.is_empty() => t,
         _ => return Ok(0),
     };
+    let Some(owner) = token_owner(&token) else {
+        return Ok(0);
+    };
 
     if !check_online(&api_base_url).await {
         return Ok(0);
@@ -1508,10 +1576,11 @@ async fn run_sync_cycle_inner(app: &AppHandle, state: &SyncState) -> Result<usiz
             "SELECT id, file_path, filename, identifier, tenant_id, user_id, status, attempts, last_error, created_at, COALESCE(upload_mode, 'attach')
              FROM upload_queue
              WHERE status IN ('pending', 'failed') AND attempts < ?1
+               AND tenant_id = ?2 AND user_id = ?3
              ORDER BY created_at ASC",
         )
         .map_err(|e| e.to_string())?
-        .query_map(params![MAX_ATTEMPTS], row_to_item)
+        .query_map(params![MAX_ATTEMPTS, owner.tenant_id, owner.user_id], row_to_item)
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
@@ -1596,8 +1665,9 @@ async fn run_sync_cycle_inner(app: &AppHandle, state: &SyncState) -> Result<usiz
 
     let remaining: i32 = conn
         .query_row(
-            "SELECT COUNT(*) FROM upload_queue WHERE status IN ('pending', 'uploading', 'failed') AND attempts < ?1",
-            params![MAX_ATTEMPTS],
+            "SELECT COUNT(*) FROM upload_queue WHERE status IN ('pending', 'uploading', 'failed') AND attempts < ?1
+             AND tenant_id = ?2 AND user_id = ?3",
+            params![MAX_ATTEMPTS, owner.tenant_id, owner.user_id],
             |row| row.get(0),
         )
         .map_err(|e| e.to_string())?;
@@ -1629,20 +1699,24 @@ pub fn start_background_sync(app: AppHandle) {
                 let _ = run_sync_cycle(&app, &state).await;
             } else if online {
                 let conn = state.conn().ok();
+                let owner = state_owner(&state);
                 let has_pending = conn
-                    .and_then(|c| {
+                    .zip(owner)
+                    .and_then(|(c, owner)| {
                         let uploads: i32 = c
                             .query_row(
-                                "SELECT COUNT(*) FROM upload_queue WHERE status IN ('pending', 'failed') AND attempts < ?1",
-                                params![MAX_ATTEMPTS],
+                                "SELECT COUNT(*) FROM upload_queue WHERE status IN ('pending', 'failed') AND attempts < ?1
+                                 AND tenant_id = ?2 AND user_id = ?3",
+                                params![MAX_ATTEMPTS, owner.tenant_id, owner.user_id],
                                 |row| row.get::<_, i32>(0),
                             )
                             .ok()
                             .unwrap_or(0);
                         let writes: i32 = c
                             .query_row(
-                                "SELECT COUNT(*) FROM local_write_queue WHERE status IN ('pending', 'failed') AND attempts < ?1",
-                                params![MAX_WRITE_ATTEMPTS],
+                                "SELECT COUNT(*) FROM local_write_queue WHERE status IN ('pending', 'failed') AND attempts < ?1
+                                 AND tenant_id = ?2 AND user_id = ?3",
+                                params![MAX_WRITE_ATTEMPTS, owner.tenant_id, owner.user_id],
                                 |row| row.get::<_, i32>(0),
                             )
                             .ok()
@@ -1819,8 +1893,26 @@ pub fn enqueue_upload_bytes(
 
 #[tauri::command]
 pub fn get_queue(state: State<'_, SyncState>) -> Result<Vec<QueueItem>, String> {
+    let Some(owner) = state_owner(&state) else {
+        return Ok(Vec::new());
+    };
     let conn = state.conn()?;
-    fetch_all(&conn)
+    fetch_uploads_for(&conn, &owner)
+}
+
+fn fetch_uploads_for(conn: &Connection, owner: &Owner) -> Result<Vec<QueueItem>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, file_path, filename, identifier, tenant_id, user_id, status, attempts, last_error, created_at, COALESCE(upload_mode, 'attach')
+             FROM upload_queue WHERE tenant_id = ?1 AND user_id = ?2 ORDER BY created_at ASC",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![owner.tenant_id, owner.user_id], row_to_item)
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(rows)
 }
 
 fn is_safe_path(uploads_dir: &PathBuf, path: &str) -> bool {
@@ -1921,12 +2013,14 @@ pub fn enqueue_write(
         return Err("idempotency_key é obrigatória.".to_string());
     }
 
+    let owner = state_owner(&state)
+        .ok_or_else(|| "Sessão necessária para guardar a alteração offline.".to_string())?;
     let conn = state.conn()?;
 
     // Idempotência: devolve o item já existente se a mesma chave foi enfileirada
     let existing: Option<WriteItem> = conn
         .query_row(
-            "SELECT id, method, path, body, idempotency_key, resource_key, status, attempts, last_error, created_at
+            "SELECT id, method, path, body, idempotency_key, resource_key, status, attempts, last_error, created_at, tenant_id, user_id
              FROM local_write_queue WHERE idempotency_key = ?1",
             params![idempotency_key],
             row_to_write_item,
@@ -1936,7 +2030,7 @@ pub fn enqueue_write(
         return Ok(existing);
     }
 
-    let item = insert_write(&conn, &method, &path, body, &idempotency_key, resource_key)?;
+    let item = insert_write(&conn, &owner, &method, &path, body, &idempotency_key, resource_key)?;
     let _ = app.emit(
         "write:enqueued",
         serde_json::json!({
@@ -1950,42 +2044,68 @@ pub fn enqueue_write(
 
 #[tauri::command]
 pub fn get_write_queue(state: State<'_, SyncState>) -> Result<Vec<WriteItem>, String> {
+    let Some(owner) = state_owner(&state) else {
+        return Ok(Vec::new());
+    };
     let conn = state.conn()?;
+    fetch_writes_visible_to(&conn, &owner)
+}
+
+/// Itens da sessão actual + itens antigos sem dono (criados antes desta versão), que
+/// ficam em `conflict` até alguém os rever (ver `retry_write_item_raw`).
+fn fetch_writes_visible_to(conn: &Connection, owner: &Owner) -> Result<Vec<WriteItem>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT id, method, path, body, idempotency_key, resource_key, status, attempts, last_error, created_at
-             FROM local_write_queue ORDER BY created_at ASC",
+            "SELECT id, method, path, body, idempotency_key, resource_key, status, attempts, last_error, created_at, tenant_id, user_id
+             FROM local_write_queue
+             WHERE tenant_id IS NULL OR (tenant_id = ?1 AND user_id = ?2)
+             ORDER BY created_at ASC",
         )
         .map_err(|e| e.to_string())?;
     let rows = stmt
-        .query_map([], row_to_write_item)
+        .query_map(params![owner.tenant_id, owner.user_id], row_to_write_item)
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
     Ok(rows)
 }
 
-fn retry_write_item_raw(conn: &Connection, id: &str) -> Result<(), String> {
+/// Reenviar é uma acção explícita do utilizador: um item antigo sem dono passa a ser
+/// da sessão actual. Itens de outro utilizador não são tocados.
+fn retry_write_item_raw(conn: &Connection, id: &str, owner: &Owner) -> Result<(), String> {
+    let changed = conn
+        .execute(
+            "UPDATE local_write_queue
+             SET status = 'pending', attempts = 0, last_error = NULL,
+                 tenant_id = COALESCE(tenant_id, ?2), user_id = COALESCE(user_id, ?3)
+             WHERE id = ?1 AND (tenant_id IS NULL OR (tenant_id = ?2 AND user_id = ?3))",
+            params![id, owner.tenant_id, owner.user_id],
+        )
+        .map_err(|e| e.to_string())?;
+    if changed == 0 {
+        return Err("Alteração não encontrada nesta sessão.".to_string());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn remove_write_item(state: State<'_, SyncState>, id: String) -> Result<(), String> {
+    let owner = state_owner(&state).ok_or_else(|| "Sessão necessária.".to_string())?;
+    let conn = state.conn()?;
     conn.execute(
-        "UPDATE local_write_queue SET status = 'pending', attempts = 0, last_error = NULL WHERE id = ?1",
-        params![id],
+        "DELETE FROM local_write_queue
+         WHERE id = ?1 AND (tenant_id IS NULL OR (tenant_id = ?2 AND user_id = ?3))",
+        params![id, owner.tenant_id, owner.user_id],
     )
     .map_err(|e| e.to_string())?;
     Ok(())
 }
 
 #[tauri::command]
-pub fn remove_write_item(state: State<'_, SyncState>, id: String) -> Result<(), String> {
-    let conn = state.conn()?;
-    conn.execute("DELETE FROM local_write_queue WHERE id = ?1", params![id])
-        .map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-#[tauri::command]
 pub fn retry_write_item(state: State<'_, SyncState>, id: String) -> Result<(), String> {
+    let owner = state_owner(&state).ok_or_else(|| "Sessão necessária.".to_string())?;
     let conn = state.conn()?;
-    retry_write_item_raw(&conn, &id)
+    retry_write_item_raw(&conn, &id, &owner)
 }
 
 #[tauri::command]
@@ -3574,7 +3694,13 @@ mod tests {
             attempts: 0,
             last_error: None,
             created_at: "2026-07-21T12:00:00Z".to_string(),
+            tenant_id: Some("t1".to_string()),
+            user_id: Some("u1".to_string()),
         }
+    }
+
+    fn owner() -> Owner {
+        Owner { tenant_id: "t1".to_string(), user_id: "u1".to_string() }
     }
 
     #[test]
@@ -3667,6 +3793,7 @@ mod tests {
         let (_dir, conn) = tmp_db();
         let item = insert_write(
             &conn,
+            &owner(),
             "POST",
             "/sectors",
             Some(r#"{"name":"RH"}"#.to_string()),
@@ -3677,7 +3804,7 @@ mod tests {
         assert_eq!(item.status, "pending");
         assert_eq!(item.attempts, 0);
 
-        let pending = fetch_writes_pending(&conn).unwrap();
+        let pending = fetch_writes_pending(&conn, &owner()).unwrap();
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].path, "/sectors");
         assert_eq!(pending[0].method, "POST");
@@ -3688,17 +3815,107 @@ mod tests {
             params![item.id],
         )
         .unwrap();
-        let pending = fetch_writes_pending(&conn).unwrap();
+        let pending = fetch_writes_pending(&conn, &owner()).unwrap();
         assert!(pending.is_empty());
 
         fs::remove_dir_all(&_dir).ok();
     }
 
+    fn fake_jwt(tenant: &str, user: &str) -> String {
+        // payload base64url sem padding, como o jose emite
+        fn b64url(bytes: &[u8]) -> String {
+            const T: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+            let mut out = String::new();
+            for chunk in bytes.chunks(3) {
+                let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+                let n = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | b[2] as u32;
+                for i in 0..(chunk.len() + 1) {
+                    out.push(T[((n >> (18 - 6 * i)) & 63) as usize] as char);
+                }
+            }
+            out
+        }
+        let payload = format!(r#"{{"userId":"{user}","tenantId":"{tenant}","roles":[],"iat":1}}"#);
+        format!("eyJhbGciOiJIUzI1NiJ9.{}.sig", b64url(payload.as_bytes()))
+    }
+
+    #[test]
+    fn token_owner_reads_tenant_and_user_from_jwt() {
+        let t = fake_jwt("tenant-a", "user-ü");
+        assert_eq!(
+            token_owner(&t),
+            Some(Owner { tenant_id: "tenant-a".to_string(), user_id: "user-ü".to_string() })
+        );
+        assert_eq!(token_owner("not-a-jwt"), None);
+        assert_eq!(token_owner(&format!("a.{}.c", "!!!")), None);
+    }
+
+    #[test]
+    fn write_queue_only_replays_items_of_the_session_owner() {
+        let (_dir, conn) = tmp_db();
+        let other = Owner { tenant_id: "t2".to_string(), user_id: "u2".to_string() };
+        insert_write(&conn, &owner(), "POST", "/sectors", None, "k-mine", None).unwrap();
+        insert_write(&conn, &other, "POST", "/sectors", None, "k-other", None).unwrap();
+
+        let mine = fetch_writes_pending(&conn, &owner()).unwrap();
+        assert_eq!(mine.len(), 1);
+        assert_eq!(mine[0].idempotency_key, "k-mine");
+        let theirs = fetch_writes_pending(&conn, &other).unwrap();
+        assert_eq!(theirs.len(), 1);
+        assert_eq!(theirs[0].idempotency_key, "k-other");
+
+        // Um utilizador não consegue reenviar o item de outro.
+        assert!(retry_write_item_raw(&conn, &theirs[0].id, &owner()).is_err());
+        fs::remove_dir_all(&_dir).ok();
+    }
+
+    #[test]
+    fn legacy_ownerless_writes_become_conflict_and_retry_claims_them() {
+        let (dir, conn) = tmp_db();
+        conn.execute(
+            "INSERT INTO local_write_queue (id, method, path, idempotency_key, status, attempts, created_at)
+             VALUES ('legacy', 'POST', '/sectors', 'k-legacy', 'pending', 0, '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+        // Reabrir corre a migração leve.
+        let conn = db::open(&dir.join("test.db")).unwrap();
+        let (status, err): (String, Option<String>) = conn
+            .query_row("SELECT status, last_error FROM local_write_queue WHERE id = 'legacy'", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        assert_eq!(status, "conflict");
+        assert!(err.unwrap().contains("versão anterior"));
+        assert!(fetch_writes_pending(&conn, &owner()).unwrap().is_empty());
+        assert_eq!(fetch_writes_visible_to(&conn, &owner()).unwrap().len(), 1);
+
+        retry_write_item_raw(&conn, "legacy", &owner()).unwrap();
+        let pending = fetch_writes_pending(&conn, &owner()).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].user_id.as_deref(), Some("u1"));
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn upload_listing_only_shows_items_of_the_session_owner() {
+        let (dir, conn) = tmp_db();
+        let f = dir.join("a.pdf");
+        fs::write(&f, b"x").unwrap();
+        insert_item(&conn, &f, "a.pdf", "VL-PROP-2026-0101-001", "t1", "u1", "attach").unwrap();
+        insert_item(&conn, &f, "a.pdf", "VL-PROP-2026-0101-002", "t2", "u2", "attach").unwrap();
+        let mine = fetch_uploads_for(&conn, &owner()).unwrap();
+        assert_eq!(mine.len(), 1);
+        assert_eq!(mine[0].identifier, "VL-PROP-2026-0101-001");
+        fs::remove_dir_all(&dir).ok();
+    }
+
     #[test]
     fn write_queue_idempotency_key_unique() {
         let (_dir, conn) = tmp_db();
-        insert_write(&conn, "PATCH", "/approvals/1", None, "dup-key", None).unwrap();
-        let second = insert_write(&conn, "PATCH", "/approvals/1", None, "dup-key", None);
+        insert_write(&conn, &owner(), "PATCH", "/approvals/1", None, "dup-key", None).unwrap();
+        let second = insert_write(&conn, &owner(), "PATCH", "/approvals/1", None, "dup-key", None);
         assert!(second.is_err(), "UNIQUE idempotency_key deve rejeitar duplicados");
         fs::remove_dir_all(&_dir).ok();
     }
@@ -3708,6 +3925,7 @@ mod tests {
         let (_dir, conn) = tmp_db();
         let item = insert_write(
             &conn,
+            &owner(),
             "DELETE",
             "/identifiers/VL-1/cancel",
             None,
@@ -3872,6 +4090,7 @@ mod tests {
         let (_dir, conn) = tmp_db();
         let first = insert_write(
             &conn,
+            &owner(),
             "POST",
             "/sectors",
             Some(r#"{"name":"Finanças"}"#.to_string()),
@@ -3883,7 +4102,7 @@ mod tests {
         // Mesma chave: lookup como enqueue_write (não duplica)
         let existing: WriteItem = conn
             .query_row(
-                "SELECT id, method, path, body, idempotency_key, resource_key, status, attempts, last_error, created_at
+                "SELECT id, method, path, body, idempotency_key, resource_key, status, attempts, last_error, created_at, tenant_id, user_id
                  FROM local_write_queue WHERE idempotency_key = ?1",
                 params!["idem-sector-1"],
                 row_to_write_item,
@@ -3904,7 +4123,7 @@ mod tests {
             params![outcome.new_status, first.id],
         )
         .unwrap();
-        assert!(fetch_writes_pending(&conn).unwrap().is_empty());
+        assert!(fetch_writes_pending(&conn, &owner()).unwrap().is_empty());
 
         fs::remove_dir_all(&_dir).ok();
     }
