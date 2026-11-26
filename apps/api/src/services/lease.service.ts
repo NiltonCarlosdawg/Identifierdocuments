@@ -5,6 +5,7 @@ import type { AuthPayload } from "../middleware/auth";
 import { getFreshRoles } from "../middleware/auth";
 import { getSubscriptionContext, SubscriptionError } from "./subscription.service";
 import { isTenantAdmin } from "./access-decision.service";
+import { takeFromReleasePool } from "./release-pool.service";
 
 export const DEFAULT_LEASE_BATCH_SIZE = 50;
 
@@ -87,6 +88,20 @@ export async function leaseIdentifiers(
       ),
     });
     if (existingActive) throw new Error("Dispositivo já tem um lease activo para esta categoria.");
+
+    // Primeiro, números devolvidos que ainda podem sair por ordem cronológica.
+    const reused = await takeFromReleasePool(tx2 as unknown as DB, auth, opts.categoryId, batchSize, ip);
+    if (reused) {
+      return tx2.insert(identifierLeases).values({
+        tenantId: auth.tenantId,
+        categoryId: opts.categoryId,
+        sectorId: resolvedSectorId,
+        deviceId: opts.deviceId,
+        startSeq: reused.start,
+        endSeq: reused.end,
+        status: "active",
+      }).returning();
+    }
 
     const [idMax] = await tx2
       .select({ val: sql<number>`COALESCE(MAX(sequence), 0)` })

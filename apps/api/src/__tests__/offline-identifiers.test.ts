@@ -111,7 +111,7 @@ describe("M2 — Offline Identifiers (lease/release/force-release/register-offli
     }
     await db.execute(sql`DELETE FROM organizations WHERE slug LIKE ${`m2-%-${tag}`}`);
     await db.execute(sql`DELETE FROM plans WHERE id = ${paidOfflinePlanId}`);
-    await db.execute(sql`DELETE FROM categories WHERE id IN (${catSeqId}, ${catNoSeqId})`);
+    await db.execute(sql`DELETE FROM categories WHERE id IN (${catSeqId}, ${catNoSeqId}) OR id LIKE ${`TST-POOL-%-${tag}`}`);
   });
 
   /* ================================================================
@@ -206,35 +206,75 @@ describe("M2 — Offline Identifiers (lease/release/force-release/register-offli
       }
     });
 
-    test("nextStart respeita o maior entre identifiers.sequence, leases.end_seq e pool.range_end", async () => {
+    // Cada teste de pool usa uma categoria própria: os outros testes deixam
+    // leases activos e identificadores em catSeqId, o que mudaria o limiar.
+    async function freshSeqCategory(suffix: string) {
+      const id = `TST-POOL-${suffix}-${tag}`;
+      await db.insert(categories).values({ id, name: `Pool ${suffix}`, group: "Test", prefix: id, requiresSequential: true });
+      return id;
+    }
+    async function seedPoolScenario(categoryId: string, opts: { issuedUpTo: number; releasedLease: [number, number, number | null]; pool: [number, number] }) {
       const [d] = await withTenant(orgId, (tx) =>
-        tx.insert(devices).values({ tenantId: orgId, registeredByUserId: userId, name: `PoolTest-${tag}`, status: "active" })
+        tx.insert(devices).values({ tenantId: orgId, registeredByUserId: userId, name: `PoolSeed-${categoryId}`, status: "active" })
           .returning({ id: devices.id }));
-
-      // Pre-seed: identifier com sequence=100, lease com end_seq=200, pool com range_end=150
-      await db.transaction(async (tx) => {
-        await tx.execute(sql`SELECT set_config('app.current_tenant', ${orgId}, true)`);
+      await withTenant(orgId, async (tx) => {
         await tx.insert(identifiers).values({
-          tenantId: orgId, sectorId, categoryId: catSeqId,
-          identifier: `PRE-SEED-${tag}`, sequence: 100, createdBy: userId,
+          tenantId: orgId, sectorId, categoryId,
+          identifier: `PRE-${categoryId}`, sequence: opts.issuedUpTo, createdBy: userId,
         });
+        const [s, e, used] = opts.releasedLease;
         await tx.insert(identifierLeases).values({
-          tenantId: orgId, categoryId: catSeqId, sectorId,
-          deviceId: d.id, startSeq: 101, endSeq: 200, status: "released", releasedAt: new Date(),
+          tenantId: orgId, categoryId, sectorId, deviceId: d.id,
+          startSeq: s, endSeq: e, usedUpTo: used, status: "released", releasedAt: new Date(),
         });
         await tx.insert(identifierReleasePool).values({
-          tenantId: orgId, categoryId: catSeqId, sectorId,
-          rangeStart: 101, rangeEnd: 150,
+          tenantId: orgId, categoryId, sectorId, rangeStart: opts.pool[0], rangeEnd: opts.pool[1],
         });
       });
+      return d.id;
+    }
+    const poolRows = (categoryId: string) => withTenant(orgId, (tx) => tx.select().from(identifierReleasePool)
+      .where(and(eq(identifierReleasePool.tenantId, orgId), eq(identifierReleasePool.categoryId, categoryId))));
+    const voidedAudits = (categoryId: string) => withTenant(orgId, (tx) => tx.select().from(auditLogs)
+      .where(and(eq(auditLogs.tenantId, orgId), eq(auditLogs.action, "SEQUENCE_VOIDED"),
+        sql`${auditLogs.metadata}::jsonb->>'categoryId' = ${categoryId}`)));
 
-      // lease deve começar depois do maior valor pre-seedado (max(100,200,150)+1 = 201)
-      // NOTA: outros testes podem ter criado dados na mesma categoria, por isso
-      // só verificamos que startSeq > 200 (maior valor pre-seedado)
+    test("pool seguro (nada mais alto emitido) é reaproveitado no próximo lease", async () => {
+      const cat = await freshSeqCategory("reuse");
+      // Emitido até 20; lease [21,50] devolvido sem uso → pool [21,50].
+      const dev = await seedPoolScenario(cat, { issuedUpTo: 20, releasedLease: [21, 50, null], pool: [21, 50] });
       const lease = await withTenant(orgId, (tx) =>
-        leaseIdentifiers(tx, authAdmin(), { deviceId: d.id, categoryId: catSeqId }));
-      expect(lease.startSeq).toBeGreaterThan(200);
-      expect(lease.endSeq).toBe(lease.startSeq + 49);
+        leaseIdentifiers(tx, authAdmin(), { deviceId: dev, categoryId: cat }));
+      expect(lease.startSeq).toBe(21);
+      expect(lease.endSeq).toBe(50);
+      expect(await poolRows(cat)).toHaveLength(0);
+      expect(await voidedAudits(cat)).toHaveLength(0);
+    });
+
+    test("pool abaixo de um número já emitido é anulado e auditado, não reaproveitado", async () => {
+      const cat = await freshSeqCategory("void");
+      // Pool [21,50] mas já saiu o 60 (online): reutilizar quebraria a ordem cronológica.
+      const dev = await seedPoolScenario(cat, { issuedUpTo: 60, releasedLease: [21, 50, 20], pool: [21, 50] });
+      const lease = await withTenant(orgId, (tx) =>
+        leaseIdentifiers(tx, authAdmin(), { deviceId: dev, categoryId: cat }));
+      expect(lease.startSeq).toBe(61);
+      expect(await poolRows(cat)).toHaveLength(0);
+      const audits = await voidedAudits(cat);
+      expect(audits).toHaveLength(1);
+      const meta = JSON.parse(audits[0].metadata!);
+      expect(meta.rangeStart).toBe(21);
+      expect(meta.rangeEnd).toBe(50);
+    });
+
+    test("geração online consome primeiro o número devolvido seguro", async () => {
+      const cat = await freshSeqCategory("online");
+      await seedPoolScenario(cat, { issuedUpTo: 20, releasedLease: [21, 50, null], pool: [21, 50] });
+      const gen = await withTenant(orgId, (tx) => generateIdentifier(tx, authAdmin(), { categoryId: cat, sectorId }));
+      expect((gen as any).sequence).toBe(21);
+      const pool = await poolRows(cat);
+      expect(pool).toHaveLength(1);
+      expect(pool[0].rangeStart).toBe(22);
+      expect(pool[0].rangeEnd).toBe(50);
     });
   });
 
