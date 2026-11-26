@@ -1,14 +1,70 @@
 name: Build & Release
+
+# Publica o DocID Desktop. Basta subir a versão (scripts/bump-desktop-version.sh X.Y.Z) e
+# fazer merge para main: este workflow vê a versão nova, cria o release desktop-vX.Y.Z,
+# gera os instaladores e publica-os no site (downloads, SHA256SUMS e landing).
+# Uma tag desktop-v* empurrada à mão continua a funcionar.
 on:
   push:
+    branches: [main]
+    paths: ["apps/desktop/src-tauri/tauri.conf.json"]
     tags: ["v*", "desktop-v*"]
   workflow_dispatch:
 
 permissions:
   contents: write
 
+concurrency:
+  group: desktop-release
+  cancel-in-progress: false
+
 jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      release: ${{ steps.plan.outputs.release }}
+      tag: ${{ steps.plan.outputs.tag }}
+      version: ${{ steps.plan.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Decide release
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(bash scripts/check-desktop-version.sh)
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            TAG="${GITHUB_REF_NAME}"
+            [ "${TAG#desktop-v}" = "$VERSION" ] || [ "${TAG#v}" = "$VERSION" ] || {
+              echo "::error::a tag $TAG não corresponde à versão $VERSION do desktop"; exit 1; }
+          else
+            TAG="desktop-v$VERSION"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          if [ "${GITHUB_REF_TYPE}" != "tag" ] && gh release view "$TAG" >/dev/null 2>&1; then
+            echo "O release $TAG já existe: nada a publicar."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Criado aqui (como pré-release) para os três builds encontrarem o mesmo release em
+      # vez de cada um criar o seu. Só passa a "latest" — o que o auto-update lê — no fim
+      # do job publish, depois de os instaladores estarem conferidos.
+      - name: Create release
+        if: steps.plan.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.plan.outputs.tag }}
+        run: |
+          gh release view "$TAG" >/dev/null 2>&1 || \
+            gh release create "$TAG" --target "$GITHUB_SHA" --title "DocID $TAG" --generate-notes --prerelease
+
   build:
+    needs: prepare
+    if: needs.prepare.outputs.release == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -55,9 +111,9 @@ jobs:
         uses: tauri-apps/tauri-action@v1
         with:
           projectPath: apps/desktop
-          tagName: ${{ github.ref_name }}
-          releaseName: DocID ${{ github.ref_name }}
-          generateReleaseNotes: true
+          tagName: ${{ needs.prepare.outputs.tag }}
+          releaseName: DocID ${{ needs.prepare.outputs.tag }}
+          prerelease: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -68,3 +124,98 @@ jobs:
         with:
           name: docid-${{ matrix.platform }}
           path: apps/desktop/src-tauri/target/release/bundle/${{ matrix.bundle }}/
+
+  # Corre mesmo que o build de macOS falhe (ainda não gera artefactos): o site só publica
+  # Windows e Linux, e verifica-os antes de mexer em qualquer coisa.
+  publish:
+    needs: [prepare, build]
+    if: ${{ !cancelled() && needs.prepare.outputs.release == 'true' }}
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.prepare.outputs.tag }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+      SSH_TARGET: milvendas@135.181.34.42
+      SITE_DIR: /mnt/homer2/milvendas/docid.milvendas.ao
+    steps:
+      # refs/heads/main: existe uma tag chamada "main" no repositório.
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/heads/main
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Download installers from the release
+        run: |
+          EXE="DocID_${VERSION}_x64-setup.exe"
+          DEB="DocID_${VERSION}_amd64.deb"
+          ASSETS=$(gh release view "$TAG" --json assets -q '.assets[].name')
+          for f in "$EXE" "$EXE.sig" "$DEB" latest.json; do
+            grep -Fxq "$f" <<< "$ASSETS" || { echo "::error::falta $f no release $TAG"; exit 1; }
+          done
+          mkdir -p /tmp/dl
+          gh release download "$TAG" -D /tmp/dl -p "$EXE" -p "$DEB"
+          echo "EXE=$EXE" >> "$GITHUB_ENV"
+          echo "DEB=$DEB" >> "$GITHUB_ENV"
+
+      - name: Write deploy key
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/deploy_key
+          chmod 600 /tmp/deploy_key
+
+      # Limite de débito: a conta do cPanel tem um tecto de I/O partilhado com a API, e
+      # escrever 300 MB de uma vez pode deixá-la sem resposta.
+      - name: Upload installers to the site
+        run: |
+          SSH="ssh -i /tmp/deploy_key -o StrictHostKeyChecking=no -o ConnectTimeout=30 $SSH_TARGET"
+          DL="$SITE_DIR/downloads"
+          # Envia para uma pasta à parte e só depois move: ninguém descarrega um ficheiro a meio.
+          $SSH "mkdir -p $DL/.upload-$VERSION"
+          scp -i /tmp/deploy_key -o StrictHostKeyChecking=no -l 16000 \
+            "/tmp/dl/$EXE" "/tmp/dl/$DEB" "$SSH_TARGET:$DL/.upload-$VERSION/"
+          EXE_SIZE=$(stat -c %s "/tmp/dl/$EXE"); DEB_SIZE=$(stat -c %s "/tmp/dl/$DEB")
+          SUMS=$(cd /tmp/dl && sha256sum "$EXE" "$DEB")
+          $SSH "set -e
+            cd $DL/.upload-$VERSION
+            [ \$(stat -c %s $EXE) = $EXE_SIZE ] && [ \$(stat -c %s $DEB) = $DEB_SIZE ]
+            mv -f $EXE $DEB $DL/
+            cd $DL && rmdir .upload-$VERSION
+            printf '%s\n' \"$SUMS\" > SHA256SUMS.tmp && mv -f SHA256SUMS.tmp SHA256SUMS
+            echo downloads-ok"
+
+      - name: Point the landing to the new installers
+        run: |
+          python3 scripts/update-download-section.py "$VERSION" "/tmp/dl/$EXE" "/tmp/dl/$DEB"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/landing/src/components/ui/download-section.tsx
+          if git diff --cached --quiet; then
+            echo "A landing já aponta para $VERSION."
+          else
+            git commit -m "chore: publish desktop $VERSION downloads"
+            for i in 1 2 3; do
+              git pull --rebase origin refs/heads/main && git push origin HEAD:refs/heads/main && break
+              sleep 5
+            done
+          fi
+
+      # O push acima é feito com o GITHUB_TOKEN e não dispara o "Deploy DocID": a landing
+      # é publicada aqui.
+      - name: Deploy landing
+        run: |
+          bun install --frozen-lockfile
+          (cd apps/landing && VITE_API_URL=https://didall.milvendas.ao bun run build)
+          tar czf /tmp/landing.tgz -C apps/landing/dist .
+          scp -i /tmp/deploy_key -o StrictHostKeyChecking=no /tmp/landing.tgz "$SSH_TARGET:/tmp/docid-deploy/landing.tgz"
+          ssh -i /tmp/deploy_key -o StrictHostKeyChecking=no "$SSH_TARGET" \
+            "tar xzf /tmp/docid-deploy/landing.tgz -C $SITE_DIR && echo landing-ok"
+
+      - name: Verify published installer
+        run: bash scripts/verify-installer.sh
+
+      # Só agora o auto-update da app passa a ver esta versão.
+      - name: Mark release as latest
+        run: gh release edit "$TAG" --prerelease=false --latest
