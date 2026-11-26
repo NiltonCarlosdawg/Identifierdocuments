@@ -16,11 +16,21 @@ static IDENTIFIER_RE: OnceLock<Regex> = OnceLock::new();
 const SEEN_FILE: &str = "watcher_seen.json";
 
 fn identifier_re() -> &'static Regex {
-    IDENTIFIER_RE.get_or_init(|| Regex::new(r"[A-Z]{1,6}-[A-Z]{2,5}-\d{4}-\d{4}-\d{3}").unwrap())
+    // A sequência tem 3 dígitos com zeros à esquerda, mas não pára em 999: sem `\d{3,}`
+    // e sem limites de palavra, "…-1000" era lido como "…-100" (outro identificador).
+    // Antes do prefixo não pode haver maiúscula nem dígito ("XVL-…" não é "VL-…"); depois,
+    // `\d{3,}` guloso consome todos os dígitos. Minúsculas coladas (texto de PDF sem
+    // espaços) continuam a ser aceites. O crate regex não tem lookbehind: usa-se um grupo.
+    IDENTIFIER_RE.get_or_init(|| {
+        Regex::new(r"(?:^|[^A-Z0-9])([A-Z]{1,6}-[A-Z]{2,5}-\d{4}-\d{4}-\d{3,})").unwrap()
+    })
 }
 
 pub fn find_identifier(text: &str) -> Option<String> {
-    identifier_re().find(text).map(|m| m.as_str().to_string())
+    identifier_re()
+        .captures(text)
+        .and_then(|c| c.get(1))
+        .map(|m| m.as_str().to_string())
 }
 
 fn load_seen(app_data: &Path) -> HashMap<String, u64> {
@@ -517,6 +527,20 @@ mod tests {
     fn find_multiple_returns_first() {
         let text = "primeiro VL-PROP-2026-0101-001 e depois VL-NDA-2026-0202-002";
         assert_eq!(find_identifier(text), Some("VL-PROP-2026-0101-001".into()));
+    }
+
+    #[test]
+    fn find_sequence_above_999_is_read_whole() {
+        assert_eq!(find_identifier("Ref. VL-PROP-2026-0725-1000."), Some("VL-PROP-2026-0725-1000".into()));
+        assert_eq!(find_identifier("VL-FAT-2026-0101-12345"), Some("VL-FAT-2026-0101-12345".into()));
+    }
+
+    #[test]
+    fn find_respects_prefix_boundary() {
+        assert_eq!(find_identifier("XYZABCDVL-PROP-2026-0725-001"), None);
+        assert_eq!(find_identifier("VL-PROP-2026-0725-001Proposta"), Some("VL-PROP-2026-0725-001".into()));
+        assert_eq!(find_identifier("referênciaVL-PROP-2026-0725-001"), Some("VL-PROP-2026-0725-001".into()));
+        assert_eq!(find_identifier("(VL-PROP-2026-0725-001)"), Some("VL-PROP-2026-0725-001".into()));
     }
 
     #[test]

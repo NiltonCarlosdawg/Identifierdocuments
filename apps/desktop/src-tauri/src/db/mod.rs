@@ -217,7 +217,9 @@ fn init_schema(conn: &Connection) -> Result<()> {
                              CHECK (status IN ('pending','applying','done','failed','conflict')),
             attempts         INTEGER NOT NULL DEFAULT 0,
             last_error       TEXT,
-            created_at       TEXT NOT NULL
+            created_at       TEXT NOT NULL,
+            tenant_id        TEXT,
+            user_id          TEXT
         );
 
         CREATE INDEX IF NOT EXISTS idx_write_status
@@ -249,6 +251,18 @@ fn init_schema(conn: &Connection) -> Result<()> {
         "ALTER TABLE upload_queue ADD COLUMN upload_mode TEXT NOT NULL DEFAULT 'attach'",
         [],
     );
+    // Migração leve: dono de cada escrita offline (organização + utilizador da sessão).
+    let _ = conn.execute("ALTER TABLE local_write_queue ADD COLUMN tenant_id TEXT", []);
+    let _ = conn.execute("ALTER TABLE local_write_queue ADD COLUMN user_id TEXT", []);
+    // Escritas de versões antigas não têm dono: não se sabe em nome de quem enviá-las.
+    // Ficam em conflito para revisão; reenviar (acção explícita) atribui-as à sessão actual.
+    conn.execute(
+        "UPDATE local_write_queue
+         SET status = 'conflict',
+             last_error = 'Alteração guardada por uma versão anterior sem registo do utilizador. Reveja e reenvie, ou remova.'
+         WHERE tenant_id IS NULL AND status IN ('pending', 'applying', 'failed')",
+        [],
+    )?;
     Ok(())
 }
 

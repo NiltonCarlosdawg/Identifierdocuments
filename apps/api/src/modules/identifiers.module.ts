@@ -122,6 +122,7 @@ export const identifiersModule = new (Elysia as any)({ prefix: "/identifiers" })
       leaseId: t.String(),
       identifiers: t.Array(t.Object({
         sequence: t.Integer(),
+        identifier: t.Optional(t.String({ maxLength: 120 })),
         issuedTo: t.Optional(t.String()),
         description: t.Optional(t.String()),
         visibility: t.Optional(t.Union([t.Literal("public"), t.Literal("sector_only")])),
@@ -147,6 +148,12 @@ export const identifiersModule = new (Elysia as any)({ prefix: "/identifiers" })
           const cat = await tx.query.categories.findFirst({ where: eq(categories.id, body.categoryId) });
           if (!cat) { set.status = 404; return { error: { code: "NOT_FOUND", message: "Categoria não encontrada." } }; }
           if (cat.requiresSequential) { set.status = 400; return { error: { code: "CATEGORY_SEQUENTIAL", message: "Categoria requer sequenciação. Use /identifiers/register-offline em vez de -loose." } }; }
+
+          // Mesmo teto mensal que /generate (antes este caminho não tinha nenhum). O estado
+          // expirado/suspenso não bloqueia aqui: a fila offline criada antes da expiração
+          // tem de continuar a sincronizar (ver docs/LICENCAS.md), por isso só o teto conta.
+          const limit = await checkIdentifierQuota(tenantId, tx, true);
+          if (limit) { set.status = 403; return { error: limit }; }
 
             const result = await generateIdentifier(tx, auth!, ({
             categoryId: body.categoryId,

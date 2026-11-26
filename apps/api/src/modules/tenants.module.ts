@@ -5,7 +5,7 @@ import { Type as t } from "@sinclair/typebox";
 import { db } from "../db";
 import { withTenant } from "../db/withTenant";
 import { sql } from "drizzle-orm";
-import { organizations, sectors, users, roles, userRoles } from "../db/schema";
+import { organizations, sectors, users, roles, userRoles, identifiers } from "../db/schema";
 import { eq, and, isNull } from "drizzle-orm";
 import { requireAuth, requireRole } from "../middleware/auth";
 import { checkRateLimit } from "../middleware/rateLimit";
@@ -15,6 +15,7 @@ import { getClientIp } from "../lib/ip";
 import { getFreePlan, getSubscriptionContext } from "../services/subscription.service";
 import { getTenantLicense } from "../services/license-enforcement.service";
 import { getLicenseContext, issueLicense, trialLicenseInput } from "../services/license.service";
+import { defaultIdentifierPrefix, IDENTIFIER_PREFIX_MESSAGE, normalizeIdentifierPrefix } from "../lib/identifier-prefix";
 
 export const tenantsModule = new (Elysia as any)({ prefix: "/tenants" })
 
@@ -37,6 +38,17 @@ export const tenantsModule = new (Elysia as any)({ prefix: "/tenants" })
       set.status = 429;
       return { error: { code: "RATE_LIMITED", message: "Muitas tentativas de registo. Tente novamente em 1 hora." } };
     }
+    let identifierPrefix: string;
+    if (body.identifierPrefix !== undefined && body.identifierPrefix !== "") {
+      const normalized = normalizeIdentifierPrefix(body.identifierPrefix);
+      if (!normalized) {
+        set.status = 422;
+        return { error: { code: "INVALID_IDENTIFIER_PREFIX", message: IDENTIFIER_PREFIX_MESSAGE } };
+      }
+      identifierPrefix = normalized;
+    } else {
+      identifierPrefix = "";
+    }
     try {
       const slug = body.slug ?? body.name.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 63);
 
@@ -55,7 +67,7 @@ export const tenantsModule = new (Elysia as any)({ prefix: "/tenants" })
             id: orgId,
             name: body.name,
             slug,
-            identifierPrefix: body.identifierPrefix ?? slug.toUpperCase().slice(0, 4),
+            identifierPrefix: identifierPrefix || defaultIdentifierPrefix(slug),
             planId: freePlan.id,
             termsAccepted: true,
             termsAcceptedAt: new Date(),
@@ -191,13 +203,54 @@ export const tenantsModule = new (Elysia as any)({ prefix: "/tenants" })
     try {
       const updates: Record<string, unknown> = {};
       if (body.name !== undefined) updates.name = body.name;
-      if (body.identifierPrefix !== undefined) updates.identifierPrefix = body.identifierPrefix;
+      if (body.identifierPrefix !== undefined) {
+        const normalized = normalizeIdentifierPrefix(body.identifierPrefix);
+        if (!normalized) {
+          set.status = 422;
+          return { error: { code: "INVALID_IDENTIFIER_PREFIX", message: IDENTIFIER_PREFIX_MESSAGE } };
+        }
+        updates.identifierPrefix = normalized;
+      }
 
-      const [org] = await db
-        .update(organizations)
-        .set(updates)
-        .where(eq(organizations.id, auth!.tenantId))
-        .returning();
+      if (Object.keys(updates).length === 0) {
+        set.status = 400;
+        return { error: { code: "UPDATE_ERROR", message: "Nada para actualizar." } };
+      }
+      // organizations tem RLS forçado: sem withTenant a actualização afectava 0 linhas
+      // (e devolvia data: undefined) com um utilizador da BD sem BYPASSRLS.
+      const result = await withTenant(auth!.tenantId, async (tx) => {
+        if (updates.identifierPrefix !== undefined) {
+          const [current] = await tx.select({ prefix: organizations.identifierPrefix })
+            .from(organizations).where(eq(organizations.id, auth!.tenantId));
+          if (current && current.prefix !== updates.identifierPrefix) {
+            // Mudar o prefixo depois de emitir identificadores parte a série: os números
+            // seguintes saíam com outro prefixo e os documentos antigos deixavam de bater.
+            const [issued] = await tx.select({ id: identifiers.id }).from(identifiers)
+              .where(eq(identifiers.tenantId, auth!.tenantId)).limit(1);
+            if (issued) return { locked: true as const };
+          }
+        }
+        const [org] = await tx
+          .update(organizations)
+          .set(updates)
+          .where(eq(organizations.id, auth!.tenantId))
+          .returning();
+        return { org };
+      });
+      if ("locked" in result) {
+        set.status = 409;
+        return {
+          error: {
+            code: "PREFIX_LOCKED",
+            message: "O prefixo não pode ser alterado depois de a organização emitir identificadores.",
+          },
+        };
+      }
+      const org = result.org;
+      if (!org) {
+        set.status = 404;
+        return { error: { code: "NOT_FOUND", message: "Organização não encontrada." } };
+      }
       return { data: org };
     } catch (err: any) {
       set.status = 400;

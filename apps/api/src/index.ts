@@ -30,6 +30,7 @@ import { emailModule, emailLinksModule } from "./modules/email.module";
 import { platformModule } from "./modules/platform.module";
 import { getClientIp } from "./lib/ip";
 import { ALLOWED_ORIGINS } from "./lib/cors";
+import { checkDatabaseRoleEnforcesRls } from "./db/role-check";
 
 const requestTimings = new WeakMap<Request, number>();
 const PORT = Number(process.env.PORT) || 3000;
@@ -175,5 +176,10 @@ void startWorkers().catch((err) => {
 
 // Fila de e-mails em PostgreSQL: não depende do Redis.
 startEmailWorker();
+
+void checkDatabaseRoleEnforcesRls().catch((err) => {
+  logger.error({ err }, "[SEGURANÇA] Verificação do papel da BD falhou");
+  if (process.env.REQUIRE_RLS_ROLE === "true") process.exit(1);
+});
 
 export type App = typeof app;

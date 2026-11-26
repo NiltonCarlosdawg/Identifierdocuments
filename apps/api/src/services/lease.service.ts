@@ -5,6 +5,8 @@ import type { AuthPayload } from "../middleware/auth";
 import { getFreshRoles } from "../middleware/auth";
 import { getSubscriptionContext, SubscriptionError } from "./subscription.service";
 import { isTenantAdmin } from "./access-decision.service";
+import { takeFromReleasePool } from "./release-pool.service";
+import { identifierDateParts, parseOfflineIdentifierDate } from "../lib/identifier-date";
 
 export const DEFAULT_LEASE_BATCH_SIZE = 50;
 
@@ -87,6 +89,20 @@ export async function leaseIdentifiers(
       ),
     });
     if (existingActive) throw new Error("Dispositivo já tem um lease activo para esta categoria.");
+
+    // Primeiro, números devolvidos que ainda podem sair por ordem cronológica.
+    const reused = await takeFromReleasePool(tx2 as unknown as DB, auth, opts.categoryId, batchSize, ip);
+    if (reused) {
+      return tx2.insert(identifierLeases).values({
+        tenantId: auth.tenantId,
+        categoryId: opts.categoryId,
+        sectorId: resolvedSectorId,
+        deviceId: opts.deviceId,
+        startSeq: reused.start,
+        endSeq: reused.end,
+        status: "active",
+      }).returning();
+    }
 
     const [idMax] = await tx2
       .select({ val: sql<number>`COALESCE(MAX(sequence), 0)` })
@@ -232,6 +248,8 @@ export async function registerOfflineIdentifiers(
     leaseId: string;
     identifiers: Array<{
       sequence: number;
+      /** Identificador emitido offline; clientes anteriores à 1.2.7 não o enviam. */
+      identifier?: string;
       issuedTo?: string;
       description?: string;
       visibility?: "public" | "sector_only";
@@ -260,10 +278,8 @@ export async function registerOfflineIdentifiers(
   const cat = await tx.query.categories.findFirst({ where: eq(categories.id, lease.categoryId) });
   if (!cat) throw new Error("Categoria não encontrada.");
 
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = now.getMonth() + 1;
-  const day = now.getDate();
+  // Fallback para clientes antigos que não enviam o identificador: data de hoje.
+  const { year, month, day } = identifierDateParts();
 
     const created = await tx.transaction(async (tx2) => {
     const lockKey = sql`hashtext(CONCAT(${auth.tenantId}::text, '-', ${lease.categoryId}::text))`;
@@ -299,9 +315,19 @@ export async function registerOfflineIdentifiers(
     }
 
     const mmdd = `${String(month).padStart(2, "0")}${String(day).padStart(2, "0")}`;
+    const head = `${orgPrefix}-${cat.prefix}-`;
+    // O identificador emitido offline já está impresso no documento: regista-se tal como
+    // foi emitido (com a data desse dia), não com a data da sincronização.
+    const identifierStrings = sorted.map((ident) => {
+      const tail = `-${String(ident.sequence).padStart(3, "0")}`;
+      if (!ident.identifier) return `${head}${year}-${mmdd}${tail}`;
+      const parsed = parseOfflineIdentifierDate(ident.identifier, head, tail, freshLease.createdAt);
+      if ("reason" in parsed) throw new Error(`Identificador offline '${ident.identifier}' inválido: ${parsed.reason}.`);
+      return ident.identifier;
+    });
     const inserted = await tx2.insert(identifiers).values(
-      sorted.map((ident) => {
-        const identifierStr = `${orgPrefix}-${cat.prefix}-${year}-${mmdd}-${String(ident.sequence).padStart(3, "0")}`;
+      sorted.map((ident, i) => {
+        const identifierStr = identifierStrings[i];
         return {
           tenantId: auth.tenantId,
           sectorId: lease.sectorId,

@@ -4,6 +4,12 @@ import { secureJsonStorage } from "../../infrastructure/storage/SecureStorageAda
 import { offlineCache } from "../../infrastructure/storage/OfflineCache";
 import type { StoredUser } from "../../domain/entities/User";
 
+async function clearNativeSyncCredentials(): Promise<void> {
+  if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) return;
+  const { invoke } = await import("@tauri-apps/api/core");
+  await invoke("clear_sync_credentials");
+}
+
 interface AuthState {
   token: string | null;
   user: StoredUser | null;
@@ -21,6 +27,9 @@ export const useAuthStore = create<AuthState>()(
       logout: () => {
         offlineCache.clearAll().catch(() => {});
         offlineCache.clearKey().catch(() => {});
+        // O motor de sync nativo guarda o seu próprio token: sem isto continuava a
+        // sincronizar com a sessão de quem saiu.
+        clearNativeSyncCredentials().catch(() => {});
         set({ token: null, user: null });
       },
     }),
