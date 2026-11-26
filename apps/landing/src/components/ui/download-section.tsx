@@ -7,14 +7,14 @@ const ALL_RELEASES = "https://github.com/NiltonCarlosdawg/Identifierdocuments/re
 
 export const DOWNLOADS = {
   installer: {
-    href: "/downloads/DocID_1.2.6_x64-setup.exe",
-    size: "300 MB",
-    sha256: "2d58f8ddcde68cce8ec934995c566436330aa19daaaf12507fc0e37ea816c4f3",
+    href: "/downloads/DocID_1.2.7_x64-setup.exe",
+    size: "304 MB",
+    sha256: "8d41751a40bc7cf09321c9f4a2d1611e54e3db4ad869f6d0a1e4592078aa3b32",
   },
   linux: {
-    href: "/downloads/DocID_1.2.6_amd64.deb",
+    href: "/downloads/DocID_1.2.7_amd64.deb",
     size: "10 MB",
-    sha256: "cfd0655ef58c256f872147b0e67ad8f6137c2e6ff911e85992bb479e36e8e401",
+    sha256: "ac33e20c3c821e654d9ce4ec0e99166b9d3dd41a92c415193af8d0b0e97aed13",
   },
 } as const;
 
@@ -109,7 +109,7 @@ export function DownloadSection() {
               mark={<LinuxMark className="h-4 w-4" />}
               name="Linux"
               meta="Pacote para Linux · 64 bits"
-              detail="Pacote .deb para Ubuntu 22.04 e compatíveis. Para instalar, execute sudo apt install ./DocID_1.2.6_amd64.deb."
+              detail="Pacote .deb para Ubuntu 22.04 e compatíveis. Para instalar, execute sudo apt install ./DocID_1.2.7_amd64.deb."
               action={
                 <a className="btn-primary w-full sm:w-auto" href={DOWNLOADS.linux.href}>
                   <Download className="h-4 w-4" />
