@@ -247,9 +247,11 @@ function OrganizationTab() {
     setSaving(true);
     setError("");
     try {
+      // Só envia o prefixo se mudou: a API recusa alterá-lo depois de haver
+      // identificadores emitidos, e isso não deve impedir mudar só o nome.
       const res = await api.patch<{ data: OrgView }>("/tenants/me", {
         name,
-        identifierPrefix: prefix,
+        ...(prefix !== org?.identifierPrefix ? { identifierPrefix: prefix } : {}),
       });
       setOrg(o => o ? { ...o, ...res.data } : null);
       setSaved(true);
@@ -300,7 +302,7 @@ function OrganizationTab() {
         </div>
         <div>
           <label className="mb-1.5 block text-xs font-semibold text-docid-muted">Prefixo do Identificador</label>
-          <input value={prefix} onChange={e => setPrefix(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6))} className="docid-input w-full font-mono" maxLength={6} />
+          <input value={prefix} onChange={e => setPrefix(e.target.value.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 6))} className="docid-input w-full font-mono" maxLength={6} />
         </div>
         <div>
           <label className="mb-1.5 block text-xs font-semibold text-docid-muted">Endereço da organização</label>

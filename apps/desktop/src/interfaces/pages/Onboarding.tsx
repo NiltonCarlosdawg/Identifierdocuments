@@ -98,8 +98,8 @@ export default function Onboarding() {
               {autoSlug && <p className="mt-1 text-xs text-docid-muted">Gerado automaticamente.</p>}
             </div>
             <div>
-              <label className="mb-1.5 block text-xs font-semibold text-docid-muted">Prefixo do identificador <span className="font-normal text-docid-outline">(máx. 6 caracteres)</span></label>
-              <input value={prefix} onChange={e => { setPrefix(e.target.value.toUpperCase().slice(0, 6)); setAutoPrefix(false); }} className="docid-input w-full font-mono text-sm uppercase" placeholder="VL" maxLength={6} />
+              <label className="mb-1.5 block text-xs font-semibold text-docid-muted">Prefixo do identificador <span className="font-normal text-docid-outline">(1 a 6 letras, A–Z)</span></label>
+              <input value={prefix} onChange={e => { setPrefix(e.target.value.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 6)); setAutoPrefix(false); }} className="docid-input w-full font-mono text-sm uppercase" placeholder="VL" maxLength={6} />
               {autoPrefix && <p className="mt-1 text-xs text-docid-muted">Gerado automaticamente.</p>}
             </div>
             <div className="flex justify-end pt-4">

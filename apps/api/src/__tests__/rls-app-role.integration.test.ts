@@ -101,6 +101,7 @@ afterAll(async () => {
     // Superutilizador: apaga sem contexto de tenant. Ordem pelas FKs.
     for (const q of [
       `DELETE FROM audit_logs WHERE tenant_id = $1`,
+      `DELETE FROM identifiers WHERE tenant_id = $1`,
       `DELETE FROM user_roles WHERE user_id IN (SELECT id FROM users WHERE tenant_id = $1)`,
       `DELETE FROM licenses WHERE tenant_id = $1`,
       `DELETE FROM users WHERE tenant_id = $1`,
@@ -139,5 +140,57 @@ describe("API com papel da BD sem BYPASSRLS", () => {
   test("PATCH /tenants/me sem campos responde 400", async () => {
     const res = await api<any>("/tenants/me", { method: "PATCH", token, body: JSON.stringify({}) });
     expect(res.status).toBe(400);
+  });
+});
+
+describe("prefixo do identificador (API)", () => {
+  test("onboarding recusa prefixo com hífen ou dígitos", async () => {
+    for (const identifierPrefix of ["EMP-", "AB2"]) {
+      const res = await api<any>("/tenants", {
+        method: "POST",
+        body: JSON.stringify({
+          name: `Prefixo inválido ${RUN_ID}`,
+          adminEmail: `bad-prefix-${identifierPrefix.length}-${RUN_ID}@test.docid`,
+          adminPassword: "testpass123",
+          identifierPrefix,
+          termsAccepted: true,
+        }),
+      });
+      expect(res.status).toBe(422);
+      expect(res.body.error.code).toBe("INVALID_IDENTIFIER_PREFIX");
+    }
+  });
+
+  test("PATCH normaliza minúsculas e recusa inválidos", async () => {
+    const ok = await api<any>("/tenants/me", { method: "PATCH", token, body: JSON.stringify({ identifierPrefix: "rlsx" }) });
+    expect(ok.status).toBe(200);
+    expect(ok.body.data.identifierPrefix).toBe("RLSX");
+
+    const bad = await api<any>("/tenants/me", { method: "PATCH", token, body: JSON.stringify({ identifierPrefix: "RL-1" }) });
+    expect(bad.status).toBe(422);
+    expect(bad.body.error.code).toBe("INVALID_IDENTIFIER_PREFIX");
+  });
+
+  test("depois de emitir um identificador o prefixo fica bloqueado (o mesmo valor continua aceite)", async () => {
+    const sector = await api<any>("/sectors", {
+      method: "POST",
+      token,
+      body: JSON.stringify({ name: "Prefixo", code: `PFX${RUN_ID.slice(-4)}` }),
+    });
+    expect(sector.status).toBe(200);
+    const gen = await api<any>("/identifiers/generate", {
+      method: "POST",
+      token,
+      body: JSON.stringify({ categoryId: "MEM", sectorId: sector.body.data.id }),
+    });
+    expect(gen.status).toBe(200);
+    expect(gen.body.data.identifier.startsWith("RLSX-MEM-")).toBe(true);
+
+    const change = await api<any>("/tenants/me", { method: "PATCH", token, body: JSON.stringify({ identifierPrefix: "NOVO" }) });
+    expect(change.status).toBe(409);
+    expect(change.body.error.code).toBe("PREFIX_LOCKED");
+
+    const same = await api<any>("/tenants/me", { method: "PATCH", token, body: JSON.stringify({ identifierPrefix: "RLSX" }) });
+    expect(same.status).toBe(200);
   });
 });
