@@ -72,6 +72,7 @@ Em produção: API em `https://didall.milvendas.ao`, site, downloads e painel da
 
 - [`docs/CLAUDE.md`](docs/CLAUDE.md) — arquitectura e regras do sistema (fonte de verdade técnica)
 - [`docs/BACKLOG.md`](docs/BACKLOG.md) — estado por fase
+- [`docs/DESCRICAO_TECNICA.md`](docs/DESCRICAO_TECNICA.md) — resumo técnico de 2 páginas (PDF: `bash scripts/docs-to-pdf.sh docs/DESCRICAO_TECNICA.md docs/Descricao_Tecnica_DocID.pdf`)
 - [`docs/LICENCAS.md`](docs/LICENCAS.md) · [`docs/NOTIFICACOES_EMAIL.md`](docs/NOTIFICACOES_EMAIL.md) · [`docs/RLS_PRODUCAO.md`](docs/RLS_PRODUCAO.md)
 - [`docs/offline-persistence-invariants.md`](docs/offline-persistence-invariants.md) — regras da persistência offline
 - [`docs/pesquisa-mercado-docid.md`](docs/pesquisa-mercado-docid.md) — mercado, concorrência e regulamentação
