@@ -13,6 +13,7 @@ import { verifyDownloadToken } from "../lib/signed-link";
 import { resolveSafeSmtpHost, SmtpHostError } from "../lib/smtp-guard";
 import { downloadDocument } from "../services/attachment.service";
 import { fallbackMode, resolveSender } from "../services/email/tenant-email.service";
+import { detectSmtp } from "../services/email/smtp-autodetect";
 import { renderTestEmail } from "../services/email/templates";
 import { cleanDisplayName, formatAddress, isValidEmail, sendEmail } from "../services/email/transport";
 
@@ -44,6 +45,114 @@ const fail = (set: any, status: number, code: string, message: string) => {
   return { error: { code, message } };
 };
 
+
+async function saveSettings({ tenantId, auth, body, set, request }: any) {
+  if (!isValidEmail(body.fromEmail)) return fail(set, 422, "VALIDATION_ERROR", "E-mail do remetente inválido.");
+  if (body.replyTo && !isValidEmail(body.replyTo)) return fail(set, 422, "VALIDATION_ERROR", "E-mail de resposta inválido.");
+
+  if (body.provider === "smtp") {
+    if (!body.smtpHost || !body.smtpPort || !body.smtpSecurity) {
+      return fail(set, 422, "VALIDATION_ERROR", "SMTP exige host, porta e segurança (ssl, starttls ou none).");
+    }
+    try {
+      await resolveSafeSmtpHost(body.smtpHost, body.smtpPort);
+    } catch (err: any) {
+      return fail(set, 422, "SMTP_HOST_REJECTED", err instanceof SmtpHostError ? err.message : "Host SMTP inválido.");
+    }
+  }
+  if (body.secret !== undefined && !isSecretBoxConfigured()) {
+    return fail(set, 500, "SECRETS_KEY_MISSING", "O servidor não tem EMAIL_SECRETS_KEY configurada; não é possível guardar credenciais.");
+  }
+
+  try {
+    return await withTenant(tenantId, async (tx) => {
+      const existing = await tx.query.tenantEmailSettings.findFirst({ where: eq(tenantEmailSettings.tenantId, tenantId) });
+      const providerChanged = existing && existing.provider !== body.provider;
+      let secretEncrypted = existing?.secretEncrypted ?? null;
+      if (body.secret !== undefined) {
+        secretEncrypted = body.secret ? encryptSecret(body.secret, tenantId) : null;
+      } else if (providerChanged) {
+        // Não reaproveitar uma password SMTP como chave de API (ou vice-versa).
+        secretEncrypted = null;
+      }
+      if (body.provider !== "smtp" && !secretEncrypted) {
+        return fail(set, 422, "VALIDATION_ERROR", "Indique a chave de API do fornecedor.");
+      }
+
+      const values = {
+        tenantId,
+        provider: body.provider,
+        fromEmail: body.fromEmail.trim(),
+        fromName: body.fromName ? cleanDisplayName(body.fromName) : null,
+        replyTo: body.replyTo?.trim() || null,
+        smtpHost: body.provider === "smtp" ? body.smtpHost.trim() : null,
+        smtpPort: body.provider === "smtp" ? body.smtpPort : null,
+        smtpSecurity: body.provider === "smtp" ? body.smtpSecurity : null,
+        smtpUser: body.provider === "smtp" ? (body.smtpUser?.trim() || null) : null,
+        secretEncrypted,
+        enabled: body.enabled ?? existing?.enabled ?? true,
+        verifiedAt: null, // qualquer alteração exige novo teste
+        updatedBy: auth.userId,
+        updatedAt: new Date(),
+      };
+      const [saved] = await tx.insert(tenantEmailSettings).values(values)
+        .onConflictDoUpdate({ target: tenantEmailSettings.tenantId, set: values })
+        .returning();
+
+      await tx.insert(auditLogs).values({
+        tenantId, userId: auth.userId, action: "EMAIL_SETTINGS_UPDATED", resource: "tenant_email_settings",
+        resourceId: tenantId, ip: getClientIp(request),
+        metadata: JSON.stringify({ provider: body.provider, fromEmail: values.fromEmail, secretChanged: body.secret !== undefined }),
+      });
+      return { data: publicSettings(saved) };
+    });
+  } catch (err: any) {
+    return fail(set, 400, "EMAIL_SETTINGS_ERROR", safeError(err));
+  }
+}
+
+async function sendTestEmail({ tenantId, auth, body, set }: any) {
+  if (!isValidEmail(body.to)) return fail(set, 422, "VALIDATION_ERROR", "Destinatário inválido.");
+  if (!(await checkRateLimit(`email-test:${tenantId}`, 5, 10 * 60_000))) {
+    return fail(set, 429, "RATE_LIMITED", "Demasiados testes. Tente novamente dentro de alguns minutos.");
+  }
+  const prep = await withTenant(tenantId, async (tx) => {
+    const org = await tx.query.organizations.findFirst({ where: eq(organizations.id, tenantId) });
+    return { resolution: await resolveSender(tx, tenantId), tenantName: org?.name ?? "DocID" };
+  });
+  const res0 = prep.resolution;
+  if (res0.ok === false) return fail(set, 422, res0.reason, res0.message);
+  const sender = res0.sender;
+  const senderLabel = formatAddress(sender.fromName, sender.fromEmail);
+  const rendered = renderTestEmail({ tenantName: prep.tenantName, sender: senderLabel });
+
+  let error: string | null = null;
+  let messageId: string | null = null;
+  try {
+    messageId = await sendEmail(sender, { ...rendered, to: body.to });
+  } catch (err: any) {
+    error = String(err?.message ?? err).slice(0, 1000);
+  }
+
+  await withTenant(tenantId, async (tx) => {
+    const now = new Date();
+    await tx.insert(emailLogs).values({
+      tenantId, eventType: "test", recipientEmail: body.to, recipientUserId: auth.userId,
+      subject: rendered.subject, status: error ? "failed" : "sent", attempts: 1,
+      provider: `${sender.source}:${sender.provider}`, sender: senderLabel, messageId,
+      lastError: error, sentAt: error ? null : now,
+    });
+    if (sender.source === "tenant") {
+      await tx.update(tenantEmailSettings).set({
+        lastTestAt: now, lastTestError: error, ...(error ? {} : { verifiedAt: now }),
+      }).where(eq(tenantEmailSettings.tenantId, tenantId));
+    }
+  });
+
+  if (error) return fail(set, 502, "EMAIL_TEST_FAILED", error);
+  return { data: { sent: true, sender: senderLabel, source: sender.source } };
+}
+
 /* ─────────────── Configuração e histórico (só ORG_ADMIN do próprio tenant) ─────────────── */
 
 export const emailModule = new (Elysia as any)({ prefix: "/email" })
@@ -61,70 +170,59 @@ export const emailModule = new (Elysia as any)({ prefix: "/email" })
     };
   }, { detail: { summary: "Configuração de e-mail da organização", tags: ["E-mail"] } })
 
-  .put("/settings", async ({ tenantId, auth, body, set, request }: any) => {
-    if (!isValidEmail(body.fromEmail)) return fail(set, 422, "VALIDATION_ERROR", "E-mail do remetente inválido.");
-    if (body.replyTo && !isValidEmail(body.replyTo)) return fail(set, 422, "VALIDATION_ERROR", "E-mail de resposta inválido.");
+  .put("/settings", ({ tenantId, auth, body, set, request }: any) => saveSettings({ tenantId, auth, body, set, request }), { body: settingsBody, detail: { summary: "Guardar configuração de e-mail", tags: ["E-mail"] } })
 
-    if (body.provider === "smtp") {
-      if (!body.smtpHost || !body.smtpPort || !body.smtpSecurity) {
-        return fail(set, 422, "VALIDATION_ERROR", "SMTP exige host, porta e segurança (ssl, starttls ou none).");
-      }
-      try {
-        await resolveSafeSmtpHost(body.smtpHost, body.smtpPort);
-      } catch (err: any) {
-        return fail(set, 422, "SMTP_HOST_REJECTED", err instanceof SmtpHostError ? err.message : "Host SMTP inválido.");
-      }
-    }
-    if (body.secret !== undefined && !isSecretBoxConfigured()) {
+  /**
+   * Configuração rápida: só e-mail + palavra-passe. Descobre o servidor SMTP, confirma o
+   * login, guarda (encriptado) e envia um e-mail de teste para o administrador.
+   */
+  .post("/settings/quick", async ({ tenantId, auth, body, set, request }: any) => {
+    const email = body.email.trim().toLowerCase();
+    if (!isValidEmail(email)) return fail(set, 422, "VALIDATION_ERROR", "E-mail inválido.");
+    if (!isSecretBoxConfigured()) {
       return fail(set, 500, "SECRETS_KEY_MISSING", "O servidor não tem EMAIL_SECRETS_KEY configurada; não é possível guardar credenciais.");
     }
-
-    try {
-      return await withTenant(tenantId, async (tx) => {
-        const existing = await tx.query.tenantEmailSettings.findFirst({ where: eq(tenantEmailSettings.tenantId, tenantId) });
-        const providerChanged = existing && existing.provider !== body.provider;
-        let secretEncrypted = existing?.secretEncrypted ?? null;
-        if (body.secret !== undefined) {
-          secretEncrypted = body.secret ? encryptSecret(body.secret, tenantId) : null;
-        } else if (providerChanged) {
-          // Não reaproveitar uma password SMTP como chave de API (ou vice-versa).
-          secretEncrypted = null;
-        }
-        if (body.provider !== "smtp" && !secretEncrypted) {
-          return fail(set, 422, "VALIDATION_ERROR", "Indique a chave de API do fornecedor.");
-        }
-
-        const values = {
-          tenantId,
-          provider: body.provider,
-          fromEmail: body.fromEmail.trim(),
-          fromName: body.fromName ? cleanDisplayName(body.fromName) : null,
-          replyTo: body.replyTo?.trim() || null,
-          smtpHost: body.provider === "smtp" ? body.smtpHost.trim() : null,
-          smtpPort: body.provider === "smtp" ? body.smtpPort : null,
-          smtpSecurity: body.provider === "smtp" ? body.smtpSecurity : null,
-          smtpUser: body.provider === "smtp" ? (body.smtpUser?.trim() || null) : null,
-          secretEncrypted,
-          enabled: body.enabled ?? existing?.enabled ?? true,
-          verifiedAt: null, // qualquer alteração exige novo teste
-          updatedBy: auth.userId,
-          updatedAt: new Date(),
-        };
-        const [saved] = await tx.insert(tenantEmailSettings).values(values)
-          .onConflictDoUpdate({ target: tenantEmailSettings.tenantId, set: values })
-          .returning();
-
-        await tx.insert(auditLogs).values({
-          tenantId, userId: auth.userId, action: "EMAIL_SETTINGS_UPDATED", resource: "tenant_email_settings",
-          resourceId: tenantId, ip: getClientIp(request),
-          metadata: JSON.stringify({ provider: body.provider, fromEmail: values.fromEmail, secretChanged: body.secret !== undefined }),
-        });
-        return { data: publicSettings(saved) };
-      });
-    } catch (err: any) {
-      return fail(set, 400, "EMAIL_SETTINGS_ERROR", safeError(err));
+    // Cada pedido pode fazer logins noutro servidor: limite apertado contra abuso.
+    if (!(await checkRateLimit(`email-quick:${tenantId}`, 5, 10 * 60_000))) {
+      return fail(set, 429, "RATE_LIMITED", "Demasiadas tentativas. Tente novamente dentro de alguns minutos.");
     }
-  }, { body: settingsBody, detail: { summary: "Guardar configuração de e-mail", tags: ["E-mail"] } })
+
+    const found = await detectSmtp(email, body.password);
+    if (found.ok === false) return fail(set, 422, found.reason, found.hint ? `${found.message} ${found.hint}` : found.message);
+
+    const ctx = await withTenant(tenantId, async (tx) => ({
+      org: await tx.query.organizations.findFirst({ where: eq(organizations.id, tenantId), columns: { name: true } }),
+      me: await tx.query.users.findFirst({ where: eq(users.id, auth.userId), columns: { email: true } }),
+    }));
+    const saved: any = await saveSettings({
+      tenantId, auth, set, request,
+      body: {
+        provider: "smtp", fromEmail: email, fromName: body.fromName?.trim() || ctx.org?.name || null, replyTo: null,
+        smtpHost: found.host, smtpPort: found.port, smtpSecurity: found.security, smtpUser: email,
+        secret: body.password, enabled: true,
+      },
+    });
+    if (saved?.error) return saved;
+
+    const to = ctx.me?.email && isValidEmail(ctx.me.email) ? ctx.me.email : email;
+    const test: any = await sendTestEmail({ tenantId, auth, set, body: { to } });
+    set.status = 200; // o login já foi confirmado: uma falha no teste não desfaz a configuração
+    return {
+      data: {
+        settings: saved.data,
+        detected: { host: found.host, port: found.port, security: found.security, provider: found.provider },
+        testSentTo: test?.error ? null : to,
+        testError: test?.error?.message ?? null,
+      },
+    };
+  }, {
+    body: t.Object({
+      email: t.String({ maxLength: 254 }),
+      password: t.String({ minLength: 1, maxLength: 512 }),
+      fromName: t.Optional(t.String({ maxLength: 100 })),
+    }),
+    detail: { summary: "Configurar o e-mail só com e-mail e palavra-passe", tags: ["E-mail"] },
+  })
 
   .delete("/settings", async ({ tenantId, auth, request }: any) => {
     await withTenant(tenantId, async (tx) => {
@@ -137,47 +235,7 @@ export const emailModule = new (Elysia as any)({ prefix: "/email" })
     return { data: { deleted: true, fallbackMode: fallbackMode() } };
   }, { detail: { summary: "Remover configuração (volta ao e-mail da plataforma)", tags: ["E-mail"] } })
 
-  .post("/settings/test", async ({ tenantId, auth, body, set }: any) => {
-    if (!isValidEmail(body.to)) return fail(set, 422, "VALIDATION_ERROR", "Destinatário inválido.");
-    if (!(await checkRateLimit(`email-test:${tenantId}`, 5, 10 * 60_000))) {
-      return fail(set, 429, "RATE_LIMITED", "Demasiados testes. Tente novamente dentro de alguns minutos.");
-    }
-    const prep = await withTenant(tenantId, async (tx) => {
-      const org = await tx.query.organizations.findFirst({ where: eq(organizations.id, tenantId) });
-      return { resolution: await resolveSender(tx, tenantId), tenantName: org?.name ?? "DocID" };
-    });
-    const res0 = prep.resolution;
-    if (res0.ok === false) return fail(set, 422, res0.reason, res0.message);
-    const sender = res0.sender;
-    const senderLabel = formatAddress(sender.fromName, sender.fromEmail);
-    const rendered = renderTestEmail({ tenantName: prep.tenantName, sender: senderLabel });
-
-    let error: string | null = null;
-    let messageId: string | null = null;
-    try {
-      messageId = await sendEmail(sender, { ...rendered, to: body.to });
-    } catch (err: any) {
-      error = String(err?.message ?? err).slice(0, 1000);
-    }
-
-    await withTenant(tenantId, async (tx) => {
-      const now = new Date();
-      await tx.insert(emailLogs).values({
-        tenantId, eventType: "test", recipientEmail: body.to, recipientUserId: auth.userId,
-        subject: rendered.subject, status: error ? "failed" : "sent", attempts: 1,
-        provider: `${sender.source}:${sender.provider}`, sender: senderLabel, messageId,
-        lastError: error, sentAt: error ? null : now,
-      });
-      if (sender.source === "tenant") {
-        await tx.update(tenantEmailSettings).set({
-          lastTestAt: now, lastTestError: error, ...(error ? {} : { verifiedAt: now }),
-        }).where(eq(tenantEmailSettings.tenantId, tenantId));
-      }
-    });
-
-    if (error) return fail(set, 502, "EMAIL_TEST_FAILED", error);
-    return { data: { sent: true, sender: senderLabel, source: sender.source } };
-  }, {
+  .post("/settings/test", ({ tenantId, auth, body, set }: any) => sendTestEmail({ tenantId, auth, body, set }), {
     body: t.Object({ to: t.String({ maxLength: 254 }) }),
     detail: { summary: "Enviar e-mail de teste com a configuração actual", tags: ["E-mail"] },
   })
