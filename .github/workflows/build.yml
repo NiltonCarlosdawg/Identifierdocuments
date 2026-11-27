@@ -140,10 +140,51 @@ jobs:
           name: docid-${{ matrix.platform }}
           path: apps/desktop/src-tauri/target/release/bundle/${{ matrix.bundle }}/
 
+  # Instalador Windows completo, com o WebView2 lá dentro (~300 MB), para computadores sem
+  # internet durante a instalação. O instalador por omissão (tauri.conf.json) é o leve, que
+  # descarrega o WebView2 só se faltar; é esse que o auto-update usa.
+  build-windows-offline:
+    needs: prepare
+    if: needs.prepare.outputs.build == 'true'
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - name: Install deps (desktop)
+        working-directory: apps/desktop
+        run: bun install
+      - name: Build offline installer
+        working-directory: apps/desktop
+        run: |
+          bunx tauri build --bundles nsis --config \
+            '{"bundle":{"createUpdaterArtifacts":false,"windows":{"webviewInstallMode":{"type":"offlineInstaller","silent":true}}}}'
+      - name: Rename
+        run: |
+          V="${{ needs.prepare.outputs.version }}"
+          D=apps/desktop/src-tauri/target/release/bundle/nsis
+          mv "$D/DocID_${V}_x64-setup.exe" "$D/DocID_${V}_x64-setup-offline.exe"
+      - name: Upload to release
+        if: needs.prepare.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ needs.prepare.outputs.tag }}" --clobber \
+            "apps/desktop/src-tauri/target/release/bundle/nsis/DocID_${{ needs.prepare.outputs.version }}_x64-setup-offline.exe"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: docid-windows-offline
+          path: apps/desktop/src-tauri/target/release/bundle/nsis/*-offline.exe
+
   # Corre mesmo que o build de macOS falhe (ainda não gera artefactos): o site só publica
   # Windows e Linux, e verifica-os antes de mexer em qualquer coisa.
   publish:
-    needs: [prepare, build]
+    needs: [prepare, build, build-windows-offline]
     if: ${{ !cancelled() && needs.prepare.outputs.release == 'true' }}
     runs-on: ubuntu-latest
     env:
@@ -164,14 +205,16 @@ jobs:
       - name: Download installers from the release
         run: |
           EXE="DocID_${VERSION}_x64-setup.exe"
+          OFFLINE="DocID_${VERSION}_x64-setup-offline.exe"
           DEB="DocID_${VERSION}_amd64.deb"
           ASSETS=$(gh release view "$TAG" --json assets -q '.assets[].name')
-          for f in "$EXE" "$EXE.sig" "$DEB" latest.json; do
+          for f in "$EXE" "$EXE.sig" "$OFFLINE" "$DEB" latest.json; do
             grep -Fxq "$f" <<< "$ASSETS" || { echo "::error::falta $f no release $TAG"; exit 1; }
           done
           mkdir -p /tmp/dl
-          gh release download "$TAG" -D /tmp/dl -p "$EXE" -p "$DEB"
+          gh release download "$TAG" -D /tmp/dl -p "$EXE" -p "$OFFLINE" -p "$DEB"
           echo "EXE=$EXE" >> "$GITHUB_ENV"
+          echo "OFFLINE=$OFFLINE" >> "$GITHUB_ENV"
           echo "DEB=$DEB" >> "$GITHUB_ENV"
 
       - name: Write deploy key
@@ -190,20 +233,20 @@ jobs:
           # Envia para uma pasta à parte e só depois move: ninguém descarrega um ficheiro a meio.
           $SSH "mkdir -p $DL/.upload-$VERSION"
           scp -i /tmp/deploy_key -o StrictHostKeyChecking=no -l 16000 \
-            "/tmp/dl/$EXE" "/tmp/dl/$DEB" "$SSH_TARGET:$DL/.upload-$VERSION/"
-          EXE_SIZE=$(stat -c %s "/tmp/dl/$EXE"); DEB_SIZE=$(stat -c %s "/tmp/dl/$DEB")
-          SUMS=$(cd /tmp/dl && sha256sum "$EXE" "$DEB")
+            "/tmp/dl/$EXE" "/tmp/dl/$OFFLINE" "/tmp/dl/$DEB" "$SSH_TARGET:$DL/.upload-$VERSION/"
+          EXE_SIZE=$(stat -c %s "/tmp/dl/$EXE"); OFF_SIZE=$(stat -c %s "/tmp/dl/$OFFLINE"); DEB_SIZE=$(stat -c %s "/tmp/dl/$DEB")
+          SUMS=$(cd /tmp/dl && sha256sum "$EXE" "$OFFLINE" "$DEB")
           $SSH "set -e
             cd $DL/.upload-$VERSION
-            [ \$(stat -c %s $EXE) = $EXE_SIZE ] && [ \$(stat -c %s $DEB) = $DEB_SIZE ]
-            mv -f $EXE $DEB $DL/
+            [ \$(stat -c %s $EXE) = $EXE_SIZE ] && [ \$(stat -c %s $OFFLINE) = $OFF_SIZE ] && [ \$(stat -c %s $DEB) = $DEB_SIZE ]
+            mv -f $EXE $OFFLINE $DEB $DL/
             cd $DL && rmdir .upload-$VERSION
             printf '%s\n' \"$SUMS\" > SHA256SUMS.tmp && mv -f SHA256SUMS.tmp SHA256SUMS
             echo downloads-ok"
 
       - name: Point the landing to the new installers
         run: |
-          python3 scripts/update-download-section.py "$VERSION" "/tmp/dl/$EXE" "/tmp/dl/$DEB"
+          python3 scripts/update-download-section.py "$VERSION" "/tmp/dl/$EXE" "/tmp/dl/$DEB" "/tmp/dl/$OFFLINE"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add apps/landing/src/components/ui/download-section.tsx apps/landing/index.html

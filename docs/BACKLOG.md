@@ -838,6 +838,8 @@ aplicadas posteriormente a itens aqui marcados como completos)*
   (incluindo `index.html`), verificação e só depois *latest* para o auto-update (1.2.7 publicada
   assim)
 - [x] **P1** Build de macOS gera `.app` e `.dmg` (não assinado; não é distribuído)
+- [x] **P1** Dois instaladores Windows: leve (~9 MB, WebView2 descarregado só se faltar; usado pelo
+  auto-update, que antes descarregava ~300 MB) e completo (~300 MB) para instalar sem internet
 - [x] **P1** E2E no CI contra uma API real (desktop e painel da provedora)
 - [ ] **P1** Assinatura Authenticode do instalador Windows (o SmartScreen avisa)
 - [ ] **P2** Assinatura e notarização Apple para distribuir o `.dmg`

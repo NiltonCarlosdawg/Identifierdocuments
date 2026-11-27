@@ -11,6 +11,11 @@ export const DOWNLOADS = {
     size: "304 MB",
     sha256: "8d41751a40bc7cf09321c9f4a2d1611e54e3db4ad869f6d0a1e4592078aa3b32",
   },
+  installerOffline: {
+    href: "/downloads/DocID_1.2.7_x64-setup.exe",
+    size: "304 MB",
+    sha256: "8d41751a40bc7cf09321c9f4a2d1611e54e3db4ad869f6d0a1e4592078aa3b32",
+  },
   linux: {
     href: "/downloads/DocID_1.2.7_amd64.deb",
     size: "10 MB",
@@ -82,11 +87,11 @@ export function DownloadSection() {
       <div className="shell relative z-10 py-24 sm:py-28">
         <Reveal className="mx-auto max-w-2xl text-center">
           <h2 id="descarregar-titulo" className="text-[clamp(2rem,4.4vw,3.25rem)] font-semibold text-docid-text">
-            Instale o DocID no Windows
+            Instale o DocID
           </h2>
           <p className="mx-auto mt-5 max-w-xl text-base leading-relaxed text-docid-muted">
-            Para Windows 10 e 11, 64 bits. A conta é criada pela sua organização; depois de instalar,
-            entre com as credenciais que recebeu.
+            Para Windows 10 e 11 e Linux, 64 bits. A conta é criada pela sua organização; depois de
+            instalar, entre com as credenciais que recebeu.
           </p>
         </Reveal>
 
@@ -94,13 +99,26 @@ export function DownloadSection() {
           <div className="overflow-hidden rounded-2xl border border-docid-border bg-docid-surface">
             <PlatformRow
               mark={<WindowsMark className="h-4 w-4" />}
-              name="Instalador completo"
-              meta="inclui todos os componentes"
-              detail="Um único ficheiro. Instala o DocID e os componentes necessários no mesmo passo, mesmo sem internet. Duplo clique e seguir os passos."
+              name="Windows"
+              meta="Windows 10 e 11 · 64 bits"
+              detail="Recomendado. Se o Windows ainda não tiver o componente WebView2 da Microsoft, o instalador descarrega-o durante a instalação. As actualizações seguintes são automáticas."
               action={
                 <a className="btn-primary w-full sm:w-auto" href={DOWNLOADS.installer.href}>
                   <Download className="h-4 w-4" />
                   Descarregar {DOWNLOADS.installer.size}
+                </a>
+              }
+            />
+            <div className="rule" />
+            <PlatformRow
+              mark={<WindowsMark className="h-4 w-4" />}
+              name="Windows, instalador completo"
+              meta="para instalar sem internet"
+              detail="Um único ficheiro com tudo o que é preciso, incluindo o WebView2. Use-o em computadores sem internet no momento da instalação."
+              action={
+                <a className="btn-ghost w-full sm:w-auto" href={DOWNLOADS.installerOffline.href}>
+                  <Download className="h-4 w-4" />
+                  Descarregar {DOWNLOADS.installerOffline.size}
                 </a>
               }
             />
@@ -143,6 +161,12 @@ export function DownloadSection() {
                     <dt className="font-mono text-[10px] uppercase tracking-[0.14em] text-docid-muted">Código de verificação do instalador</dt>
                     <dd className="w-full break-all font-mono text-[11px] leading-relaxed text-docid-muted">
                       {DOWNLOADS.installer.sha256}
+                    </dd>
+                  </div>
+                  <div className="flex flex-wrap items-baseline gap-x-2">
+                    <dt className="font-mono text-[10px] uppercase tracking-[0.14em] text-docid-muted">Código de verificação do instalador completo</dt>
+                    <dd className="w-full break-all font-mono text-[11px] leading-relaxed text-docid-muted">
+                      {DOWNLOADS.installerOffline.sha256}
                     </dd>
                   </div>
                   <div className="flex flex-wrap items-baseline gap-x-2">
