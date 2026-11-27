@@ -83,7 +83,7 @@ Jurídico, Financeiro, Comercial, Técnico, Administrativo.
 | Desktop core | Rust (`rusqlite`, `notify`, `pdf-extract`, `keyring`, `reqwest`) |
 | API | Elysia + Drizzle ORM; Bun (dev/testes) e Node 22 (produção) |
 | Base de dados | PostgreSQL 16+ (produção: 13) |
-| Cache e filas | Redis 7+ opcional (rate limit, BullMQ para thumbnails); sem Redis, rate limit em memória |
+| Cache e filas | Redis 7+ (rate limit, BullMQ para thumbnails e para a verificação diária das subscrições às 08:00 UTC); sem Redis, rate limit em memória e **sem** verificação diária. Em produção (cPanel) corre como utilizador num socket Unix privado: `apps/api/scripts/redis.sh`, mantido pelo `run.sh` |
 | E-mail | Fila transaccional em PostgreSQL (`email_logs`, `FOR UPDATE SKIP LOCKED`) + SMTP por organização |
 | IA | Groq API (llama-3.3-70b), com cache Redis por hash do texto |
 | Tempo real | SSE (`/notifications/stream`) |
@@ -389,7 +389,7 @@ A lista completa, comentada, está em `apps/api/.env.example`. As que mais impor
 
 | Variável | Para quê |
 |---|---|
-| `DATABASE_URL`, `REDIS_URL` | PostgreSQL; Redis opcional |
+| `DATABASE_URL`, `REDIS_URL`, `REDIS_PASSWORD` | PostgreSQL; Redis (`redis://host:porta` ou o caminho absoluto de um socket Unix, como em produção) |
 | `JWT_SECRET` | ≥ 32 caracteres em produção (a API recusa arrancar com menos) |
 | `JWT_EXPIRES_IN`, `SESSION_MAX_AGE_HOURS` | 15 min por token; 168 h desde o último login |
 | `TRUSTED_PROXY_HOPS` | proxies à frente da API (LiteSpeed do cPanel = 1) para ler o IP real |

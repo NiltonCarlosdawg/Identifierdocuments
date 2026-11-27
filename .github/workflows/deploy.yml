@@ -46,7 +46,7 @@ jobs:
 
       - name: Pack artifacts
         run: |
-          tar czf /tmp/api.tgz -C apps/api src dist scripts package.json
+          tar czf /tmp/api.tgz -C apps/api src dist scripts package.json run.sh supervisor.sh
           tar czf /tmp/landing.tgz -C apps/landing/dist .
           tar czf /tmp/admin.tgz -C apps/admin/dist .
 

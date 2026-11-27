@@ -64,6 +64,12 @@ mkdir -p dist scripts
 cp "$NEW/dist/index.js" dist/index.js
 cp "$NEW/package.json" package.json
 cp -a "$NEW/scripts/." scripts/
+# Watchdog: substituir por mv (atómico) porque o cron pode estar a executar o run.sh agora.
+for f in run.sh supervisor.sh; do
+  [ -f "$NEW/$f" ] && cp "$NEW/$f" ".$f.new" && mv ".$f.new" "$f"
+done
+# Redis antes da API, para o BullMQ (verificação diária das subscrições) ligar à primeira.
+bash scripts/redis.sh ensure || log "aviso: Redis não arrancou (a API funciona sem ele, mas sem a verificação diária)"
 
 log "migrações"
 if ! node scripts/apply-migrations.mjs; then
