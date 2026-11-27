@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../../infrastructure/di/container";
-import { EmptyState, Modal, StatusChip } from "./docid-ui";
+import { StatusChip } from "./docid-ui";
 import { mapError } from "../../shared/errors/mapError";
 
 interface Share {
@@ -14,9 +14,10 @@ interface Share {
   sector: { id: string; name: string } | null;
 }
 
-interface Props { identifier: string; onClose: () => void; onChanged?: () => void; }
+/** Partilhas de um documento (separador "Partilhas" do painel de documentos). */
+interface Props { identifier: string; onChanged?: () => void; }
 
-export default function DocumentSharesModal({ identifier, onClose, onChanged }: Props) {
+export default function DocumentSharesPanel({ identifier, onChanged }: Props) {
   const [shares, setShares] = useState<Share[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -51,14 +52,12 @@ export default function DocumentSharesModal({ identifier, onClose, onChanged }: 
   };
 
   return (
-    <Modal title="Partilhas do documento" onClose={onClose} footer={<button onClick={onClose} className="docid-button-secondary">Fechar</button>}>
-      <div className="space-y-4">
-        <p className="font-mono text-xs text-docid-muted">{identifier}</p>
+      <div className="space-y-4" data-testid="document-shares">
         {error && <div className="rounded-lg border border-docid-error/30 bg-docid-error/10 p-3 text-sm text-docid-error">{error}</div>}
         {loading ? (
           <p className="text-sm text-docid-muted">A carregar partilhas...</p>
         ) : shares.length === 0 ? (
-          <EmptyState>Nenhuma partilha registada.</EmptyState>
+          <p className="text-sm text-docid-muted">Este documento ainda não foi partilhado.</p>
         ) : (
           <ul className="space-y-2">
             {shares.map(share => {
@@ -90,6 +89,5 @@ export default function DocumentSharesModal({ identifier, onClose, onChanged }: 
           </ul>
         )}
       </div>
-    </Modal>
   );
 }

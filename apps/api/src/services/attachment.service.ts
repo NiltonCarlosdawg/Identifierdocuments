@@ -615,10 +615,50 @@ export async function updateDocumentTags(
   return { success: true as const, tags: parseDocumentTags(serialized) };
 }
 
+export interface DocumentListFilters {
+  /** Texto livre: nome do ficheiro, identificador, categoria, etiquetas, descrição, quem carregou. */
+  q?: string;
+  categoryId?: string;
+  status?: string;
+  /** "mine" = carregados por mim; "shared" = partilhados comigo. */
+  scope?: "all" | "mine" | "shared";
+  tag?: string;
+  /** Datas AAAA-MM-DD (inclusivas). */
+  from?: string;
+  to?: string;
+}
+
+/** Sem acentos e em minúsculas: "Facturação" encontra "facturacao". */
+export function normalizeSearch(s: string): string {
+  return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+}
+
+/** Regra pura dos filtros da lista de documentos (testável sem BD). */
+export function matchesDocumentFilters(d: {
+  filename: string | null; label: string | null; tags: string[]; identifier: string | null;
+  categoryId: string | null; categoryName: string | null; status: string; uploadedBy: string | null;
+  uploaderName: string | null; createdAt: Date; sharedWithMe: boolean;
+}, f: DocumentListFilters, userId: string): boolean {
+  if (f.categoryId && d.categoryId !== f.categoryId) return false;
+  if (f.status && d.status !== f.status) return false;
+  if (f.scope === "mine" && d.uploadedBy !== userId) return false;
+  if (f.scope === "shared" && !d.sharedWithMe) return false;
+  if (f.tag && !d.tags.some((t) => normalizeSearch(t) === normalizeSearch(f.tag!))) return false;
+  const day = d.createdAt.toISOString().slice(0, 10);
+  if (f.from && day < f.from) return false;
+  if (f.to && day > f.to) return false;
+  if (f.q) {
+    const hay = normalizeSearch([d.filename, d.label, d.identifier, d.categoryName, d.uploaderName, ...d.tags].filter(Boolean).join(" "));
+    // Todas as palavras têm de aparecer (em qualquer ordem).
+    if (!normalizeSearch(f.q).split(/\s+/).filter(Boolean).every((w) => hay.includes(w))) return false;
+  }
+  return true;
+}
+
 export async function listDocumentsForApi(
   tx: DB,
   auth: AuthPayload,
-  opts: { tenantId: string; identifierId?: string; page: number; limit: number; roleNames?: string[] },
+  opts: { tenantId: string; identifierId?: string; page: number; limit: number; roleNames?: string[] } & DocumentListFilters,
 ) {
   const conditions = [eq(documents.tenantId, opts.tenantId)];
   if (opts.identifierId) conditions.push(eq(documents.identifierId, opts.identifierId));
@@ -651,9 +691,33 @@ export async function listDocumentsForApi(
   });
 
   // Default listing: one row per identifier (primary). When filtering by identifierId, return all kinds.
-  const filtered = opts.identifierId
+  const listed = opts.identifierId
     ? visibleRows
     : visibleRows.filter((d) => d.kind === "primary");
+
+  // Categorias presentes (para o filtro), calculadas antes dos filtros do utilizador.
+  const categoryCounts = new Map<string, { id: string; name: string; count: number }>();
+  for (const d of listed) {
+    const c = d.identifier?.category;
+    if (!c) continue;
+    const cur = categoryCounts.get(c.id) ?? { id: c.id, name: c.name, count: 0 };
+    cur.count++;
+    categoryCounts.set(c.id, cur);
+  }
+
+  const filtered = listed.filter((d) => matchesDocumentFilters({
+    filename: d.versions[0]?.filename ?? null,
+    label: d.label,
+    tags: parseDocumentTags(d.tags),
+    identifier: d.identifier?.identifier ?? null,
+    categoryId: d.identifier?.category?.id ?? null,
+    categoryName: d.identifier?.category?.name ?? null,
+    status: d.identifier?.status || "active",
+    uploadedBy: d.uploadedBy,
+    uploaderName: d.uploader?.fullName ?? null,
+    createdAt: d.createdAt,
+    sharedWithMe: sharedDocIds.has(d.id),
+  }, opts, auth.userId));
 
   const total = filtered.length;
   const offset = (opts.page - 1) * opts.limit;
@@ -683,8 +747,16 @@ export async function listDocumentsForApi(
         sectorId: d.identifier.sectorId,
       } : null,
       uploadedBy: d.uploader?.fullName || null,
+      uploadedById: d.uploadedBy ?? null,
+      sharedWithMe: sharedDocIds.has(d.id),
     };
   });
 
-  return { data: safe, meta: { total, page: opts.page, limit: opts.limit } };
+  return {
+    data: safe,
+    meta: {
+      total, page: opts.page, limit: opts.limit,
+      categories: [...categoryCounts.values()].sort((a, b) => a.name.localeCompare(b.name, "pt")),
+    },
+  };
 }

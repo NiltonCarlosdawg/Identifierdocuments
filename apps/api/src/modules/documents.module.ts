@@ -117,11 +117,19 @@ export const documentsModule = new (Elysia as any)({ prefix: "/documents" })
           const parsedPage = parseInt(query.page || "1", 10);
           const page = Math.max(1, Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : 1);
 
+          const date = (v?: string) => (v && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : undefined);
           return await listDocumentsForApi(tx, auth!, {
             tenantId,
             identifierId: query.identifierId,
             page,
             limit,
+            q: query.q?.slice(0, 200) || undefined,
+            categoryId: query.categoryId || undefined,
+            status: query.status || undefined,
+            scope: query.scope === "mine" || query.scope === "shared" ? query.scope : undefined,
+            tag: query.tag || undefined,
+            from: date(query.from),
+            to: date(query.to),
           });
         } catch (err: any) {
           console.error("[LIST_ERROR]", err);
@@ -137,6 +145,13 @@ export const documentsModule = new (Elysia as any)({ prefix: "/documents" })
       limit: t.Optional(t.String()),
       page: t.Optional(t.String()),
       identifierId: t.Optional(t.String()),
+      q: t.Optional(t.String()),
+      categoryId: t.Optional(t.String()),
+      status: t.Optional(t.String()),
+      scope: t.Optional(t.String()),
+      tag: t.Optional(t.String()),
+      from: t.Optional(t.String()),
+      to: t.Optional(t.String()),
     }),
     detail: { summary: "Listar documentos", tags: ["Documentos"] },
   })

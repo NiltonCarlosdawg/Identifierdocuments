@@ -35,7 +35,7 @@ export function EmptyState({ children }: { children: ReactNode }) {
 export function Modal({ title, children, footer, onClose, maxWidth = "max-w-2xl" }: { title: string; children: ReactNode; footer?: ReactNode; onClose: () => void; maxWidth?: string }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-6 backdrop-blur-sm" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className={`docid-panel max-h-[90vh] w-full overflow-hidden ${maxWidth}`}>
+      <div role="dialog" aria-modal="true" aria-label={title} className={`docid-panel max-h-[90vh] w-full overflow-hidden ${maxWidth}`}>
         <div className="flex items-center justify-between border-b border-docid-border bg-docid-surface-high/60 px-6 py-4">
           <h2 className="text-lg font-semibold text-docid-text">{title}</h2>
           <button onClick={onClose} aria-label="Fechar" className="rounded-lg p-2 text-docid-muted transition hover:bg-docid-surface-high hover:text-docid-text"><X className="h-4 w-4" /></button>
