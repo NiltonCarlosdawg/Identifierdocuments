@@ -9,7 +9,9 @@ import { checkRateLimit } from "../middleware/rateLimit";
 import { getClientIp } from "../lib/ip";
 import { createOrder, OrderError, resolveCheckoutToken, signCheckoutToken } from "../services/order.service";
 
-const LANDING_URL = (process.env.LANDING_URL || "http://localhost:5173").replace(/\/+$/, "");
+// Em produção, sem LANDING_URL, o link apontava para localhost; o site público é o padrão.
+const LANDING_URL = (process.env.LANDING_URL
+  || (process.env.NODE_ENV === "production" ? "https://docid.milvendas.ao" : "http://localhost:5173")).replace(/\/+$/, "");
 
 export const subscriptionsModule = new (Elysia as any)()
 
@@ -93,7 +95,8 @@ export const subscriptionsModule = new (Elysia as any)()
       return { error: { code: "FORBIDDEN", message: "Permissão insuficiente." } };
     }
     const token = await signCheckoutToken(auth.tenantId);
-    return { token, url: `${LANDING_URL}/checkout?pedido=${token}` };
+    // A landing é uma página única: /checkout dá 404 no Apache; o formulário está em #pedido.
+    return { token, url: `${LANDING_URL}/?pedido=${token}#pedido` };
   }, {
     body: t.Object({}),
     detail: { summary: "Gerar token de checkout (ORG_ADMIN)", tags: ["Subscrições"] },

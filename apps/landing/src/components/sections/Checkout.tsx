@@ -59,7 +59,10 @@ export function Checkout() {
     const match = plans.find((p) => p.name.toLowerCase() === name.toLowerCase());
     if (!match) return;
     setPlanId(match.id);
-    window.history.replaceState(null, "", `?plano=${encodeURIComponent(name)}#pedido`);
+    // Manter os outros parâmetros: perder ?pedido= (link da aplicação) tirava o token ao envio.
+    const params = new URLSearchParams(window.location.search);
+    params.set("plano", name);
+    window.history.replaceState(null, "", `?${params.toString()}#pedido`);
     document.getElementById("pedido")?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
