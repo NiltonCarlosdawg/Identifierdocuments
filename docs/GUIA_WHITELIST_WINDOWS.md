@@ -14,7 +14,7 @@
   `https://docid.milvendas.ao/downloads/DocID_1.2.7_x64-setup.exe` (304 152 197 bytes).
 - Para instalar em massa ou em computadores sem internet, use o **instalador completo**
   `DocID_<versão>_x64-setup-offline.exe` (~300 MB, inclui o WebView2). O instalador normal
-  (`…_x64-setup.exe`, ~9 MB) descarrega o WebView2 da Microsoft se o computador ainda não o tiver.
+  (`…_x64-setup.exe`, ~6 MB) descarrega o WebView2 da Microsoft se o computador ainda não o tiver.
 - Hash oficial de cada versão: `https://docid.milvendas.ao/downloads/SHA256SUMS`, actualizado
   automaticamente a cada versão publicada.
 - Depois de instalada, a app actualiza-se sozinha (pede confirmação); só a primeira instalação
