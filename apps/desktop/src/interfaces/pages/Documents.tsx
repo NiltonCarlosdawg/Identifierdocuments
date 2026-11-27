@@ -5,20 +5,25 @@ import { OfflineNotice } from "../components/docid-ui";
 import { useOfflineCache } from "../hooks/useOfflineCache";
 import UploadDocumentsModal from "../components/documents/UploadDocumentsModal";
 import DocumentPanel from "../components/documents/DocumentPanel";
+import HrProfiles from "../components/documents/HrProfiles";
 import {
-  EMPTY_FILTERS, activeFilterCount, filtersToQuery, friendlyDate,
+  EMPTY_FILTERS, NO_PERSON, activeFilterCount, filtersToQuery, friendlyDate,
   type DocFilters, type DocListMeta, type DocRow, type DocScope,
 } from "../components/documents/types";
-import { Upload, Search, X, ChevronLeft, ChevronRight, SlidersHorizontal, FileText, Users, Inbox, Lock } from "lucide-react";
+import { Upload, Search, X, ChevronLeft, ChevronRight, SlidersHorizontal, FileText, Users, Inbox, Lock, IdCard, ArrowLeft } from "lucide-react";
 
 const PAGE_SIZE = 25;
 const SCOPES: Array<[DocScope, string]> = [["all", "Todos"], ["mine", "Carregados por mim"], ["shared", "Partilhados comigo"]];
+const CHIP_ON = "bg-docid-primary/20 text-docid-text ring-1 ring-docid-primary/50";
+const CHIP_OFF = "text-docid-muted hover:bg-docid-surface-high hover:text-docid-text";
 const STATUSES: Array<[string, string]> = [["", "Todos os estados"], ["active", "Activo"], ["attached", "Anexado"], ["cancelled", "Anulado"]];
 
-/** Filtros ↔ URL (?q=&scope=&cat=&status=&from=&to=&page=&doc=): voltar atrás e recarregar mantêm a vista. */
+/** Filtros ↔ URL (?view=&person=&q=&scope=&cat=&status=&from=&to=&page=&doc=): voltar atrás e recarregar mantêm a vista. */
 function readFilters(sp: URLSearchParams): DocFilters {
   const scope = sp.get("scope");
   return {
+    view: sp.get("view") === "perfis" ? "perfis" : "lista",
+    person: sp.get("person") || "",
     q: sp.get("q") || "",
     scope: scope === "mine" || scope === "shared" ? scope : "all",
     categoryId: sp.get("cat") || "",
@@ -83,16 +88,25 @@ export default function Documents() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchText]);
 
+  // Vista de perfis de RH sem colaborador escolhido: mostra a grelha de perfis em vez da lista.
+  const profileGrid = filters.view === "perfis" && !filters.person;
   const query = filtersToQuery(filters, PAGE_SIZE);
   const { loading, error, isStale, cachedAt, refresh } = useOfflineCache<{ data: DocRow[]; meta: DocListMeta }>({
     endpoint: "/documents",
     params: query,
+    enabled: !profileGrid,
     fetcher: async () => {
       const res = await api.get<{ data: DocRow[]; meta: DocListMeta }>(`/documents?${query}`);
       return { data: res.data || [], meta: res.meta || { total: 0, page: 1, limit: PAGE_SIZE } };
     },
     onData: result => { setRows(result.data); setMeta(result.meta); },
   });
+
+  // Ao mudar de vista ou de colaborador, não mostrar (nem por instantes) os documentos de outra pessoa.
+  useEffect(() => {
+    setRows([]);
+    setMeta({ total: 0, page: 1, limit: PAGE_SIZE });
+  }, [filters.view, filters.person]);
 
   // O documento seleccionado pode não estar na página actual (ex.: link directo): guardar a última linha conhecida.
   useEffect(() => {
@@ -104,6 +118,23 @@ export default function Documents() {
   useEffect(() => { if (attachPath) setShowUpload(true); }, [attachPath]);
 
   const select = (row: DocRow | null) => setParams({ doc: row?.id ?? null });
+
+  const showProfiles = () => {
+    setSearchText("");
+    setSearchParams(new URLSearchParams({ view: "perfis" }), { replace: true });
+  };
+  const openPerson = (person: string) => {
+    setSearchText("");
+    setSearchParams(new URLSearchParams({ view: "perfis", person }), { replace: true });
+  };
+  /** Limpa pesquisa e filtros, mas mantém a vista (perfis/colaborador) e o documento aberto. */
+  const clearFilters = () => {
+    setSearchText("");
+    const keep = new URLSearchParams();
+    for (const k of ["view", "person", "doc"]) { const v = searchParams.get(k); if (v) keep.set(k, v); }
+    setSearchParams(keep, { replace: true });
+  };
+  const personLabel = filters.person === NO_PERSON ? "Documentos de RH sem colaborador" : filters.person;
 
   const closeUpload = (done: boolean) => async () => {
     if (done && attachPath && watcher.isAvailable()) await watcher.setFileStatus(attachPath, "added").catch(() => {});
@@ -162,7 +193,8 @@ export default function Documents() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-docid-text">Documentos</h1>
           <p className="mt-1 text-sm text-docid-muted">
-            {loading && rows.length === 0 ? "A carregar..." : `${meta.total} ${meta.total === 1 ? "documento" : "documentos"}${anyFilter ? " encontrados" : ""}`}
+            {profileGrid ? "Perfis de RH: os documentos de cada colaborador num só sítio"
+              : loading && rows.length === 0 ? "A carregar..." : `${meta.total} ${meta.total === 1 ? "documento" : "documentos"}${anyFilter ? " encontrados" : ""}`}
           </p>
         </div>
         <button onClick={() => setShowUpload(true)} className="docid-button-primary" data-testid="documents-upload"><Upload className="h-4 w-4" /> Anexar documento</button>
@@ -174,29 +206,35 @@ export default function Documents() {
           <div className="relative min-w-[16rem] flex-1">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-docid-outline" />
             <input value={searchText} onChange={e => setSearchText(e.target.value)} className="docid-input w-full pl-9 pr-8"
-              placeholder="Pesquisar por nome, identificador, categoria, etiqueta ou pessoa..." data-testid="documents-search" aria-label="Pesquisar documentos" />
+              placeholder={profileGrid ? "Procurar colaborador..." : "Pesquisar por nome, identificador, categoria, etiqueta ou pessoa..."} data-testid="documents-search" aria-label="Pesquisar documentos" />
             {searchText && <button onClick={() => setSearchText("")} aria-label="Limpar pesquisa" className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-docid-muted hover:text-docid-text"><X className="h-3.5 w-3.5" /></button>}
           </div>
-          <button onClick={() => setShowFilters(s => !s)} aria-expanded={showFilters}
+          {!profileGrid && <button onClick={() => setShowFilters(s => !s)} aria-expanded={showFilters}
             className={`docid-button-secondary ${filterCount ? "ring-1 ring-docid-primary" : ""}`} data-testid="documents-filters-toggle">
             <SlidersHorizontal className="h-4 w-4" /> Filtros{filterCount ? ` (${filterCount})` : ""}
-          </button>
+          </button>}
         </div>
 
         <div className="flex flex-wrap items-center gap-1.5" role="tablist" aria-label="Âmbito">
           {SCOPES.map(([key, label]) => (
-            <button key={key} role="tab" aria-selected={filters.scope === key} onClick={() => setFilter("scope", key)} data-testid={`documents-scope-${key}`}
-              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition ${filters.scope === key ? "bg-docid-primary/20 text-docid-text ring-1 ring-docid-primary/50" : "text-docid-muted hover:bg-docid-surface-high hover:text-docid-text"}`}>
+            <button key={key} role="tab" aria-selected={filters.view === "lista" && filters.scope === key} data-testid={`documents-scope-${key}`}
+              onClick={() => filters.view === "perfis" ? setParams({ view: null, person: null, scope: key === "all" ? null : key }, { resetPage: true }) : setFilter("scope", key)}
+              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition ${filters.view === "lista" && filters.scope === key ? CHIP_ON : CHIP_OFF}`}>
               {key === "shared" ? <Inbox className="h-3.5 w-3.5" /> : key === "mine" ? <Users className="h-3.5 w-3.5" /> : <FileText className="h-3.5 w-3.5" />} {label}
             </button>
           ))}
+          <span className="mx-1 h-4 w-px bg-docid-border" aria-hidden />
+          <button role="tab" aria-selected={filters.view === "perfis"} onClick={showProfiles} data-testid="documents-view-perfis"
+            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition ${filters.view === "perfis" ? CHIP_ON : CHIP_OFF}`}>
+            <IdCard className="h-3.5 w-3.5" /> Perfis RH
+          </button>
           {anyFilter && (
-            <button onClick={() => { setSearchText(""); setSearchParams(new URLSearchParams(selectedId ? { doc: selectedId } : {}), { replace: true }); }}
+            <button onClick={clearFilters}
               className="ml-auto text-xs text-docid-muted underline-offset-2 hover:text-docid-text hover:underline" data-testid="documents-clear">Limpar filtros</button>
           )}
         </div>
 
-        {showFilters && (
+        {showFilters && !profileGrid && (
           <div className="docid-panel grid grid-cols-1 gap-3 p-3 sm:grid-cols-4" data-testid="documents-filters">
             <label className="text-[11px] text-docid-muted">Categoria
               <select value={filters.categoryId} onChange={e => setFilter("cat", e.target.value)} className="docid-input mt-1 w-full text-sm" data-testid="documents-filter-category">
@@ -225,11 +263,21 @@ export default function Documents() {
       {/* Lista + painel */}
       <div className={`grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)] gap-4 ${selectedRow ? "grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(22rem,28rem)] xl:grid-cols-[minmax(0,1fr)_32rem]" : "grid-cols-1"}`}>
         <section className={`docid-panel flex min-h-0 flex-col overflow-hidden ${selectedRow ? "hidden lg:flex" : "flex"}`} aria-label="Lista de documentos">
+          {filters.view === "perfis" && filters.person && (
+            <div className="flex items-center gap-2 border-b border-docid-border px-4 py-2.5" data-testid="hr-person-header">
+              <button onClick={showProfiles} className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-docid-muted hover:bg-docid-surface-high hover:text-docid-text"><ArrowLeft className="h-3.5 w-3.5" /> Perfis</button>
+              <span className="text-docid-outline">/</span>
+              <span className="truncate text-sm font-semibold text-docid-text">{personLabel}</span>
+              <span className="ml-auto shrink-0 text-xs text-docid-muted">{meta.total} {meta.total === 1 ? "documento" : "documentos"}</span>
+            </div>
+          )}
           <div className="min-h-0 flex-1 overflow-y-auto" data-testid="documents-list">
-            {loading && rows.length === 0 ? (
+            {profileGrid ? (
+              <HrProfiles q={filters.q} onOpen={openPerson} />
+            ) : loading && rows.length === 0 ? (
               <ul className="divide-y divide-docid-border">{[...Array(6)].map((_, i) => <SkeletonItem key={i} />)}</ul>
             ) : rows.length === 0 ? (
-              <EmptyList filtered={anyFilter} onClear={() => { setSearchText(""); setSearchParams(new URLSearchParams(), { replace: true }); }} onUpload={() => setShowUpload(true)} />
+              <EmptyList filtered={anyFilter} onClear={clearFilters} onUpload={() => setShowUpload(true)} />
             ) : (
               <ul className="divide-y divide-docid-border" role="listbox" aria-label="Documentos">
                 {rows.map(row => (
@@ -238,7 +286,7 @@ export default function Documents() {
               </ul>
             )}
           </div>
-          {meta.total > 0 && (
+          {!profileGrid && meta.total > 0 && (
             <div className="flex items-center justify-between border-t border-docid-border px-4 py-2.5 text-xs text-docid-muted">
               <span>{(filters.page - 1) * PAGE_SIZE + 1}–{Math.min(filters.page * PAGE_SIZE, meta.total)} de {meta.total}</span>
               <div className="flex items-center gap-1">

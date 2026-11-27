@@ -34,3 +34,43 @@ describe("filtros da lista de documentos", () => {
     expect(ok({ scope: "shared" }, "u2", { ...doc, sharedWithMe: true })).toBe(true);
   });
 });
+
+import { buildHrProfiles, NO_PERSON } from "../services/attachment.service";
+
+describe("perfis de RH", () => {
+  const r = (cat: string, person: string | null, day: string, tags: string[] = []) =>
+    ({ createdAt: new Date(`2026-${day}T10:00:00Z`), tags, identifier: { categoryId: cat, issuedTo: person } });
+
+  it("agrupa por colaborador sem distinguir acentos, maiúsculas nem espaços", () => {
+    const p = buildHrProfiles([
+      r("CTR", "Ana Lúcia  Mendes", "01-10", ["assinado"]),
+      r("FLC", "ana lucia mendes", "10-31"),
+      r("FLC", "ANA LÚCIA MENDES", "11-30", ["urgente"]),
+      r("CTR", "João Santos", "03-01"),
+      r("FLC", null, "11-01"),
+    ]);
+    expect(p.map((x) => x.name)).toEqual(["ANA LÚCIA MENDES", "João Santos", ""]); // sem colaborador no fim
+    const ana = p[0];
+    expect(ana.total).toBe(3);
+    expect(ana.byCategory).toEqual({ CTR: 1, FLC: 2 });
+    expect(ana.missing).toEqual(["ADM"]);
+    expect(ana.tags.sort()).toEqual(["assinado", "urgente"]);
+    expect(p[2].key).toBe(NO_PERSON);
+    expect(p[2].missing).toEqual([]);
+  });
+
+  it("assinala rescisão e documentos obrigatórios", () => {
+    const [joao] = buildHrProfiles([r("CTR", "João", "01-01"), r("ADM", "João", "01-01"), r("TER", "João", "11-01")]);
+    expect(joao.missing).toEqual([]);
+    expect(joao.terminated).toBe(true);
+  });
+
+  it("filtros por grupo e colaborador", () => {
+    const d = { ...doc, issuedTo: "Ana Lúcia Mendes", categoryGroup: "RH" };
+    expect(matchesDocumentFilters(d, { group: "RH", issuedTo: "ana lucia mendes" }, "u1")).toBe(true);
+    expect(matchesDocumentFilters(d, { group: "Jurídico" }, "u1")).toBe(false);
+    expect(matchesDocumentFilters(d, { issuedTo: NO_PERSON }, "u1")).toBe(false);
+    expect(matchesDocumentFilters({ ...d, issuedTo: null }, { issuedTo: NO_PERSON }, "u1")).toBe(true);
+    expect(matchesDocumentFilters(d, { q: "mendes" }, "u2")).toBe(true);
+  });
+});

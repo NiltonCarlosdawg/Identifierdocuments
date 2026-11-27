@@ -41,6 +41,14 @@ test.describe("Documentos", () => {
       fd.append("file", new File([pdf(name)], name, { type: "application/pdf" }));
       await call("/documents/attach", { method: "POST", token, body: fd });
     }
+    // RH: dois documentos da mesma pessoa, escrita de maneiras diferentes → um só perfil.
+    for (const [cat, person, name] of [["CTR", "Maria Kiluange", "contrato-maria.pdf"], ["FLC", "maria kiluange", "recibo-maria.pdf"]]) {
+      const g = await call("/identifiers/generate", { method: "POST", token, body: JSON.stringify({ categoryId: cat, issuedTo: person }) });
+      const fd = new FormData();
+      fd.append("identifier", g.data?.identifier ?? g.identifier);
+      fd.append("file", new File([pdf(name)], name, { type: "application/pdf" }));
+      await call("/documents/attach", { method: "POST", token, body: fd });
+    }
   });
 
   test.beforeEach(async ({ page }) => {
@@ -60,7 +68,7 @@ test.describe("Documentos", () => {
   test("lista, pesquisa no servidor, painel e teclado", async ({ page }) => {
     await page.goto("/documentos", { waitUntil: "domcontentloaded" });
     const rows = page.getByTestId("document-row");
-    await expect(rows).toHaveCount(3);
+    await expect(rows).toHaveCount(5);
 
     // Pesquisa (no servidor) e o URL acompanha.
     await page.getByTestId("documents-search").fill("factura");
@@ -69,7 +77,7 @@ test.describe("Documentos", () => {
     await page.getByTestId("documents-search").fill("nada-corresponde");
     await expect(page.getByTestId("documents-empty")).toBeVisible();
     await page.getByTestId("documents-clear").click();
-    await expect(rows).toHaveCount(3);
+    await expect(rows).toHaveCount(5);
 
     // Painel lateral com separadores.
     await rows.first().click();
@@ -97,17 +105,35 @@ test.describe("Documentos", () => {
 
   test("filtros: âmbito e categoria", async ({ page }) => {
     await page.goto("/documentos", { waitUntil: "domcontentloaded" });
-    await expect(page.getByTestId("document-row")).toHaveCount(3);
+    await expect(page.getByTestId("document-row")).toHaveCount(5);
     await page.getByTestId("documents-scope-shared").click();
     await expect(page.getByTestId("documents-empty")).toBeVisible(); // nada partilhado com o admin
     await page.getByTestId("documents-scope-mine").click();
-    await expect(page.getByTestId("document-row")).toHaveCount(3);
+    await expect(page.getByTestId("document-row")).toHaveCount(5);
 
     await page.getByTestId("documents-filters-toggle").click();
     const select = page.getByTestId("documents-filter-category");
-    const firstCategory = await select.locator("option").nth(1).getAttribute("value");
-    await select.selectOption(firstCategory!);
-    await expect(page.getByTestId("document-row")).toHaveCount(1);
+    const option = select.locator("option").nth(1);
+    const expected = Number((await option.textContent())!.match(/\((\d+)\)/)![1]);
+    await select.selectOption((await option.getAttribute("value"))!);
+    await expect(page.getByTestId("document-row")).toHaveCount(expected);
     await expect(page).toHaveURL(/cat=/);
+  });
+
+  test("perfis de RH: um cartão por colaborador e os documentos dele", async ({ page }) => {
+    await page.goto("/documentos", { waitUntil: "domcontentloaded" });
+    await page.getByTestId("documents-view-perfis").click();
+    const card = page.getByTestId("hr-profile-card");
+    await expect(card).toHaveCount(1);
+    await expect(card).toContainText("2 documentos");
+    await expect(card).toContainText("Admissão em falta");
+
+    await card.click();
+    await expect(page).toHaveURL(/view=perfis&person=/);
+    await expect(page.getByTestId("hr-person-header")).toContainText("2 documentos");
+    await expect(page.getByTestId("document-row")).toHaveCount(2);
+
+    await page.getByTestId("hr-person-header").getByRole("button", { name: /Perfis/ }).click();
+    await expect(card).toHaveCount(1);
   });
 });

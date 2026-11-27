@@ -5,6 +5,8 @@ export interface DocIdentifier {
   categoryName: string;
   visibility?: string;
   sectorId?: string;
+  issuedTo?: string | null;
+  categoryGroup?: string | null;
 }
 
 export interface DocRow {
@@ -64,7 +66,26 @@ export interface DocListMeta {
 
 export type DocScope = "all" | "mine" | "shared";
 
+export type DocView = "lista" | "perfis";
+
+/** Valor especial de `person`: documentos de RH sem colaborador indicado. */
+export const NO_PERSON = "__sem_colaborador__";
+
+export interface HrProfile {
+  name: string;
+  key: string;
+  total: number;
+  byCategory: Record<string, number>;
+  missing: string[];
+  terminated: boolean;
+  tags: string[];
+  lastDocumentAt: string;
+}
+
 export interface DocFilters {
+  view: DocView;
+  /** Colaborador escolhido na vista de perfis (nome, ou NO_PERSON). */
+  person: string;
   q: string;
   scope: DocScope;
   categoryId: string;
@@ -74,7 +95,7 @@ export interface DocFilters {
   page: number;
 }
 
-export const EMPTY_FILTERS: DocFilters = { q: "", scope: "all", categoryId: "", status: "", from: "", to: "", page: 1 };
+export const EMPTY_FILTERS: DocFilters = { view: "lista", person: "", q: "", scope: "all", categoryId: "", status: "", from: "", to: "", page: 1 };
 
 /** Filtros ↔ query string da API (só os preenchidos). */
 export function filtersToQuery(f: DocFilters, limit: number): string {
@@ -85,6 +106,7 @@ export function filtersToQuery(f: DocFilters, limit: number): string {
   if (f.status) p.set("status", f.status);
   if (f.from) p.set("from", f.from);
   if (f.to) p.set("to", f.to);
+  if (f.view === "perfis" && f.person) { p.set("group", "RH"); p.set("issuedTo", f.person); }
   return p.toString();
 }
 

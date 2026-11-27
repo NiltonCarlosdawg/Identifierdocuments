@@ -626,7 +626,13 @@ export interface DocumentListFilters {
   /** Datas AAAA-MM-DD (inclusivas). */
   from?: string;
   to?: string;
+  /** Grupo da categoria (ex.: "RH"). */
+  group?: string;
+  /** Colaborador/destinatário ("Emitido para"), sem distinguir acentos nem maiúsculas. NO_PERSON = sem nome. */
+  issuedTo?: string;
 }
+
+export const NO_PERSON = "__sem_colaborador__";
 
 /** Sem acentos e em minúsculas: "Facturação" encontra "facturacao". */
 export function normalizeSearch(s: string): string {
@@ -638,7 +644,13 @@ export function matchesDocumentFilters(d: {
   filename: string | null; label: string | null; tags: string[]; identifier: string | null;
   categoryId: string | null; categoryName: string | null; status: string; uploadedBy: string | null;
   uploaderName: string | null; createdAt: Date; sharedWithMe: boolean;
+  issuedTo?: string | null; categoryGroup?: string | null;
 }, f: DocumentListFilters, userId: string): boolean {
+  if (f.group && d.categoryGroup !== f.group) return false;
+  if (f.issuedTo) {
+    const person = normalizeSearch(d.issuedTo ?? "");
+    if (f.issuedTo === NO_PERSON ? person !== "" : person !== normalizeSearch(f.issuedTo)) return false;
+  }
   if (f.categoryId && d.categoryId !== f.categoryId) return false;
   if (f.status && d.status !== f.status) return false;
   if (f.scope === "mine" && d.uploadedBy !== userId) return false;
@@ -648,7 +660,7 @@ export function matchesDocumentFilters(d: {
   if (f.from && day < f.from) return false;
   if (f.to && day > f.to) return false;
   if (f.q) {
-    const hay = normalizeSearch([d.filename, d.label, d.identifier, d.categoryName, d.uploaderName, ...d.tags].filter(Boolean).join(" "));
+    const hay = normalizeSearch([d.filename, d.label, d.identifier, d.categoryName, d.uploaderName, d.issuedTo, ...d.tags].filter(Boolean).join(" "));
     // Todas as palavras têm de aparecer (em qualquer ordem).
     if (!normalizeSearch(f.q).split(/\s+/).filter(Boolean).every((w) => hay.includes(w))) return false;
   }
@@ -717,6 +729,8 @@ export async function listDocumentsForApi(
     uploaderName: d.uploader?.fullName ?? null,
     createdAt: d.createdAt,
     sharedWithMe: sharedDocIds.has(d.id),
+    issuedTo: d.identifier?.issuedTo ?? null,
+    categoryGroup: d.identifier?.category?.group ?? null,
   }, opts, auth.userId));
 
   const total = filtered.length;
@@ -745,6 +759,8 @@ export async function listDocumentsForApi(
         categoryName: d.identifier.category?.name,
         visibility: d.identifier.visibility,
         sectorId: d.identifier.sectorId,
+        issuedTo: d.identifier.issuedTo ?? null,
+        categoryGroup: d.identifier.category?.group ?? null,
       } : null,
       uploadedBy: d.uploader?.fullName || null,
       uploadedById: d.uploadedBy ?? null,
@@ -759,4 +775,46 @@ export async function listDocumentsForApi(
       categories: [...categoryCounts.values()].sort((a, b) => a.name.localeCompare(b.name, "pt")),
     },
   };
+}
+
+/* ───────────── Perfis de RH: documentos agrupados por colaborador ───────────── */
+
+/** Documentos que todo o colaborador deve ter no processo (o perfil assinala os que faltam). */
+export const HR_REQUIRED = ["CTR", "ADM"] as const;
+
+export interface HrProfile {
+  /** Nome como foi escrito (a variante mais recente); vazio = documentos sem colaborador. */
+  name: string;
+  key: string;
+  total: number;
+  byCategory: Record<string, number>;
+  missing: string[];
+  terminated: boolean;
+  tags: string[];
+  lastDocumentAt: string;
+}
+
+/** Regra pura: agrupa linhas da lista (já filtradas pela visibilidade) por colaborador. */
+export function buildHrProfiles(rows: Array<{
+  createdAt: Date | string; tags: string[];
+  identifier: { categoryId?: string | null; issuedTo?: string | null } | null;
+}>): HrProfile[] {
+  const groups = new Map<string, HrProfile & { _latest: number }>();
+  for (const r of rows) {
+    const raw = (r.identifier?.issuedTo ?? "").trim().replace(/\s+/g, " ");
+    const key = normalizeSearch(raw) || NO_PERSON;
+    const at = new Date(r.createdAt).getTime();
+    const g = groups.get(key) ?? { name: raw, key, total: 0, byCategory: {}, missing: [], terminated: false, tags: [], lastDocumentAt: "", _latest: 0 };
+    g.total++;
+    const cat = r.identifier?.categoryId ?? "?";
+    g.byCategory[cat] = (g.byCategory[cat] ?? 0) + 1;
+    for (const t of r.tags) if (!g.tags.includes(t)) g.tags.push(t);
+    if (at >= g._latest) { g._latest = at; g.lastDocumentAt = new Date(at).toISOString(); if (raw) g.name = raw; }
+    groups.set(key, g);
+  }
+  return [...groups.values()].map(({ _latest, ...g }) => ({
+    ...g,
+    terminated: (g.byCategory.TER ?? 0) > 0,
+    missing: g.key === NO_PERSON ? [] : HR_REQUIRED.filter((c) => !g.byCategory[c]),
+  })).sort((a, b) => (a.key === NO_PERSON ? 1 : b.key === NO_PERSON ? -1 : a.name.localeCompare(b.name, "pt")));
 }
