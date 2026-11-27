@@ -46,3 +46,16 @@ export function sanitizeDocHtml(html: string): string {
   }
   return doc.body.innerHTML;
 }
+
+/** Proporção altura/largura de uma folha A4 (297/210). */
+export const A4_RATIO = 297 / 210;
+/** Largura de uma folha A4 em píxeis CSS a 96 ppp (210 mm). */
+export const A4_CSS_WIDTH = 794;
+
+/** Maior folha com a proporção `ratio` (altura/largura) que cabe em width×height. */
+export function fitPage(width: number, height: number, ratio: number): { width: number; height: number } {
+  if (width <= 0 || height <= 0 || !(ratio > 0)) return { width: 0, height: 0 };
+  const byWidth = { width, height: width * ratio };
+  if (byWidth.height <= height) return { width: Math.floor(byWidth.width), height: Math.floor(byWidth.height) };
+  return { width: Math.floor(height / ratio), height: Math.floor(height) };
+}

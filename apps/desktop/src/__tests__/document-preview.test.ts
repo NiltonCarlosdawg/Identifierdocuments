@@ -46,3 +46,20 @@ describe("sanitizador do HTML do Word", () => {
     expect(sanitizeDocHtml("<div><section>texto <font>dentro</font></section></div>")).toBe("texto dentro");
   });
 });
+
+import { fitPage, A4_RATIO } from "../interfaces/components/documents/preview-utils";
+
+describe("tamanho da folha (primeira página)", () => {
+  it("espaço alto e estreito: a folha usa a largura toda", () => {
+    expect(fitPage(400, 1000, A4_RATIO)).toEqual({ width: 400, height: 565 });
+  });
+  it("espaço largo e baixo: a folha usa a altura toda, mantendo a proporção", () => {
+    const s = fitPage(800, 400, A4_RATIO);
+    expect(s.height).toBe(400);
+    expect(s.width).toBe(282);
+  });
+  it("página horizontal (proporção < 1) e espaço inválido", () => {
+    expect(fitPage(600, 600, 210 / 297)).toEqual({ width: 600, height: 424 });
+    expect(fitPage(0, 500, A4_RATIO)).toEqual({ width: 0, height: 0 });
+  });
+});

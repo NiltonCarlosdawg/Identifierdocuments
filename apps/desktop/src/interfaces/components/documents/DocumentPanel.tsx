@@ -237,7 +237,8 @@ export default function DocumentPanel({ row, onClose, onChanged, onOpen }: Props
           <div className="h-full space-y-5">
             {/* Ocupa a altura visível do separador; os detalhes ficam por baixo (scroll). */}
             <div className="h-full min-h-[18rem]" data-testid="preview-slot">
-              <DocumentPreview documentId={row.id} mime={detail?.mimeType || row.mimeType} filename={row.filename} thumbnailUrl={thumbnailUrl} />
+              <DocumentPreview documentId={row.id} mime={detail?.mimeType || row.mimeType} filename={row.filename} thumbnailUrl={thumbnailUrl}
+                onOpen={needsAccess ? undefined : () => run("abrir", () => onOpen(row), "Não foi possível abrir o documento.")} />
             </div>
             <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
               <Field label="Ficheiro" wide>{row.filename || "—"}</Field>

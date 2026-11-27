@@ -1,19 +1,25 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { api } from "../../../infrastructure/di/container";
 import { friendlyMime } from "../../../shared/errors/mapError";
-import { previewKind, sanitizeDocHtml, type PreviewKind } from "./preview-utils";
-import { ChevronLeft, ChevronRight, FileText, Loader2 } from "lucide-react";
+import { fitPage, previewKind, sanitizeDocHtml, A4_RATIO, A4_CSS_WIDTH, type PreviewKind } from "./preview-utils";
+import { FileText, Loader2 } from "lucide-react";
 
 /**
- * Pré-visualização dentro da app, sem depender do visualizador do motor web:
- * - PDF: pdf.js desenha em <canvas> (o WebKitGTK do Linux não tem visualizador de PDF e a
- *   CSP do Tauri bloqueia <iframe> com blob:, por isso o iframe antigo ficava sempre vazio);
- * - Word (.docx): mammoth converte para HTML, que passa por uma lista de elementos permitidos;
- * - texto/CSV/Markdown: mostrado como texto; imagens: <img> com blob: (permitido pela CSP).
+ * Pré-visualização da PRIMEIRA PÁGINA, como no Word Online: uma folha branca com a proporção
+ * da página, encaixada no espaço disponível. Clicar na folha abre o documento completo.
+ *
+ * Tudo é desenhado pela app (sem o visualizador do motor web): o WebKitGTK do Linux não tem
+ * visualizador de PDF e a CSP do Tauri bloqueia <iframe> com blob:.
+ * - PDF: pdf.js desenha só a página 1 em <canvas>, com a proporção real dessa página;
+ * - Word (.docx): mammoth → HTML (com lista de elementos permitidos), paginado à largura de uma
+ *   folha A4 e reduzido para caber; o que passa da primeira folha fica cortado;
+ * - texto e CSV: na mesma folha A4; imagens: a própria imagem.
  * As bibliotecas só são carregadas quando aparece um ficheiro desse tipo.
  */
-export default function DocumentPreview({ documentId, mime, filename, thumbnailUrl }: {
+export default function DocumentPreview({ documentId, mime, filename, thumbnailUrl, onOpen }: {
   documentId: string; mime: string; filename: string; thumbnailUrl: string | null;
+  /** Clicar na folha abre o documento completo. */
+  onOpen?: () => void;
 }) {
   const kind = previewKind(mime, filename);
   const [blob, setBlob] = useState<Blob | null>(null);
@@ -29,64 +35,66 @@ export default function DocumentPreview({ documentId, mime, filename, thumbnailU
     return () => { cancelled = true; };
   }, [documentId, kind]);
 
-  if (kind === "none" || error) return <Fallback mime={mime} filename={filename} thumbnailUrl={thumbnailUrl} unavailable={error} />;
+  const fallback = (unavailable: boolean) => <Fallback mime={mime} filename={filename} thumbnailUrl={thumbnailUrl} unavailable={unavailable} />;
+  if (kind === "none" || error) return fallback(error);
   if (!blob) return <Loading />;
-  if (kind === "pdf") return <PdfPreview blob={blob} fallback={<Fallback mime={mime} filename={filename} thumbnailUrl={thumbnailUrl} unavailable />} />;
-  if (kind === "docx") return <DocxPreview blob={blob} fallback={<Fallback mime={mime} filename={filename} thumbnailUrl={thumbnailUrl} unavailable />} />;
-  if (kind === "image") return <ImagePreview blob={blob} filename={filename} />;
-  return <TextPreview blob={blob} kind={kind} />;
+  if (kind === "pdf") return <PdfFirstPage blob={blob} onOpen={onOpen} fallback={fallback(true)} />;
+  if (kind === "image") return <ImagePreview blob={blob} filename={filename} onOpen={onOpen} />;
+  return <A4FirstPage blob={blob} kind={kind} onOpen={onOpen} fallback={fallback(true)} />;
 }
 
-// Sem cor de fundo: cada tipo escolhe a sua (PDF e Word em branco, como no papel).
-const FRAME = "rounded-lg border border-docid-border";
-const DARK = "bg-docid-surface-low";
-/** A pré-visualização enche o contentor (o painel dá-lhe a altura visível da área com scroll). */
-const FILL_H = "h-full";
-const FILL_MAX_H = "max-h-full";
+/* ───────────────────────── Folha (primeira página) ───────────────────────── */
 
-function Loading() {
-  return (
-    <div className={`flex h-48 items-center justify-center gap-2 text-xs text-docid-muted ${FRAME} ${DARK}`} data-testid="preview-loading">
-      <Loader2 className="h-4 w-4 animate-spin" /> A preparar a pré-visualização...
-    </div>
-  );
-}
-
-function Fallback({ mime, filename, thumbnailUrl, unavailable }: { mime: string; filename: string; thumbnailUrl: string | null; unavailable?: boolean }) {
-  if (thumbnailUrl) {
-    return <img src={thumbnailUrl} alt={`Miniatura de ${filename}`} className={`max-h-64 w-full object-contain ${FRAME} ${DARK}`} data-testid="preview-thumbnail" />;
-  }
-  return (
-    <div className="flex h-32 flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-docid-border text-docid-muted" data-testid="preview-none">
-      <FileText className="h-8 w-8" />
-      <span className="text-xs">{friendlyMime(mime)} · {unavailable ? "não foi possível pré-visualizar" : "sem pré-visualização"}. Use "Abrir".</span>
-    </div>
-  );
-}
-
-function PdfPreview({ blob, fallback }: { blob: Blob; fallback: React.ReactNode }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const boxRef = useRef<HTMLDivElement>(null);
-  const docRef = useRef<any>(null);
-  const [pages, setPages] = useState(0);
-  const [page, setPage] = useState(1);
-  const [failed, setFailed] = useState(false);
-  const [width, setWidth] = useState(0);
-
-  // O painel cresce com a janela: voltar a desenhar a página à nova largura (sem ficar desfocada).
-  useEffect(() => {
-    const box = boxRef.current;
-    if (!box) return;
+/** Mede o espaço disponível e devolve o tamanho da folha que cabe nele com a proporção dada. */
+function useSheetSize(ratio: number, reserve = 0) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState({ width: 0, height: 0 });
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
     let t: ReturnType<typeof setTimeout> | undefined;
-    const ro = new ResizeObserver(() => { clearTimeout(t); t = setTimeout(() => setWidth(box.clientWidth), 150); });
-    ro.observe(box);
-    setWidth(box.clientWidth);
+    const measure = () => setSize(fitPage(el.clientWidth - 24, el.clientHeight - reserve, ratio));
+    measure();
+    const ro = new ResizeObserver(() => { clearTimeout(t); t = setTimeout(measure, 100); });
+    ro.observe(el);
     return () => { clearTimeout(t); ro.disconnect(); };
-  }, []);
+  }, [ratio, reserve]);
+  return { ref, size };
+}
+
+function Sheet({ width, height, onOpen, children, testId }: { width: number; height: number; onOpen?: () => void; children: ReactNode; testId: string }) {
+  return (
+    <button type="button" onClick={onOpen} disabled={!onOpen} title={onOpen ? "Abrir o documento completo" : undefined} data-testid={testId}
+      style={{ width, height }}
+      className="relative block shrink-0 overflow-hidden rounded-sm bg-white text-left shadow-[0_2px_12px_rgba(0,0,0,0.45)] ring-1 ring-black/10 transition hover:ring-2 hover:ring-docid-primary disabled:cursor-default">
+      {children}
+    </button>
+  );
+}
+
+function SheetArea({ areaRef, caption, children }: { areaRef: React.RefObject<HTMLDivElement>; caption?: ReactNode; children: ReactNode }) {
+  return (
+    <div ref={areaRef} className="flex h-full min-h-[18rem] flex-col items-center gap-2 rounded-lg bg-docid-surface-low/60 p-3">
+      <div className="flex min-h-0 flex-1 items-start justify-center">{children}</div>
+      {caption && <p className="text-[11px] text-docid-muted" data-testid="preview-caption">{caption}</p>}
+    </div>
+  );
+}
+
+const CAPTION_SPACE = 30; // px para a legenda por baixo da folha
+
+function PdfFirstPage({ blob, onOpen, fallback }: { blob: Blob; onOpen?: () => void; fallback: ReactNode }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const pageRef = useRef<any>(null);
+  const docRef = useRef<any>(null);
+  const [ratio, setRatio] = useState(A4_RATIO);
+  const [pages, setPages] = useState(0);
+  const [failed, setFailed] = useState(false);
+  const { ref, size } = useSheetSize(ratio, CAPTION_SPACE + 24);
 
   useEffect(() => {
     let cancelled = false;
-    setFailed(false); setPages(0); setPage(1);
+    setFailed(false); setPages(0);
     (async () => {
       try {
         // pdf.js 4 usa Promise.withResolvers, que só existe no WebKitGTK recente (Linux).
@@ -104,31 +112,33 @@ function PdfPreview({ blob, fallback }: { blob: Blob; fallback: React.ReactNode 
         const doc = await pdfjs.getDocument({ data: new Uint8Array(await blob.arrayBuffer()), isEvalSupported: false }).promise;
         if (cancelled) { void doc.destroy(); return; }
         docRef.current = doc;
+        const first = await doc.getPage(1);
+        if (cancelled) return;
+        pageRef.current = first;
+        const vp = first.getViewport({ scale: 1 });
+        setRatio(vp.height / vp.width); // proporção real (A4, carta, horizontal...)
         setPages(doc.numPages);
       } catch {
         if (!cancelled) setFailed(true);
       }
     })();
-    return () => { cancelled = true; void docRef.current?.destroy?.(); docRef.current = null; };
+    return () => { cancelled = true; void docRef.current?.destroy?.(); docRef.current = null; pageRef.current = null; };
   }, [blob]);
 
+  // Desenha a página 1 ao tamanho da folha (e volta a desenhar quando a folha muda de tamanho).
   useEffect(() => {
-    const doc = docRef.current;
-    if (!doc || !pages || !canvasRef.current || !boxRef.current) return;
+    const p = pageRef.current;
+    const canvas = canvasRef.current;
+    if (!p || !canvas || !pages || !size.width) return;
     let task: any = null;
     let cancelled = false;
     (async () => {
       try {
-        const p = await doc.getPage(page);
-        if (cancelled) return;
+        const dpr = window.devicePixelRatio || 1;
         const base = p.getViewport({ scale: 1 });
-        // Largura útil (menos a barra de scroll vertical, se aparecer).
-        const avail = Math.max(200, (width || boxRef.current!.clientWidth || 400) - 2);
-        const ratio = window.devicePixelRatio || 1;
-        const viewport = p.getViewport({ scale: (avail / base.width) * ratio });
-        const canvas = canvasRef.current!;
-        canvas.width = viewport.width; canvas.height = viewport.height;
-        canvas.style.width = `${viewport.width / ratio}px`; canvas.style.height = `${viewport.height / ratio}px`;
+        const viewport = p.getViewport({ scale: (size.width / base.width) * dpr });
+        canvas.width = Math.floor(viewport.width); canvas.height = Math.floor(viewport.height);
+        canvas.style.width = `${size.width}px`; canvas.style.height = `${size.height}px`;
         task = p.render({ canvasContext: canvas.getContext("2d")!, viewport });
         await task.promise;
       } catch (err: any) {
@@ -136,52 +146,79 @@ function PdfPreview({ blob, fallback }: { blob: Blob; fallback: React.ReactNode 
       }
     })();
     return () => { cancelled = true; task?.cancel?.(); };
-  }, [pages, page, width]);
+  }, [pages, size.width, size.height]);
 
   if (failed) return <>{fallback}</>;
   return (
-    <div className="flex h-full flex-col gap-2" data-testid="preview-pdf">
-      <div ref={boxRef} className={`min-h-0 flex-1 overflow-auto bg-white ${FRAME}`}>
-        {!pages && <div className="flex h-48 items-center justify-center text-xs text-docid-muted"><Loader2 className="mr-2 h-4 w-4 animate-spin" /> A abrir o PDF...</div>}
-        <canvas ref={canvasRef} className={pages ? "block" : "hidden"} />
-      </div>
-      {pages > 1 && (
-        <div className="flex items-center justify-center gap-2 text-xs text-docid-muted">
-          <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page <= 1} aria-label="Página anterior" className="rounded p-1 hover:bg-docid-surface-high disabled:opacity-40"><ChevronLeft className="h-4 w-4" /></button>
-          <span data-testid="preview-pdf-page">Página {page} de {pages}</span>
-          <button onClick={() => setPage(p => Math.min(pages, p + 1))} disabled={page >= pages} aria-label="Página seguinte" className="rounded p-1 hover:bg-docid-surface-high disabled:opacity-40"><ChevronRight className="h-4 w-4" /></button>
-        </div>
+    <SheetArea areaRef={ref} caption={pages ? `Primeira página · ${pages} ${pages === 1 ? "página" : "páginas"}` : undefined}>
+      {!pages || !size.width ? <Spinner text="A abrir o PDF..." /> : (
+        <Sheet width={size.width} height={size.height} onOpen={onOpen} testId="preview-pdf">
+          <canvas ref={canvasRef} className="block" />
+        </Sheet>
       )}
-    </div>
+    </SheetArea>
   );
 }
 
-function DocxPreview({ blob, fallback }: { blob: Blob; fallback: React.ReactNode }) {
-  const [html, setHtml] = useState<string | null>(null);
+const TEXT_LIMIT = 60_000; // chega e sobra para uma folha
+
+/** Word, texto e CSV: conteúdo à largura real de uma folha A4, reduzido para caber; só a 1.ª folha. */
+function A4FirstPage({ blob, kind, onOpen, fallback }: { blob: Blob; kind: PreviewKind; onOpen?: () => void; fallback: ReactNode }) {
+  const [content, setContent] = useState<{ html?: string; text?: string; rows?: string[][] } | null>(null);
   const [failed, setFailed] = useState(false);
+  const { ref, size } = useSheetSize(A4_RATIO, 24);
+
   useEffect(() => {
     let cancelled = false;
-    setHtml(null); setFailed(false);
+    setContent(null); setFailed(false);
     (async () => {
       try {
-        const mammoth: any = await import("mammoth/mammoth.browser");
-        const res = await (mammoth.default ?? mammoth).convertToHtml({ arrayBuffer: await blob.arrayBuffer() });
-        if (!cancelled) setHtml(sanitizeDocHtml(res.value || ""));
+        if (kind === "docx") {
+          const mammoth: any = await import("mammoth/mammoth.browser");
+          const res = await (mammoth.default ?? mammoth).convertToHtml({ arrayBuffer: await blob.arrayBuffer() });
+          if (!cancelled) setContent({ html: sanitizeDocHtml(res.value || "") || "<p><em>Documento sem texto.</em></p>" });
+        } else {
+          const text = await blob.slice(0, TEXT_LIMIT).text();
+          if (cancelled) return;
+          if (kind === "csv") setContent({ rows: text.split(/\r?\n/).filter(Boolean).slice(0, 80).map(l => l.split(/[;,]/)) });
+          else setContent({ text: text || "(ficheiro vazio)" });
+        }
       } catch {
         if (!cancelled) setFailed(true);
       }
     })();
     return () => { cancelled = true; };
-  }, [blob]);
+  }, [blob, kind]);
+
   if (failed) return <>{fallback}</>;
-  if (html === null) return <Loading />;
+  const scale = size.width / A4_CSS_WIDTH;
+  const testId = kind === "docx" ? "preview-docx" : kind === "csv" ? "preview-csv" : "preview-text";
   return (
-    <div className={`docid-doc-preview ${FILL_H} overflow-auto bg-white p-5 text-[13px] leading-relaxed text-neutral-900 ${FRAME}`}
-      data-testid="preview-docx" dangerouslySetInnerHTML={{ __html: html || "<p><em>Documento sem texto.</em></p>" }} />
+    <SheetArea areaRef={ref}>
+      {!content || !size.width ? <Spinner text="A preparar a pré-visualização..." /> : (
+        <Sheet width={size.width} height={size.height} onOpen={onOpen} testId={testId}>
+          {/* Folha A4 "real" (794×1123 px a 96 ppp) reduzida por transform: só cabe a 1.ª página. */}
+          <div style={{ width: A4_CSS_WIDTH, height: A4_CSS_WIDTH * A4_RATIO, transform: `scale(${scale})`, transformOrigin: "top left" }}
+            className="overflow-hidden p-[72px] text-[14px] leading-relaxed text-neutral-900">
+            {content.html !== undefined && <div className="docid-doc-preview" dangerouslySetInnerHTML={{ __html: content.html }} />}
+            {content.text !== undefined && <pre className="whitespace-pre-wrap break-words font-mono text-[13px]">{content.text}</pre>}
+            {content.rows && (
+              <table className="w-full border-collapse text-[13px]">
+                <tbody>{content.rows.map((r, i) => (
+                  <tr key={i} className={i === 0 ? "bg-neutral-100 font-semibold" : ""}>
+                    {r.map((c, j) => <td key={j} className="border border-neutral-300 px-2 py-1">{c}</td>)}
+                  </tr>
+                ))}</tbody>
+              </table>
+            )}
+          </div>
+        </Sheet>
+      )}
+    </SheetArea>
   );
 }
 
-function ImagePreview({ blob, filename }: { blob: Blob; filename: string }) {
+function ImagePreview({ blob, filename, onOpen }: { blob: Blob; filename: string; onOpen?: () => void }) {
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
     const u = URL.createObjectURL(blob);
@@ -189,36 +226,32 @@ function ImagePreview({ blob, filename }: { blob: Blob; filename: string }) {
     return () => URL.revokeObjectURL(u);
   }, [blob]);
   if (!url) return <Loading />;
-  return <img src={url} alt={filename} className={`${FILL_H} w-full object-contain ${FRAME} ${DARK}`} data-testid="preview-image" />;
+  return (
+    <button type="button" onClick={onOpen} disabled={!onOpen} title={onOpen ? "Abrir o documento completo" : undefined}
+      className="block h-full min-h-[18rem] w-full rounded-lg bg-docid-surface-low/60 p-3 disabled:cursor-default">
+      <img src={url} alt={filename} className="mx-auto h-full max-w-full object-contain shadow-[0_2px_12px_rgba(0,0,0,0.45)]" data-testid="preview-image" />
+    </button>
+  );
 }
 
-const TEXT_LIMIT = 200_000;
+/* ───────────────────────── Estados ───────────────────────── */
 
-function TextPreview({ blob, kind }: { blob: Blob; kind: PreviewKind }) {
-  const [text, setText] = useState<string | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    blob.slice(0, TEXT_LIMIT).text().then(t => { if (!cancelled) setText(t); }).catch(() => { if (!cancelled) setText(""); });
-    return () => { cancelled = true; };
-  }, [blob]);
-  if (text === null) return <Loading />;
-  if (kind === "csv") {
-    const rows = text.split(/\r?\n/).filter(Boolean).slice(0, 200).map(l => l.split(/[;,]/));
-    return (
-      <div className={`${FILL_MAX_H} overflow-auto ${FRAME} ${DARK}`} data-testid="preview-csv">
-        <table className="w-full text-xs">
-          <tbody>{rows.map((r, i) => (
-            <tr key={i} className={i === 0 ? "bg-docid-surface-high font-semibold" : "border-t border-docid-border"}>
-              {r.map((c, j) => <td key={j} className="whitespace-nowrap px-2 py-1 text-docid-text">{c}</td>)}
-            </tr>
-          ))}</tbody>
-        </table>
-      </div>
-    );
+function Spinner({ text }: { text: string }) {
+  return <div className="flex h-48 items-center justify-center gap-2 text-xs text-docid-muted" data-testid="preview-loading"><Loader2 className="h-4 w-4 animate-spin" /> {text}</div>;
+}
+
+function Loading() {
+  return <div className="flex h-full min-h-[18rem] items-center justify-center rounded-lg bg-docid-surface-low/60"><Spinner text="A preparar a pré-visualização..." /></div>;
+}
+
+function Fallback({ mime, filename, thumbnailUrl, unavailable }: { mime: string; filename: string; thumbnailUrl: string | null; unavailable?: boolean }) {
+  if (thumbnailUrl) {
+    return <img src={thumbnailUrl} alt={`Miniatura de ${filename}`} className="max-h-64 w-full rounded-lg bg-docid-surface-low object-contain" data-testid="preview-thumbnail" />;
   }
   return (
-    <pre className={`${FILL_MAX_H} overflow-auto whitespace-pre-wrap break-words p-4 font-mono text-xs text-docid-text ${FRAME} ${DARK}`} data-testid="preview-text">
-      {text || "(ficheiro vazio)"}{blob.size > TEXT_LIMIT && "\n\n… (mostra só o início; use \"Abrir\" para ver tudo)"}
-    </pre>
+    <div className="flex h-32 flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-docid-border text-docid-muted" data-testid="preview-none">
+      <FileText className="h-8 w-8" />
+      <span className="text-xs">{friendlyMime(mime)} · {unavailable ? "não foi possível pré-visualizar" : "sem pré-visualização"}. Use "Abrir".</span>
+    </div>
   );
 }
