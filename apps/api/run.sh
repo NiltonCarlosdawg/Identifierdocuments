@@ -17,6 +17,13 @@ log() { printf '%s %s\n' "$(date -Is)" "$*" >> "$WATCHLOG"; }
 alive() { [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; }
 healthy() { curl -fs -m 5 -o /dev/null "http://127.0.0.1:$PORT/health"; }
 
+# Rotação do log: acima de 50 MB guarda os últimos 10 MB em docid-api.log.1 e esvazia o
+# original no sítio (a API escreve em modo append, por isso continua sem reiniciar).
+# Só lê 10 MB: ler o ficheiro inteiro esbarra no limite de I/O do alojamento (CloudLinux).
+if [ -f docid-api.log ] && [ "$(stat -c %s docid-api.log)" -gt $((50 * 1024 * 1024)) ]; then
+  tail -c $((10 * 1024 * 1024)) docid-api.log > docid-api.log.1 && truncate -s 0 docid-api.log && log "log rodado (últimos 10 MB em docid-api.log.1)"
+fi
+
 # Redis (socket privado, ver scripts/redis.sh): repõe-o mesmo com a API saudável,
 # senão a verificação diária das subscrições (BullMQ) deixava de correr sem ninguém notar.
 [ -f scripts/redis.sh ] && bash scripts/redis.sh ensure >/dev/null 2>&1

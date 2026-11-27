@@ -324,6 +324,7 @@ export function renderEmail(eventType: string, data: Record<string, unknown>): R
     case "role_granted":
     case "device_registered":
     case "identifier_cancelled":
+    case "license_alert":
       return renderAttention(data as unknown as AttentionData);
     default: throw new Error(`Template desconhecido: ${eventType}`);
   }

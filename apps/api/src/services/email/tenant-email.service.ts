@@ -145,7 +145,8 @@ type Prefs = Record<string, unknown> | null | undefined;
 
 /** O utilizador pode desligar e-mails em notification_preferences: `email: false` ou `email_<evento>: false`. */
 /** Avisos de segurança: saem sempre, mesmo com os e-mails desligados nas preferências. */
-export const MANDATORY_EMAIL_EVENTS: ReadonlySet<EmailEventType> = new Set(["password_changed"]);
+// license_alert: sem ele um administrador podia não saber que a organização vai deixar de poder criar documentos.
+export const MANDATORY_EMAIL_EVENTS: ReadonlySet<EmailEventType> = new Set(["password_changed", "license_alert"]);
 
 export function wantsEmail(prefs: Prefs, event: EmailEventType): boolean {
   if (MANDATORY_EMAIL_EVENTS.has(event)) return true;
@@ -565,5 +566,89 @@ export async function onIdentifierCancelled(tx: DB, e: {
       note: e.reason?.trim() ? { label: "Motivo", text: e.reason } : null,
       at: new Date().toISOString(),
     },
+  });
+}
+
+/** Data por extenso curta (dd/mm/aaaa), no fuso dos e-mails. */
+function shortDate(d: Date): string {
+  return new Intl.DateTimeFormat("pt-PT", { timeZone: process.env.EMAIL_TIMEZONE || "Africa/Luanda", day: "2-digit", month: "2-digit", year: "numeric" }).format(d);
+}
+
+/**
+ * Licença a terminar / em tolerância / em só consulta. Destinatários: todos os
+ * administradores (aviso obrigatório). Ver jobs/license-alerts.ts.
+ */
+export async function onLicenseAlert(tx: DB, e: {
+  tenantId: string;
+  milestone: import("../../jobs/license-alerts").LicenseMilestone;
+  key: string;
+  validUntil: Date;
+  now: Date;
+}): Promise<number> {
+  const org = await tx.query.organizations.findFirst({
+    where: eq(organizations.id, e.tenantId),
+    columns: { name: true, licenseNumber: true },
+    with: { plan: true },
+  });
+  if (!org) return 0;
+  const m = e.milestone;
+  const until = shortDate(e.validUntil);
+  const rows: Array<[string, string]> = [
+    ["Organização", org.name],
+    ...(org.licenseNumber ? [["Licença", org.licenseNumber] as [string, string]] : []),
+    ...(org.plan?.name ? [["Plano", org.plan.name] as [string, string]] : []),
+    ["Válida até", until],
+  ];
+  const renew = "Para renovar: na aplicação DocID, Configurações › Organização › \"Renovar / Actualizar\".";
+  const readOnly = "Em só consulta continua a entrar, ver e descarregar documentos, mas não pode criar documentos nem identificadores.";
+
+  let build: AttentionBase;
+  if (m.kind === "expiring") {
+    const dias = m.daysLeft <= 1 ? (m.daysLeft === 1 ? "amanhã" : "hoje") : `daqui a ${m.daysLeft} dias`;
+    build = {
+      subject: m.daysLeft <= 1 ? `A licença do DocID termina ${dias}` : `A licença do DocID termina daqui a ${m.daysLeft} dias`,
+      title: "A licença está a terminar",
+      badge: "Licença",
+      tone: m.bucket <= 3 ? "danger" : "warning",
+      intro: [
+        `A licença de ${org.name} termina ${dias} (${until}).`,
+        `Depois disso há um período de tolerância; no fim dele a organização passa a só consulta. ${readOnly}`,
+      ],
+      rows,
+      action: renew,
+    };
+  } else if (m.kind === "grace" || m.kind === "grace_last") {
+    const last = m.kind === "grace_last";
+    build = {
+      subject: last ? "Último dia de tolerância da licença do DocID" : "A licença do DocID terminou: período de tolerância",
+      title: last ? "Último dia de tolerância" : "A licença terminou",
+      badge: "Licença",
+      tone: "danger",
+      intro: [
+        last
+          ? `A licença de ${org.name} terminou a ${until} e a tolerância acaba a ${shortDate(m.graceUntil)}. A partir daí a organização passa a só consulta.`
+          : `A licença de ${org.name} terminou a ${until}. Tudo continua a funcionar até ${shortDate(m.graceUntil)}; depois a organização passa a só consulta.`,
+        readOnly,
+      ],
+      rows: [...rows, ["Tolerância até", shortDate(m.graceUntil)]],
+      action: renew,
+    };
+  } else {
+    build = {
+      subject: "A organização está em só consulta no DocID",
+      title: "Organização em só consulta",
+      badge: "Licença",
+      tone: "danger",
+      intro: [`A licença de ${org.name} terminou a ${until} e o período de tolerância acabou.`, readOnly],
+      rows,
+      action: `${renew} Assim que a renovação for aprovada, tudo volta a funcionar.`,
+    };
+  }
+  return enqueueAttention(tx, {
+    tenantId: e.tenantId,
+    event: "license_alert",
+    recipientIds: await adminIds(tx, e.tenantId),
+    dedupe: `license:${e.validUntil.toISOString().slice(0, 10)}:${e.key}`,
+    build: { ...build, at: e.now.toISOString() },
   });
 }
