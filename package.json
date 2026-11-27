@@ -2,12 +2,16 @@
   "name": "verano-docid",
   "version": "1.0.0",
   "private": true,
-  "workspaces": ["apps/*", "packages/*"],
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
     "test:e2e": "playwright test",
     "test:e2e:admin": "playwright test --config playwright.admin.config.ts",
     "test:e2e:install": "playwright install chromium",
-    "admin:dev": "cd apps/admin && npm run dev"
+    "admin:dev": "cd apps/admin && npm run dev",
+    "test:e2e:landing": "playwright test --config playwright.landing.config.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",

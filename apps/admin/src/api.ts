@@ -19,9 +19,11 @@ export type Plan = {
 };
 
 export type Order = {
-  id: string; tenantId: string; planId: string; paymentMethod: string;
+  id: string; tenantId: string | null; planId: string; paymentMethod: string;
   phone: string | null; contactEmail: string | null; status: "pending" | "approved" | "rejected";
   rejectReason: string | null; createdAt: string; tenantName: string; planName: string;
+  /** Pedido de quem ainda não tem conta: sem organização, com o nome da empresa. */
+  isNewCustomer?: boolean; companyName?: string | null; contactName?: string | null;
 };
 
 export type Tenant = {

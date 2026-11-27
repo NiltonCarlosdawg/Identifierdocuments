@@ -29,3 +29,6 @@ th { color: #8b949e; font-weight: 600; }
 .form-grid { margin-bottom: 20px; }
 .form-grid label { min-width: 150px; }
 section { display: grid; gap: 12px; }
+
+.badge { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 999px; font-size: 12px; background: #fff4d6; color: #7a4b00; }
+.hint { font-size: 13px; color: #9aa4b2; margin: 0 0 12px; max-width: 72ch; }

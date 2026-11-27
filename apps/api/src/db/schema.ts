@@ -44,7 +44,10 @@ export const providerUsers = pgTable("provider_users", {
 
 export const orders = pgTable("orders", {
   id: uuid("id").primaryKey().defaultRandom(),
-  tenantId: uuid("tenant_id").notNull().references(() => organizations.id),
+  // Sem organização: pedido de um cliente novo (company_name obrigatório, ver migração 0030).
+  tenantId: uuid("tenant_id").references(() => organizations.id),
+  companyName: text("company_name"),
+  contactName: text("contact_name"),
   planId: uuid("plan_id").notNull().references(() => plans.id),
   paymentMethod: text("payment_method", { enum: ["multicaixa", "transfer", "send_order"] }).notNull(),
   phone: text("phone"),

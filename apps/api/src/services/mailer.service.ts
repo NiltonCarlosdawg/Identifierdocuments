@@ -59,9 +59,16 @@ export async function sendInviteEmail(to: string, fullName: string, orgName: str
   return true;
 }
 
+/** Os pedidos vêm de um formulário público: tudo o que entra no HTML é escapado. */
+function esc(value: unknown): string {
+  return String(value ?? "").replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+}
+
 export interface OrderNotification {
   id: string;
   tenantName: string;
+  contactName?: string | null;
   planName: string;
   paymentMethod: string;
   phone: string | null;
@@ -74,6 +81,7 @@ export async function sendOrderReceivedEmail(toProvider: string, order: OrderNot
   const linhas = [
     `Pedido de subscrição recebido (${order.id}).`,
     `Organização: ${order.tenantName}`,
+    `Contacto: ${order.contactName || "não indicado"}`,
     `Plano: ${order.planName}`,
     `Forma de pagamento: ${order.paymentMethod}`,
     `Telefone: ${order.phone || "não indicado"}`,
@@ -91,13 +99,14 @@ export async function sendOrderReceivedEmail(toProvider: string, order: OrderNot
     to: toProvider,
     subject: `DocID — Novo pedido de subscrição: ${order.tenantName}`,
     text: bodyText,
-    html: `<p>Olá,</p><p>Pedido de subscrição recebido (<strong>${order.id}</strong>).</p>` +
-      `<p>Organização: <strong>${order.tenantName}</strong><br/>` +
-      `Plano: <strong>${order.planName}</strong><br/>` +
-      `Forma de pagamento: <strong>${order.paymentMethod}</strong><br/>` +
-      `Telefone: ${order.phone || "não indicado"}<br/>` +
-      `Email de contacto: ${order.contactEmail || "não indicado"}<br/>` +
-      `Estado: <strong>${order.status}</strong></p>`,
+    html: `<p>Olá,</p><p>Pedido de subscrição recebido (<strong>${esc(order.id)}</strong>).</p>` +
+      `<p>Organização: <strong>${esc(order.tenantName)}</strong><br/>` +
+      `Contacto: ${esc(order.contactName || "não indicado")}<br/>` +
+      `Plano: <strong>${esc(order.planName)}</strong><br/>` +
+      `Forma de pagamento: <strong>${esc(order.paymentMethod)}</strong><br/>` +
+      `Telefone: ${esc(order.phone || "não indicado")}<br/>` +
+      `Email de contacto: ${esc(order.contactEmail || "não indicado")}<br/>` +
+      `Estado: <strong>${esc(order.status)}</strong></p>`,
   });
   return true;
 }
@@ -126,8 +135,8 @@ export async function sendSubscriptionActiveEmail(to: string, info: Subscription
     subject: "DocID — Subscrição concluída",
     text: bodyText,
     html: `<p>Olá,</p><p>A sua <strong>subscrição concluída</strong> no DocID está ativa.</p>` +
-      `<p>Organização: <strong>${info.tenantName}</strong><br/>` +
-      `Plano: <strong>${info.planName}</strong><br/>` +
+      `<p>Organização: <strong>${esc(info.tenantName)}</strong><br/>` +
+      `Plano: <strong>${esc(info.planName)}</strong><br/>` +
       `Válida até: <strong>${fim}</strong></p>`,
   });
   return true;
@@ -157,9 +166,9 @@ export async function sendOrderRejectedEmail(to: string, info: OrderRejectedInfo
     subject: "DocID — Pedido de subscrição rejeitado",
     text: bodyText,
     html: `<p>Olá,</p><p>O seu pedido de subscrição no DocID foi rejeitado.</p>` +
-      `<p>Organização: <strong>${info.tenantName}</strong><br/>` +
-      `Plano: <strong>${info.planName}</strong><br/>` +
-      `Motivo: <strong>${info.reason}</strong></p>` +
+      `<p>Organização: <strong>${esc(info.tenantName)}</strong><br/>` +
+      `Plano: <strong>${esc(info.planName)}</strong><br/>` +
+      `Motivo: <strong>${esc(info.reason)}</strong></p>` +
       `<p>Pode submeter um novo pedido pelo checkout.</p>`,
   });
   return true;

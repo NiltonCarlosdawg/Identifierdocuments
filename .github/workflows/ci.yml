@@ -145,6 +145,7 @@ jobs:
           bun src/db/migrate.ts
           bun src/db/seed.ts
           bun src/db/create-provider-user.ts admin@docid.local testpass123
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f ../../e2e/seed-plans.sql
       - name: Start API
         working-directory: apps/api
         # NODE_ENV=test desliga os limites de pedidos (o teste cria organizações e faz vários logins).
@@ -158,12 +159,17 @@ jobs:
       - name: Build admin panel
         working-directory: apps/admin
         run: VITE_API_URL=http://127.0.0.1:3002 bun run build
+      - name: Build landing
+        working-directory: apps/landing
+        run: VITE_API_URL=http://127.0.0.1:3002 bun run build
       - name: Install Playwright Chromium
         run: bunx playwright install --with-deps chromium
       - name: Run E2E (desktop)
         run: bun run test:e2e
       - name: Run E2E (painel da provedora)
         run: bun run test:e2e:admin
+      - name: Run E2E (landing — pedido de cliente novo)
+        run: bun run test:e2e:landing
       - name: API log
         if: failure()
         run: tail -n 200 /tmp/api.log

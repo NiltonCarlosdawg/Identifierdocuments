@@ -9,7 +9,7 @@ import { verifyPassword } from "../lib/password";
 import { signProviderToken, requireProvider } from "../middleware/auth";
 import { checkRateLimit } from "../middleware/rateLimit";
 import { getClientIp } from "../lib/ip";
-import { approveOrder, OrderError, rejectOrder } from "../services/order.service";
+import { approveOrder, OrderError, rejectOrder, orderDisplayName } from "../services/order.service";
 import { getSubscriptionContext } from "../services/subscription.service";
 import { getLicenseContext } from "../services/license.service";
 
@@ -132,15 +132,21 @@ export const providerModule = new (Elysia as any)({ prefix: "/provider" })
 
   .get("/orders", async () => {
     // Tabelas globais: SEM withTenant.
+    // leftJoin: pedidos de clientes novos ainda não têm organização.
     const rows = await db.select({
       order: orders,
-      tenantName: organizations.name,
+      orgName: organizations.name,
       planName: plans.name,
     }).from(orders)
-      .innerJoin(organizations, eq(orders.tenantId, organizations.id))
+      .leftJoin(organizations, eq(orders.tenantId, organizations.id))
       .innerJoin(plans, eq(orders.planId, plans.id))
       .orderBy(desc(orders.createdAt));
-    return rows.map(({ order, tenantName, planName }) => ({ ...order, tenantName, planName }));
+    return rows.map(({ order, orgName, planName }) => ({
+      ...order,
+      tenantName: orderDisplayName(orgName, order.companyName),
+      isNewCustomer: order.tenantId === null,
+      planName,
+    }));
   }, { detail: { summary: "Listar pedidos", tags: ["Painel"] } })
 
   .post("/orders/:id/approve", async (ctx: any) => {
