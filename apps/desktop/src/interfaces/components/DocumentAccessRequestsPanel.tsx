@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../../infrastructure/di/container";
-import { EmptyState, Modal, StatusChip } from "./docid-ui";
+import { StatusChip } from "./docid-ui";
 import { mapError } from "../../shared/errors/mapError";
 import { useAuthStore } from "../stores/authStore";
 
@@ -14,12 +14,13 @@ interface AccessRequest {
   resolver: { id: string; fullName: string } | null;
 }
 
-interface Props { identifier: string; onClose: () => void; onChanged?: () => void; }
+/** Pedidos de acesso a um documento (separador "Pedidos" do painel de documentos). */
+interface Props { identifier: string; onChanged?: () => void; }
 
 const STATUS_LABELS: Record<string, string> = { pending: "Pendente", approved: "Aprovado", denied: "Negado", cancelled: "Cancelado" };
 const STATUS_TONES: Record<string, "success" | "warning" | "error" | "neutral"> = { pending: "warning", approved: "success", denied: "error", cancelled: "neutral" };
 
-export default function DocumentAccessRequestsModal({ identifier, onClose, onChanged }: Props) {
+export default function DocumentAccessRequestsPanel({ identifier, onChanged }: Props) {
   const [requests, setRequests] = useState<AccessRequest[]>([]);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
@@ -70,14 +71,12 @@ export default function DocumentAccessRequestsModal({ identifier, onClose, onCha
   };
 
   return (
-    <Modal title="Pedidos de acesso" onClose={onClose} footer={<button onClick={onClose} className="docid-button-secondary">Fechar</button>}>
-      <div className="space-y-4">
-        <p className="font-mono text-xs text-docid-muted">{identifier}</p>
+      <div className="space-y-4" data-testid="document-access-requests">
         {error && <div className="rounded-lg border border-docid-error/30 bg-docid-error/10 p-3 text-sm text-docid-error">{error}</div>}
         {loading ? (
           <p className="text-sm text-docid-muted">A carregar pedidos...</p>
         ) : requests.length === 0 ? (
-          <EmptyState>Nenhum pedido de acesso registado.</EmptyState>
+          <p className="text-sm text-docid-muted">Não há pedidos de acesso a este documento.</p>
         ) : (
           <ul className="space-y-3">
             {requests.map(request => (
@@ -119,6 +118,5 @@ export default function DocumentAccessRequestsModal({ identifier, onClose, onCha
           </ul>
         )}
       </div>
-    </Modal>
   );
 }

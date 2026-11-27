@@ -419,6 +419,14 @@ function GenerateModal({ categories, onClose, onDone }: { categories: Category[]
   const user = useAuthStore(s => s.user);
   const [isOffline, setIsOffline] = useState(false);
   const [leaseRevoked, setLeaseRevoked] = useState(false);
+  const isHr = categories.find(c => c.id === categoryId)?.group === "RH";
+  const [hrNames, setHrNames] = useState<string[]>([]);
+  useEffect(() => {
+    if (!isHr || hrNames.length) return;
+    api.get<{ data: Array<{ name: string; key: string }> }>("/documents/profiles")
+      .then(r => setHrNames((r.data || []).filter(p => p.name).map(p => p.name)))
+      .catch(() => {});
+  }, [isHr, hrNames.length]);
 
   useEffect(() => {
     (async () => {
@@ -514,7 +522,15 @@ function GenerateModal({ categories, onClose, onDone }: { categories: Category[]
             <p className="mt-1 text-xs text-amber-500">* Sequência provisória até sincronizar.</p>
           )}
         </div>
-        <div><label className="mb-1.5 block text-xs font-semibold text-docid-muted">Emitido para</label><input value={issuedTo} onChange={e => setIssuedTo(e.target.value)} className="docid-input w-full" placeholder="Nome do cliente/destinatário (opcional)" /></div>
+        {/* Em RH o nome do colaborador agrupa os documentos em Documentos › Perfis RH. */}
+        <div>
+          <label className="mb-1.5 block text-xs font-semibold text-docid-muted">{isHr ? "Colaborador" : "Emitido para"}</label>
+          <input value={issuedTo} onChange={e => setIssuedTo(e.target.value)} className="docid-input w-full" data-testid="generate-issued-to"
+            list={isHr ? "hr-collaborators" : undefined} autoComplete="off"
+            placeholder={isHr ? "Nome completo do colaborador" : "Nome do cliente/destinatário (opcional)"} />
+          {isHr && <datalist id="hr-collaborators">{hrNames.map(n => <option key={n} value={n} />)}</datalist>}
+          {isHr && <p className="mt-1 text-[11px] text-docid-muted">Escreva sempre o mesmo nome: é ele que junta os documentos no perfil do colaborador (Documentos › Perfis RH).</p>}
+        </div>
         <div><label className="mb-1.5 block text-xs font-semibold text-docid-muted">Descrição</label><textarea value={description} onChange={e => setDescription(e.target.value)} className="docid-input w-full" rows={2} placeholder="Descrição opcional" /></div>
         <div>
           <label className="mb-1.5 block text-xs font-semibold text-docid-muted">Visibilidade</label>

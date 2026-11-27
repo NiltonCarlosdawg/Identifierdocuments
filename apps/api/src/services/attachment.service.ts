@@ -615,10 +615,62 @@ export async function updateDocumentTags(
   return { success: true as const, tags: parseDocumentTags(serialized) };
 }
 
+export interface DocumentListFilters {
+  /** Texto livre: nome do ficheiro, identificador, categoria, etiquetas, descrição, quem carregou. */
+  q?: string;
+  categoryId?: string;
+  status?: string;
+  /** "mine" = carregados por mim; "shared" = partilhados comigo. */
+  scope?: "all" | "mine" | "shared";
+  tag?: string;
+  /** Datas AAAA-MM-DD (inclusivas). */
+  from?: string;
+  to?: string;
+  /** Grupo da categoria (ex.: "RH"). */
+  group?: string;
+  /** Colaborador/destinatário ("Emitido para"), sem distinguir acentos nem maiúsculas. NO_PERSON = sem nome. */
+  issuedTo?: string;
+}
+
+export const NO_PERSON = "__sem_colaborador__";
+
+/** Sem acentos e em minúsculas: "Facturação" encontra "facturacao". */
+export function normalizeSearch(s: string): string {
+  return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+}
+
+/** Regra pura dos filtros da lista de documentos (testável sem BD). */
+export function matchesDocumentFilters(d: {
+  filename: string | null; label: string | null; tags: string[]; identifier: string | null;
+  categoryId: string | null; categoryName: string | null; status: string; uploadedBy: string | null;
+  uploaderName: string | null; createdAt: Date; sharedWithMe: boolean;
+  issuedTo?: string | null; categoryGroup?: string | null;
+}, f: DocumentListFilters, userId: string): boolean {
+  if (f.group && d.categoryGroup !== f.group) return false;
+  if (f.issuedTo) {
+    const person = normalizeSearch(d.issuedTo ?? "");
+    if (f.issuedTo === NO_PERSON ? person !== "" : person !== normalizeSearch(f.issuedTo)) return false;
+  }
+  if (f.categoryId && d.categoryId !== f.categoryId) return false;
+  if (f.status && d.status !== f.status) return false;
+  if (f.scope === "mine" && d.uploadedBy !== userId) return false;
+  if (f.scope === "shared" && !d.sharedWithMe) return false;
+  if (f.tag && !d.tags.some((t) => normalizeSearch(t) === normalizeSearch(f.tag!))) return false;
+  const day = d.createdAt.toISOString().slice(0, 10);
+  if (f.from && day < f.from) return false;
+  if (f.to && day > f.to) return false;
+  if (f.q) {
+    const hay = normalizeSearch([d.filename, d.label, d.identifier, d.categoryName, d.uploaderName, d.issuedTo, ...d.tags].filter(Boolean).join(" "));
+    // Todas as palavras têm de aparecer (em qualquer ordem).
+    if (!normalizeSearch(f.q).split(/\s+/).filter(Boolean).every((w) => hay.includes(w))) return false;
+  }
+  return true;
+}
+
 export async function listDocumentsForApi(
   tx: DB,
   auth: AuthPayload,
-  opts: { tenantId: string; identifierId?: string; page: number; limit: number; roleNames?: string[] },
+  opts: { tenantId: string; identifierId?: string; page: number; limit: number; roleNames?: string[] } & DocumentListFilters,
 ) {
   const conditions = [eq(documents.tenantId, opts.tenantId)];
   if (opts.identifierId) conditions.push(eq(documents.identifierId, opts.identifierId));
@@ -651,9 +703,35 @@ export async function listDocumentsForApi(
   });
 
   // Default listing: one row per identifier (primary). When filtering by identifierId, return all kinds.
-  const filtered = opts.identifierId
+  const listed = opts.identifierId
     ? visibleRows
     : visibleRows.filter((d) => d.kind === "primary");
+
+  // Categorias presentes (para o filtro), calculadas antes dos filtros do utilizador.
+  const categoryCounts = new Map<string, { id: string; name: string; count: number }>();
+  for (const d of listed) {
+    const c = d.identifier?.category;
+    if (!c) continue;
+    const cur = categoryCounts.get(c.id) ?? { id: c.id, name: c.name, count: 0 };
+    cur.count++;
+    categoryCounts.set(c.id, cur);
+  }
+
+  const filtered = listed.filter((d) => matchesDocumentFilters({
+    filename: d.versions[0]?.filename ?? null,
+    label: d.label,
+    tags: parseDocumentTags(d.tags),
+    identifier: d.identifier?.identifier ?? null,
+    categoryId: d.identifier?.category?.id ?? null,
+    categoryName: d.identifier?.category?.name ?? null,
+    status: d.identifier?.status || "active",
+    uploadedBy: d.uploadedBy,
+    uploaderName: d.uploader?.fullName ?? null,
+    createdAt: d.createdAt,
+    sharedWithMe: sharedDocIds.has(d.id),
+    issuedTo: d.identifier?.issuedTo ?? null,
+    categoryGroup: d.identifier?.category?.group ?? null,
+  }, opts, auth.userId));
 
   const total = filtered.length;
   const offset = (opts.page - 1) * opts.limit;
@@ -681,10 +759,62 @@ export async function listDocumentsForApi(
         categoryName: d.identifier.category?.name,
         visibility: d.identifier.visibility,
         sectorId: d.identifier.sectorId,
+        issuedTo: d.identifier.issuedTo ?? null,
+        categoryGroup: d.identifier.category?.group ?? null,
       } : null,
       uploadedBy: d.uploader?.fullName || null,
+      uploadedById: d.uploadedBy ?? null,
+      sharedWithMe: sharedDocIds.has(d.id),
     };
   });
 
-  return { data: safe, meta: { total, page: opts.page, limit: opts.limit } };
+  return {
+    data: safe,
+    meta: {
+      total, page: opts.page, limit: opts.limit,
+      categories: [...categoryCounts.values()].sort((a, b) => a.name.localeCompare(b.name, "pt")),
+    },
+  };
+}
+
+/* ───────────── Perfis de RH: documentos agrupados por colaborador ───────────── */
+
+/** Documentos que todo o colaborador deve ter no processo (o perfil assinala os que faltam). */
+export const HR_REQUIRED = ["CTR", "ADM"] as const;
+
+export interface HrProfile {
+  /** Nome como foi escrito (a variante mais recente); vazio = documentos sem colaborador. */
+  name: string;
+  key: string;
+  total: number;
+  byCategory: Record<string, number>;
+  missing: string[];
+  terminated: boolean;
+  tags: string[];
+  lastDocumentAt: string;
+}
+
+/** Regra pura: agrupa linhas da lista (já filtradas pela visibilidade) por colaborador. */
+export function buildHrProfiles(rows: Array<{
+  createdAt: Date | string; tags: string[];
+  identifier: { categoryId?: string | null; issuedTo?: string | null } | null;
+}>): HrProfile[] {
+  const groups = new Map<string, HrProfile & { _latest: number }>();
+  for (const r of rows) {
+    const raw = (r.identifier?.issuedTo ?? "").trim().replace(/\s+/g, " ");
+    const key = normalizeSearch(raw) || NO_PERSON;
+    const at = new Date(r.createdAt).getTime();
+    const g = groups.get(key) ?? { name: raw, key, total: 0, byCategory: {}, missing: [], terminated: false, tags: [], lastDocumentAt: "", _latest: 0 };
+    g.total++;
+    const cat = r.identifier?.categoryId ?? "?";
+    g.byCategory[cat] = (g.byCategory[cat] ?? 0) + 1;
+    for (const t of r.tags) if (!g.tags.includes(t)) g.tags.push(t);
+    if (at >= g._latest) { g._latest = at; g.lastDocumentAt = new Date(at).toISOString(); if (raw) g.name = raw; }
+    groups.set(key, g);
+  }
+  return [...groups.values()].map(({ _latest, ...g }) => ({
+    ...g,
+    terminated: (g.byCategory.TER ?? 0) > 0,
+    missing: g.key === NO_PERSON ? [] : HR_REQUIRED.filter((c) => !g.byCategory[c]),
+  })).sort((a, b) => (a.key === NO_PERSON ? 1 : b.key === NO_PERSON ? -1 : a.name.localeCompare(b.name, "pt")));
 }

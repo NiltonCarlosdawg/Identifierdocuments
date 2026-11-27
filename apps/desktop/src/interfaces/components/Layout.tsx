@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Outlet, NavLink, useNavigate } from "react-router-dom";
+import { Outlet, NavLink, useNavigate, useLocation } from "react-router-dom";
 import { useAuthStore } from "../stores/authStore";
 import { useAppConfigStore } from "../stores/configStore";
 import { LayoutDashboard, FileText, Fingerprint, CheckSquare, Users, UserPlus, Cog, History, Scan, CloudOff, Search, Menu, LogOut, User, Shield, RefreshCw, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
@@ -25,6 +25,7 @@ const navItems = [
 ];
 
 export default function Layout() {
+  const fullWidth = useLocation().pathname.startsWith("/documentos");
   const user = useAuthStore(s => s.user);
   const logout = useAuthStore(s => s.logout);
   const avatar = useAppConfigStore(s => s.avatar);
@@ -120,7 +121,8 @@ export default function Layout() {
           </div>
         </header>
         <LicenseBanner />
-        <main className="flex-1 overflow-y-auto bg-docid-background"><div className="mx-auto max-w-7xl px-6 py-7"><Outlet /></div></main>
+        {/* Ecrãs de trabalho (lista + painel) usam a largura toda; os restantes ficam centrados. */}
+        <main className="flex-1 overflow-y-auto bg-docid-background"><div className={fullWidth ? "px-6 py-7" : "mx-auto max-w-7xl px-6 py-7"}><Outlet /></div></main>
       </div>
       <OfflineQueuePanel />
       <WriteQueuePanel />

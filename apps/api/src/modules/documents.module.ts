@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import {
   attachDocument, attachAttachment, createDocumentVersion,
   getDocumentMeta, downloadDocument, canAccessDocument,
-  pickPrimaryDocument, listDocumentsForApi, updateDocumentTags,
+  pickPrimaryDocument, listDocumentsForApi, updateDocumentTags, buildHrProfiles, normalizeSearch,
   isPathInsideDir,
 } from "../services/attachment.service";
 import { requireAuth, getFreshRoles } from "../middleware/auth";
@@ -108,6 +108,28 @@ export const documentsModule = new (Elysia as any)({ prefix: "/documents" })
     detail: { summary: "Adicionar anexo a um identificador", tags: ["Documentos"] },
   })
 
+  /**
+   * Perfis de RH: um por colaborador ("Emitido para"), com os documentos das categorias
+   * do grupo RH que o utilizador pode ver. ?q= filtra pelo nome do colaborador.
+   */
+  .get("/profiles", async ({ tenantId, auth, query, set }) => {
+    try {
+      return await withTenant(tenantId, async (tx) => {
+        const all = await listDocumentsForApi(tx, auth!, { tenantId, page: 1, limit: Number.MAX_SAFE_INTEGER, group: "RH" });
+        let profiles = buildHrProfiles(all.data);
+        const q = query.q ? normalizeSearch(query.q) : "";
+        if (q) profiles = profiles.filter((p) => normalizeSearch(p.name).includes(q));
+        return { data: profiles, meta: { total: profiles.length, documents: all.meta.total } };
+      });
+    } catch (err: any) {
+      set.status = 500;
+      return { error: { code: "PROFILES_ERROR", message: safeError(err) } };
+    }
+  }, {
+    query: t.Object({ q: t.Optional(t.String({ maxLength: 200 })) }),
+    detail: { summary: "Perfis de RH (documentos agrupados por colaborador)", tags: ["Documentos"] },
+  })
+
   .get("/", async ({ tenantId, auth, query, set }) => {
     try {
       return await withTenant(tenantId, async (tx) => {
@@ -117,11 +139,21 @@ export const documentsModule = new (Elysia as any)({ prefix: "/documents" })
           const parsedPage = parseInt(query.page || "1", 10);
           const page = Math.max(1, Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : 1);
 
+          const date = (v?: string) => (v && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : undefined);
           return await listDocumentsForApi(tx, auth!, {
             tenantId,
             identifierId: query.identifierId,
             page,
             limit,
+            q: query.q?.slice(0, 200) || undefined,
+            categoryId: query.categoryId || undefined,
+            status: query.status || undefined,
+            scope: query.scope === "mine" || query.scope === "shared" ? query.scope : undefined,
+            tag: query.tag || undefined,
+            from: date(query.from),
+            to: date(query.to),
+            group: query.group || undefined,
+            issuedTo: query.issuedTo?.slice(0, 200) || undefined,
           });
         } catch (err: any) {
           console.error("[LIST_ERROR]", err);
@@ -137,6 +169,15 @@ export const documentsModule = new (Elysia as any)({ prefix: "/documents" })
       limit: t.Optional(t.String()),
       page: t.Optional(t.String()),
       identifierId: t.Optional(t.String()),
+      q: t.Optional(t.String()),
+      categoryId: t.Optional(t.String()),
+      status: t.Optional(t.String()),
+      scope: t.Optional(t.String()),
+      tag: t.Optional(t.String()),
+      from: t.Optional(t.String()),
+      to: t.Optional(t.String()),
+      group: t.Optional(t.String()),
+      issuedTo: t.Optional(t.String()),
     }),
     detail: { summary: "Listar documentos", tags: ["Documentos"] },
   })

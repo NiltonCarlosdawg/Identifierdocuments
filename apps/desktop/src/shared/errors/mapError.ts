@@ -79,6 +79,11 @@ export function friendlyMime(mime: string | null | undefined): string {
   if (/pdf/i.test(mime)) return "PDF";
   if (/png/i.test(mime)) return "PNG";
   if (/jpe?g/i.test(mime)) return "JPG";
+  if (/wordprocessingml|msword/i.test(mime)) return "Word";
+  if (/spreadsheetml|ms-excel/i.test(mime)) return "Excel";
+  if (/csv/i.test(mime)) return "CSV";
+  if (/^image\//i.test(mime)) return "Imagem";
+  if (/^text\//i.test(mime)) return "Texto";
   return "Ficheiro";
 }
 
