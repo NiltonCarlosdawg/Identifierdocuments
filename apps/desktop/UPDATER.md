@@ -46,9 +46,11 @@ Publique `latest.json` (e os artefactos `.sig`) no GitHub Release, no formato do
 1. `bash scripts/bump-desktop-version.sh X.Y.Z` (muda `package.json`, `tauri.conf.json`,
    `Cargo.toml` e `Cargo.lock` de uma vez) e faça merge para `main`.
 2. O workflow **Build & Release** faz o resto sozinho:
-   - cria o release `desktop-vX.Y.Z` como pré-release e gera os instaladores (Windows,
-     Linux; o macOS ainda falha e não é publicado);
-   - envia o `.exe` e o `.deb` para `docid.milvendas.ao/downloads` e regenera o `SHA256SUMS`;
+   - cria o release `desktop-vX.Y.Z` como pré-release e gera os instaladores: Windows leve
+     (`DocID_X.Y.Z_x64-setup.exe`, ~9 MB, descarrega o WebView2 só se faltar; é o que o
+     auto-update usa), Windows completo (`…_x64-setup-offline.exe`, ~300 MB, com o WebView2
+     para instalar sem internet), Linux e macOS (`.dmg` não assinado, não publicado no site);
+   - envia os dois `.exe` e o `.deb` para `docid.milvendas.ao/downloads` e regenera o `SHA256SUMS`;
    - actualiza `apps/landing/src/components/ui/download-section.tsx` com um commit em `main`
      e publica a landing;
    - confere o instalador publicado (`scripts/verify-installer.sh`);

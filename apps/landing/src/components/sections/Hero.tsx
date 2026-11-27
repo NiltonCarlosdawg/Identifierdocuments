@@ -108,7 +108,10 @@ export function Hero() {
           </motion.div>
 
           <motion.p {...fade(0.3)} className="mt-5 font-mono text-[11px] uppercase tracking-[0.14em] text-docid-muted">
-            Instalador para Windows · 300 MB
+            Windows 10 e 11 · {DOWNLOADS.installer.size} · também para{" "}
+            <a href="#descarregar" className="underline underline-offset-4 hover:text-docid-text">
+              Linux
+            </a>
           </motion.p>
         </div>
 

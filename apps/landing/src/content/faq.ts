@@ -20,7 +20,7 @@ export const FAQ: FaqItem[] = [
   },
   {
     q: "Funciona em Mac ou Linux?",
-    a: "Sim, em Linux: há um pacote .deb para Ubuntu 22.04 e compatíveis (64 bits). Windows 10 e 11, 64 bits, tem instalador completo. A versão para macOS está em preparação e será publicada na mesma página.",
+    a: "Sim, em Linux: há um pacote .deb para Ubuntu 22.04 e compatíveis (64 bits). No Windows 10 e 11, 64 bits, há o instalador normal e um instalador completo para instalar sem internet. A versão para macOS está em preparação e será publicada na mesma página.",
   },
   {
     q: "Como actualizo a aplicação?",

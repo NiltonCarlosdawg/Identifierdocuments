@@ -2,12 +2,13 @@
 """Aponta a landing para os instaladores de uma versão.
 
 - apps/landing/src/components/ui/download-section.tsx: link, tamanho e SHA-256 do
-  instalador Windows e do pacote Linux, e o nome do .deb no texto de ajuda. O
+  instalador Windows (leve), do instalador completo (com o WebView2) e do pacote Linux,
+  e o nome do .deb no texto de ajuda. O
   scripts/verify-installer.sh lê este ficheiro para conferir o que está publicado.
 - apps/landing/index.html: versão e link nos dados estruturados (motores de busca) e no
   link de download para quem não tem JavaScript.
 
-  update-download-section.py <versão> <exe> <deb>   (os ficheiros já descarregados)
+  update-download-section.py <versão> <exe> <deb> <exe-offline>   (ficheiros já descarregados)
 """
 import hashlib
 import os
@@ -42,17 +43,18 @@ def replace_block(text: str, key: str, href: str, size: str, digest: str) -> str
 
 
 def main() -> None:
-    if len(sys.argv) != 4:
+    if len(sys.argv) != 5:
         sys.exit(__doc__)
-    version, exe, deb = sys.argv[1:]
+    version, exe, deb, offline = sys.argv[1:]
     if not re.fullmatch(r"\d+\.\d+\.\d+", version):
         sys.exit(f"versão inválida: {version}")
-    exe_name, deb_name = os.path.basename(exe), os.path.basename(deb)
-    if version not in exe_name or version not in deb_name:
-        sys.exit(f"os ficheiros não são da versão {version}: {exe_name}, {deb_name}")
+    exe_name, deb_name, off_name = os.path.basename(exe), os.path.basename(deb), os.path.basename(offline)
+    if any(version not in n for n in (exe_name, deb_name, off_name)):
+        sys.exit(f"os ficheiros não são da versão {version}: {exe_name}, {deb_name}, {off_name}")
 
     text = open(SOURCE, encoding="utf-8").read()
     text = replace_block(text, "installer", f"/downloads/{exe_name}", size_label(exe), sha256(exe))
+    text = replace_block(text, "installerOffline", f"/downloads/{off_name}", size_label(offline), sha256(offline))
     text = replace_block(text, "linux", f"/downloads/{deb_name}", size_label(deb), sha256(deb))
     text, n = re.subn(r"sudo apt install \./DocID_[0-9.]+_amd64\.deb", f"sudo apt install ./{deb_name}", text)
     if n != 1:
