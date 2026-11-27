@@ -652,3 +652,36 @@ export async function onLicenseAlert(tx: DB, e: {
     build: { ...build, at: e.now.toISOString() },
   });
 }
+
+/**
+ * Licença suspensa pela provedora (painel ou plataforma): avisa logo todos os
+ * administradores (obrigatório). Chamar só na passagem para "suspensa", não em cada gravação.
+ */
+export async function onLicenseSuspended(tx: DB, e: { tenantId: string; at?: Date }): Promise<number> {
+  const org = await tx.query.organizations.findFirst({
+    where: eq(organizations.id, e.tenantId),
+    columns: { name: true, licenseNumber: true },
+  });
+  if (!org) return 0;
+  const at = e.at ?? new Date();
+  const contacto = process.env.LICENSE_SUPPORT_CONTACT || "o suporte DocID";
+  return enqueueAttention(tx, {
+    tenantId: e.tenantId,
+    event: "license_alert",
+    recipientIds: await adminIds(tx, e.tenantId),
+    dedupe: `license-suspended:${at.getTime()}`,
+    build: {
+      subject: "A licença do DocID foi suspensa",
+      title: "Licença suspensa",
+      badge: "Licença",
+      tone: "danger",
+      intro: [
+        `A licença de ${org.name} foi suspensa pela DocID e a organização passou a só consulta.`,
+        "Continua a entrar, ver e descarregar documentos, mas não pode criar documentos nem identificadores.",
+      ],
+      rows: [["Organização", org.name], ...(org.licenseNumber ? [["Licença", org.licenseNumber] as [string, string]] : [])],
+      at: at.toISOString(),
+      action: `Para saber o motivo e reactivar a licença, contacte ${contacto}.`,
+    },
+  });
+}

@@ -25,7 +25,8 @@ Usam um template genérico (`renderAttention`): título, etiqueta colorida, resu
 | **Novo computador** (`device_registered`) | `POST /devices` | Os administradores (`ORG_ADMIN`), excepto quem registou |
 | **Identificador anulado** (`identifier_cancelled`) | `PATCH /identifiers/:identifier/cancel` | Os administradores, excepto quem anulou. Inclui o motivo. |
 
-| **Licença** (`license_alert`, migração `0032`) | Verificação diária (BullMQ, 08:00 UTC, `jobs/license-alerts.ts`): faltam ≤14, ≤7, ≤3 e ≤1 dias; licença terminou (tolerância); último dia da tolerância; organização em só consulta (até 30 dias depois) | Todos os administradores. **Obrigatório.** Uma vez por momento e por prazo de licença (dedupe `license:<data de fim>:<momento>`; uma renovação recomeça a contagem). Licenças suspensas pela provedora não geram aviso. |
+| **Licença** (`license_alert`, migração `0032`) | Verificação diária (BullMQ, 08:00 UTC, `jobs/license-alerts.ts`): faltam ≤14, ≤7, ≤3 e ≤1 dias; licença terminou (tolerância); último dia da tolerância; organização em só consulta (até 30 dias depois) | Todos os administradores. **Obrigatório.** Uma vez por momento e por prazo de licença (dedupe `license:<data de fim>:<momento>`; uma renovação recomeça a contagem). A verificação diária ignora licenças suspensas: a suspensão tem um aviso próprio. |
+| **Licença suspensa** (`license_alert`) | No momento da suspensão: painel da provedora ("Suspender" organização ou estado da licença) ou `PATCH /platform/licenses/:n` com `status: "suspended"`. Só na passagem para suspensa; voltar a gravar "suspended" não repete o aviso | Todos os administradores. **Obrigatório.** Indica o contacto `LICENSE_SUPPORT_CONTACT` para saber o motivo e reactivar. |
 
 O Redis de produção corre num socket privado (`apps/api/scripts/redis.sh`), mantido pelo `run.sh`.
 

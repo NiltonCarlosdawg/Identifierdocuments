@@ -12,6 +12,7 @@ import { getClientIp } from "../lib/ip";
 import { approveOrder, OrderError, rejectOrder, orderDisplayName } from "../services/order.service";
 import { getSubscriptionContext } from "../services/subscription.service";
 import { getLicenseContext } from "../services/license.service";
+import { onLicenseSuspended } from "../services/email/tenant-email.service";
 
 /** Estado manual do tenant (audit incluída) — espelha o padrão de approveOrder. */
 async function changeTenantStatus(
@@ -22,9 +23,14 @@ async function changeTenantStatus(
   ip?: string | null,
 ) {
   await withTenant(tenantId, async (tx) => {
+    const [before] = await tx.select({ status: organizations.subscriptionStatus }).from(organizations)
+      .where(eq(organizations.id, tenantId)).limit(1);
     await tx.update(organizations)
       .set({ subscriptionStatus: status })
       .where(eq(organizations.id, tenantId));
+    if (status === "suspended" && before?.status !== "suspended") {
+      await onLicenseSuspended(tx, { tenantId });
+    }
     await tx.update(licenses)
       .set({
         status: status === "suspended" ? "suspended" : "active",
@@ -222,11 +228,11 @@ export const providerModule = new (Elysia as any)({ prefix: "/provider" })
 
   .patch("/licenses/:number", async (ctx: any) => {
     const orgs = await db.select({ id: organizations.id }).from(organizations);
-    let found: { tenantId: string; licenseId: string } | null = null;
+    let found: { tenantId: string; licenseId: string; status: string | null } | null = null;
     for (const org of orgs) {
       const lic = await getLicenseContext(org.id);
       if (lic.license?.licenseNumber === ctx.params.number) {
-        found = { tenantId: org.id, licenseId: lic.license.id };
+        found = { tenantId: org.id, licenseId: lic.license.id, status: lic.license.status ?? null };
         break;
       }
     }
@@ -245,6 +251,9 @@ export const providerModule = new (Elysia as any)({ prefix: "/provider" })
         patch.validUntil = new Date(current.getTime() + ctx.body.extendDays * 86_400_000);
       }
       await tx.update(licenses).set(patch).where(eq(licenses.id, found!.licenseId));
+      if (ctx.body.status === "suspended" && found!.status !== "suspended") {
+        await onLicenseSuspended(tx, { tenantId: found!.tenantId });
+      }
       await tx.insert(auditLogs).values({
         tenantId: found!.tenantId,
         userId: null,

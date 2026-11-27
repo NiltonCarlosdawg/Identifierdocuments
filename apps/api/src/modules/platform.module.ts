@@ -6,6 +6,7 @@ import { db } from "../db";
 import { withTenant } from "../db/withTenant";
 import { auditLogs, organizations, plans } from "../db/schema";
 import { issueLicense } from "../services/license.service";
+import { onLicenseSuspended } from "../services/email/tenant-email.service";
 import { checkRateLimit } from "../middleware/rateLimit";
 import { getClientIp } from "../lib/ip";
 import { normalizeLicenseNumber } from "../lib/license-check";
@@ -164,6 +165,10 @@ export const platformModule = new (Elysia as any)({ prefix: "/platform" })
           ...(validUntil !== undefined ? { validUntil } : {}),
           ...(body.extendDays !== undefined ? { validUntil: updates.licenseValidUntil ?? null } : {}),
         });
+        // Só na passagem para suspensa (gravar outra vez "suspended" não repete o aviso).
+        if (body.status === "suspended" && current.licenseStatus !== "suspended") {
+          await onLicenseSuspended(tx, { tenantId: orgId });
+        }
         await tx.insert(auditLogs).values({
           tenantId: orgId, userId: null, action: "LICENSE_UPDATED", resource: "organizations", resourceId: orgId,
           ip: getClientIp(request),
