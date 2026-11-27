@@ -6,7 +6,7 @@ import { eq, and, isNull } from "drizzle-orm";
 import { withTenant } from "../db/withTenant";
 import { requireAuth, getFreshRoles } from "../middleware/auth";
 import { notify } from "../services/notification.service";
-import { onDocumentApproved, onDocumentShared } from "../services/email/tenant-email.service";
+import { onDocumentApproved, onDocumentRejected, onDocumentShared } from "../services/email/tenant-email.service";
 import { safeError } from "../lib/errors";
 import { withIdempotency } from "../lib/idempotency";
 import { approvalAuditEntry, canResolveApproval, canSeeApproval, shouldCreateShare, syncCounterpart } from "../services/access-decision.service";
@@ -159,11 +159,27 @@ export const approvalsModule = new (Elysia as any)({ prefix: "/approvals" })
           }
 
           if (body.status === "rejected") {
+            let rejectedShareBy: string | null = null;
             if (existing.type === "cross_sector" && existing.shareId) {
-              await tx.update(documentShares)
+              const [revoked] = await tx.update(documentShares)
                 .set({ revokedAt: now })
-                .where(eq(documentShares.id, existing.shareId));
+                .where(eq(documentShares.id, existing.shareId))
+                .returning({ sharedBy: documentShares.sharedBy });
+              rejectedShareBy = revoked?.sharedBy ?? null;
             }
+            // E-mail: a partilha recusada vai para quem partilhou; o acesso recusado, para quem pediu.
+            await onDocumentRejected(tx, {
+              tenantId,
+              kind: existing.type === "access_request" ? "access" : "share",
+              documentId: approval.documentId,
+              approvalId: approval.id,
+              rejecterId: auth!.userId,
+              recipientIds: existing.type === "access_request"
+                ? [existing.requesterId]
+                : [rejectedShareBy ?? doc?.uploadedBy],
+              notes: body.notes ?? null,
+              at: now,
+            });
             if (existing.requesterId) {
               await notify(tx, {
                 type: "access:rejected",

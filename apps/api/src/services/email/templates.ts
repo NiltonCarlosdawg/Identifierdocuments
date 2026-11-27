@@ -37,6 +37,35 @@ export interface TestEmailData {
   sender: string;
 }
 
+/**
+ * Aviso genérico de "acção que pede atenção" (pedido de aprovação, recusa, password
+ * alterada, novo dispositivo...). Os handlers em tenant-email.service.ts montam estes
+ * dados; aqui só há texto simples, por isso tudo passa por esc().
+ */
+export interface AttentionData {
+  tenantName: string;
+  recipientName: string;
+  /** Título no corpo do e-mail. */
+  title: string;
+  subject: string;
+  /** Etiqueta curta acima do título (ex.: "Aprovação pendente"). */
+  badge?: string | null;
+  tone?: "info" | "warning" | "danger" | "success";
+  /** Parágrafos de introdução (texto simples). */
+  intro: string[];
+  rows?: Array<[string, string]>;
+  /** Citação destacada, ex.: o motivo de uma recusa. */
+  note?: { label: string; text: string } | null;
+  /** O que o destinatário deve fazer a seguir. */
+  action?: string | null;
+  /** Data do evento (ISO 8601), mostrada como "Data e hora". */
+  at?: string | null;
+  /** Para documentos: o worker gera um link de download assinado no envio. */
+  withLink?: boolean;
+  link?: string | null;
+  linkLabel?: string | null;
+}
+
 export interface RenderedEmail {
   subject: string;
   html: string;
@@ -89,6 +118,13 @@ const COLORS = {
   successBg: "#ecfdf5",
 };
 
+const TONES: Record<NonNullable<AttentionData["tone"]>, { fg: string; bg: string }> = {
+  info: { fg: "#1d4ed8", bg: "#eff6ff" },
+  warning: { fg: "#b45309", bg: "#fffbeb" },
+  danger: { fg: "#b91c1c", bg: "#fef2f2" },
+  success: { fg: COLORS.success, bg: COLORS.successBg },
+};
+
 function row(label: string, value: string): string {
   return `<tr>
     <td style="padding:8px 0;color:${COLORS.muted};font-size:14px;width:38%;vertical-align:top;">${esc(label)}</td>
@@ -105,9 +141,10 @@ function button(url: string, label: string): string {
   </table>`;
 }
 
-function layout(opts: { preheader: string; tenantName: string; badge?: string; title: string; body: string }): string {
+function layout(opts: { preheader: string; tenantName: string; badge?: string; tone?: { fg: string; bg: string }; title: string; body: string }): string {
+  const tone = opts.tone ?? { fg: COLORS.success, bg: COLORS.successBg };
   const badge = opts.badge
-    ? `<div style="display:inline-block;padding:4px 10px;border-radius:999px;background:${COLORS.successBg};color:${COLORS.success};font-size:12px;font-weight:700;letter-spacing:.3px;text-transform:uppercase;margin-bottom:12px;">${esc(opts.badge)}</div>`
+    ? `<div style="display:inline-block;padding:4px 10px;border-radius:999px;background:${tone.bg};color:${tone.fg};font-size:12px;font-weight:700;letter-spacing:.3px;text-transform:uppercase;margin-bottom:12px;">${esc(opts.badge)}</div>`
     : "";
   return `<!doctype html>
 <html lang="pt">
@@ -232,11 +269,62 @@ export function renderTestEmail(d: TestEmailData): RenderedEmail {
   };
 }
 
+export function renderAttention(d: AttentionData): RenderedEmail {
+  const link = safeUrl(d.link);
+  const tone = TONES[d.tone ?? "info"] ?? TONES.info;
+  const rows = [...(d.rows ?? [])];
+  if (d.at) rows.push(["Data e hora", formatDateTime(d.at)]);
+  const p = (t: string) => `<p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:${COLORS.text};">${esc(t)}</p>`;
+  const table = rows.length
+    ? `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-top:1px solid ${COLORS.border};border-bottom:1px solid ${COLORS.border};margin:8px 0;">
+      ${rows.map(([k, v]) => row(k, esc(v))).join("")}
+    </table>`
+    : "";
+  const note = d.note?.text?.trim()
+    ? `<div style="margin-top:16px;padding:12px 14px;border-left:3px solid ${tone.fg};color:${COLORS.text};font-size:14px;line-height:1.5;">
+         <div style="color:${COLORS.muted};font-size:12px;margin-bottom:4px;">${esc(d.note.label)}</div>${esc(d.note.text.trim())}
+       </div>`
+    : "";
+  const action = d.action ? `<p style="margin:16px 0 0;font-size:14px;line-height:1.6;color:${COLORS.text};">${esc(d.action)}</p>` : "";
+  const body = `
+    ${p(`Olá ${d.recipientName},`)}
+    ${d.intro.map(p).join("")}
+    ${table}
+    ${note}
+    ${action}
+    ${link ? button(link, d.linkLabel || "Abrir documento") : ""}
+    ${link ? `<p style="margin:8px 0 0;font-size:12px;color:${COLORS.muted};">O link é pessoal, expira e só funciona enquanto tiver acesso ao documento.</p>` : ""}`;
+  const text = [
+    `Olá ${d.recipientName},`,
+    ``,
+    ...d.intro.flatMap((t) => [t, ``]),
+    ...rows.map(([k, v]) => `${k}: ${v}`),
+    d.note?.text?.trim() ? `\n${d.note.label}: ${d.note.text.trim()}` : null,
+    d.action ? `\n${d.action}` : null,
+    link ? `\n${d.linkLabel || "Abrir documento"}: ${link}` : null,
+    ``,
+    `— ${d.tenantName} (DocID)`,
+  ].filter((l) => l !== null).join("\n");
+  return {
+    subject: cleanSubject(d.subject),
+    text,
+    html: layout({ preheader: d.intro[0] ?? d.title, tenantName: d.tenantName, badge: d.badge ?? undefined, tone, title: d.title, body }),
+  };
+}
+
 export function renderEmail(eventType: string, data: Record<string, unknown>): RenderedEmail {
   switch (eventType) {
     case "document_approved": return renderDocumentApproved(data as unknown as DocumentApprovedData);
     case "document_shared": return renderDocumentShared(data as unknown as DocumentSharedData);
     case "test": return renderTestEmail(data as unknown as TestEmailData);
+    case "approval_requested":
+    case "access_requested":
+    case "document_rejected":
+    case "password_changed":
+    case "role_granted":
+    case "device_registered":
+    case "identifier_cancelled":
+      return renderAttention(data as unknown as AttentionData);
     default: throw new Error(`Template desconhecido: ${eventType}`);
   }
 }

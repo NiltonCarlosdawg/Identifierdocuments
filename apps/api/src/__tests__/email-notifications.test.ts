@@ -152,3 +152,45 @@ describe("preferências do utilizador", () => {
     expect(svc.wantsEmail({ email_document_shared: false }, "document_approved")).toBe(true);
   });
 });
+
+describe("avisos de acções que pedem atenção", () => {
+  const base = {
+    tenantName: "Org <b>X</b>", recipientName: "Ana", title: "Um documento aguarda a sua aprovação",
+    subject: "Aprovação pendente:\r\nBcc: x@y.z", badge: "Aprovação pendente", tone: "warning" as const,
+    intro: ["<script>alert(1)</script> quer enviar um documento."],
+    rows: [["Documento", "<img src=x onerror=1>"]] as Array<[string, string]>,
+    note: { label: "Motivo", text: "<i>fora do prazo</i>" },
+    action: "Abra a aplicação DocID.", at: "2026-11-27T10:05:00Z",
+  };
+
+  it("todos os novos tipos usam o template genérico", () => {
+    for (const ev of ["approval_requested", "access_requested", "document_rejected", "password_changed",
+      "role_granted", "device_registered", "identifier_cancelled"]) {
+      const r = tpl.renderEmail(ev, base as unknown as Record<string, unknown>);
+      expect(r.html).toContain("Um documento aguarda a sua aprovação");
+    }
+  });
+
+  it("escapa todas as variáveis e limpa o assunto", () => {
+    const r = tpl.renderAttention(base);
+    expect(r.html).not.toContain("<script>");
+    expect(r.html).not.toContain("<img src=x");
+    expect(r.html).not.toContain("<i>fora");
+    expect(r.html).toContain("&lt;script&gt;");
+    expect(r.subject).not.toMatch(/[\r\n]/);
+    expect(r.text).toContain("Motivo: <i>fora do prazo</i>"); // texto simples não é HTML
+    expect(r.text).toContain("Data e hora: 27/11/2026 às 11h05");
+  });
+
+  it("só mostra o botão com um link http(s)", () => {
+    expect(tpl.renderAttention({ ...base, link: "javascript:alert(1)" }).html).not.toContain("javascript:");
+    expect(tpl.renderAttention({ ...base, link: "https://api.exemplo.ao/x" }).html).toContain("https://api.exemplo.ao/x");
+  });
+
+  it("o aviso de password alterada sai mesmo com os e-mails desligados", () => {
+    expect(svc.wantsEmail({ email: false }, "password_changed")).toBe(true);
+    expect(svc.wantsEmail({ email: false }, "device_registered")).toBe(false);
+    expect(svc.wantsEmail({ email_approval_requested: false }, "approval_requested")).toBe(false);
+    expect(svc.wantsEmail({ email_approval_requested: false }, "access_requested")).toBe(true);
+  });
+});

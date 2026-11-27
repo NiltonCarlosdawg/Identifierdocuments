@@ -11,7 +11,25 @@ Data: 23/11/2026, revisto a 27/11/2026. Âmbito: API (`apps/api`) e desktop (Con
 
 Uma partilha em `pending_approval` **não** envia e-mail: o destinatário só recebe o link quando já tem acesso.
 
-O utilizador pode desligar e-mails em `notification_preferences` com `email: false` (tudo) ou `email_document_shared: false` / `email_document_approved: false`.
+### Acções que pedem atenção (desde 27/11/2026, migração `0031_attention_emails.sql`)
+
+Usam um template genérico (`renderAttention`): título, etiqueta colorida, resumo em tabela, motivo destacado e o que fazer a seguir. Os handlers ficam em `tenant-email.service.ts` e correm dentro da transacção da acção, como os anteriores.
+
+| Evento | Quando dispara | Quem recebe |
+|---|---|---|
+| **Aprovação pendente** (`approval_requested`) | Partilha entre sectores fica em `pending_approval` | O supervisor do sector destino |
+| **Pedido de acesso** (`access_requested`) | `POST /documents/:param/access-requests` | O supervisor do sector do documento |
+| **Pedido recusado** (`document_rejected`) | `PATCH /approvals/:id` com `rejected`, ou recusa de um pedido de acesso | Partilha: quem partilhou. Acesso: quem pediu. Nunca quem recusou. Inclui o motivo. |
+| **Password alterada** (`password_changed`) | `PATCH /auth/me/password` e `POST /auth/reset-password` | O próprio utilizador. **Obrigatório**: sai mesmo com os e-mails desligados. |
+| **Nova função** (`role_granted`) | `POST /users/:id/roles` | O utilizador que recebeu a função (não quando se atribui a si próprio) |
+| **Novo computador** (`device_registered`) | `POST /devices` | Os administradores (`ORG_ADMIN`), excepto quem registou |
+| **Identificador anulado** (`identifier_cancelled`) | `PATCH /identifiers/:identifier/cancel` | Os administradores, excepto quem anulou. Inclui o motivo. |
+
+Ainda por fazer: avisos de licença ou subscrição a terminar para os administradores. Dependem da verificação diária, que hoje corre no Redis (BullMQ) e não corre em produção.
+
+### Preferências
+
+O utilizador escolhe em Configurações › Notificações › "Avisos por e-mail" (separador visível a todos os utilizadores, não só aos administradores). Na API ficam em `notification_preferences`: `email: false` desliga tudo, e `email_<evento>: false` desliga um tipo (ex.: `email_approval_requested`). `password_changed` ignora as preferências. As chaves aceites estão em `NOTIFICATION_PREFERENCE_KEYS` (`auth.module.ts`); chaves desconhecidas são descartadas.
 
 ## 2. Arquitectura: fila transaccional em PostgreSQL (outbox)
 
@@ -105,13 +123,15 @@ Perder a `EMAIL_SECRETS_KEY` não afecta mais nada, mas cada tenant tem de volta
 
 - `src/db/migrations/0025_email_notifications.sql`, tabelas em `src/db/schema.ts` (o ficheiro `0022_email_notifications.sql` é uma cópia de referência fora do journal)
 - `src/lib/secret-box.ts` (encriptação), `src/lib/signed-link.ts` (links), `src/lib/smtp-guard.ts` (SSRF)
-- `src/services/email/templates.ts` (2 templates + teste), `transport.ts` (SMTP/Resend/SendGrid), `tenant-email.service.ts` (config, fallback, fila, handlers)
+- `src/services/email/templates.ts` (2 templates de documento, o aviso genérico `renderAttention` e o teste), `transport.ts` (SMTP/Resend/SendGrid), `tenant-email.service.ts` (config, fallback, fila, handlers)
 - `src/jobs/email-worker.ts` (worker), `src/modules/email.module.ts` (endpoints)
-- Gatilhos: `src/modules/approvals.module.ts`, `src/modules/documents.module.ts`
+- Gatilhos: `src/modules/approvals.module.ts`, `src/modules/documents.module.ts`, `src/modules/users.module.ts`, `src/modules/devices.module.ts`, `src/modules/identifiers.module.ts`, `src/services/auth.service.ts`
 
 ## 10. Testes
 
-- `src/__tests__/email-notifications.test.ts`: 17 testes unitários (encriptação/AAD, links, SSRF, escape nos templates, política de tentativas, preferências). Incluído no CI.
+- `src/__tests__/email-notifications.test.ts`: 21 testes unitários (encriptação/AAD, links, SSRF, escape nos templates, aviso genérico, política de tentativas, preferências). Incluído no CI.
+- `src/__tests__/attention-emails.integration.test.ts`: com PostgreSQL real, destinatários de cada aviso (administradores, excepto o autor), preferências, aviso de password obrigatório e dedupe.
+- `src/__tests__/phase3-4.integration.test.ts`: os fluxos de partilha, pedido de acesso e recusa correm com os novos avisos na mesma transacção.
 - Teste ponta-a-ponta feito em 23/11/2026 com PostgreSQL 17 real, papel sem BYPASSRLS, e dois servidores SMTP de teste: **25/25 verificações**. Cobre a configuração e a encriptação na BD, o e-mail de teste pelo SMTP do tenant (com as credenciais dele), a partilha com e-mail e um link que descarrega, o link adulterado recusado, a partilha pendente sem e-mail, a aprovação com aprovador, data/hora e observações, os membros do sector a receber depois da aprovação, a ausência de duplicados, o 451 a voltar à fila, o 550 a ficar `failed`, o fallback da plataforma para o tenant sem configuração, e o isolamento entre tenants (histórico, configuração, reenvio e RLS directo na BD).
 
 ## 11. Próximos passos

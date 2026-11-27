@@ -1,13 +1,13 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or } from "drizzle-orm";
 import type { DB } from "../../db";
 import {
-  documents, documentVersions, emailLogs, organizations, sectors, tenantEmailSettings, users,
+  documents, documentVersions, emailLogs, organizations, roles, sectors, tenantEmailSettings, userRoles, users,
   type EmailEventType,
 } from "../../db/schema";
 import { decryptSecret } from "../../lib/secret-box";
 import { resolveSafeSmtpHost } from "../../lib/smtp-guard";
 import { isValidEmail, type ResolvedSender } from "./transport";
-import type { DocumentApprovedData, DocumentSharedData } from "./templates";
+import type { AttentionData, DocumentApprovedData, DocumentSharedData } from "./templates";
 
 /* ───────────────────────── Configuração do remetente ───────────────────────── */
 
@@ -144,7 +144,11 @@ function scheduleKick() {
 type Prefs = Record<string, unknown> | null | undefined;
 
 /** O utilizador pode desligar e-mails em notification_preferences: `email: false` ou `email_<evento>: false`. */
+/** Avisos de segurança: saem sempre, mesmo com os e-mails desligados nas preferências. */
+export const MANDATORY_EMAIL_EVENTS: ReadonlySet<EmailEventType> = new Set(["password_changed"]);
+
 export function wantsEmail(prefs: Prefs, event: EmailEventType): boolean {
+  if (MANDATORY_EMAIL_EVENTS.has(event)) return true;
   if (!prefs || typeof prefs !== "object") return true;
   if (prefs.email === false) return false;
   return prefs[`email_${event}`] !== false;
@@ -298,4 +302,268 @@ export async function onDocumentShared(tx: DB, e: {
     });
   }
   return recipients.length;
+}
+
+/* ───────────────────── Acções que pedem atenção (aviso genérico) ───────────────────── */
+
+const ROLE_LABELS: Record<string, string> = {
+  ORG_ADMIN: "Administrador",
+  MEMBER: "Membro",
+  SECTOR_SUPERVISOR: "Supervisor de sector",
+};
+
+async function tenantName(tx: DB, tenantId: string): Promise<string> {
+  const org = await tx.query.organizations.findFirst({ where: eq(organizations.id, tenantId), columns: { name: true } });
+  return org?.name ?? "DocID";
+}
+
+/** Administradores activos da organização (excepto quem fez a acção). */
+async function adminIds(tx: DB, tenantId: string, exceptUserId?: string | null): Promise<string[]> {
+  const rows = await tx.select({ id: users.id }).from(users)
+    .innerJoin(userRoles, eq(userRoles.userId, users.id))
+    .innerJoin(roles, eq(roles.id, userRoles.roleId))
+    .where(and(
+      eq(users.tenantId, tenantId),
+      eq(roles.name, "ORG_ADMIN"),
+      or(isNull(roles.tenantId), eq(roles.tenantId, tenantId)),
+    ));
+  return [...new Set(rows.map((r) => r.id))].filter((id) => id !== exceptUserId);
+}
+
+type AttentionBase = Omit<AttentionData, "tenantName" | "recipientName">;
+
+/** Põe na fila um aviso genérico para cada destinatário que o quer receber. */
+async function enqueueAttention(tx: DB, e: {
+  tenantId: string;
+  event: EmailEventType;
+  recipientIds: Array<string | null | undefined>;
+  documentId?: string | null;
+  dedupe: string;
+  build: AttentionBase;
+}): Promise<number> {
+  if (!emailNotificationsEnabled()) return 0;
+  const recipients = await loadRecipients(tx, e.tenantId, e.recipientIds.filter((id): id is string => !!id), e.event);
+  if (recipients.length === 0) return 0;
+  const org = await tenantName(tx, e.tenantId);
+  for (const r of recipients) {
+    const data: AttentionData = { ...e.build, tenantName: org, recipientName: r.fullName };
+    await enqueueEmail(tx, {
+      tenantId: e.tenantId,
+      eventType: e.event,
+      recipientEmail: r.email,
+      recipientUserId: r.id,
+      documentId: e.documentId ?? null,
+      subject: e.build.subject,
+      templateData: data as unknown as Record<string, unknown>,
+      dedupeKey: `${e.dedupe}:${r.id}`,
+    });
+  }
+  return recipients.length;
+}
+
+/**
+ * Pedido de aprovação: partilha entre sectores (`share`) ou pedido de acesso (`access`).
+ * Destinatário: o supervisor que tem de decidir. Sem link: ainda não há decisão a ver.
+ */
+export async function onApprovalRequested(tx: DB, e: {
+  tenantId: string;
+  kind: "share" | "access";
+  documentId: string;
+  approvalId: string;
+  supervisorId: string;
+  requesterId: string;
+  /** Destino da partilha: nome do sector, ou o utilizador destino. */
+  targetName?: string | null;
+  targetUserId?: string | null;
+  at?: Date;
+}): Promise<number> {
+  if (!emailNotificationsEnabled() || e.supervisorId === e.requesterId) return 0;
+  const info = await loadDocumentInfo(tx, e.tenantId, e.documentId);
+  if (!info) return 0;
+  const who = await userName(tx, e.requesterId);
+  const target = e.targetName ?? (e.targetUserId ? await userName(tx, e.targetUserId) : null);
+  const share = e.kind === "share";
+  return enqueueAttention(tx, {
+    tenantId: e.tenantId,
+    event: share ? "approval_requested" : "access_requested",
+    recipientIds: [e.supervisorId],
+    documentId: e.documentId,
+    dedupe: `${share ? "approval-req" : "access-req"}:${e.approvalId}`,
+    build: {
+      subject: share
+        ? `Aprovação pendente: ${info.identifier} — ${info.title}`
+        : `${who} pede acesso a ${info.identifier}`,
+      title: share ? "Um documento aguarda a sua aprovação" : "Pedido de acesso a um documento",
+      badge: share ? "Aprovação pendente" : "Pedido de acesso",
+      tone: "warning",
+      intro: [share
+        ? `${who} quer enviar um documento para fora do sector. A partilha só fica activa depois de a aprovar.`
+        : `${who} pediu acesso a um documento do seu sector.`],
+      rows: [
+        ["Documento", info.title],
+        ["Identificador", info.identifier],
+        ["Pedido por", who],
+        ...(target ? [["Destino", target] as [string, string]] : []),
+      ],
+      at: (e.at ?? new Date()).toISOString(),
+      action: "Abra a aplicação DocID, em Aprovações, para aprovar ou recusar.",
+    },
+  });
+}
+
+/** Recusa de uma partilha ou de um pedido de acesso. Destinatários: quem pediu / quem carregou. */
+export async function onDocumentRejected(tx: DB, e: {
+  tenantId: string;
+  documentId: string;
+  approvalId: string;
+  rejecterId: string;
+  recipientIds: Array<string | null | undefined>;
+  kind: "share" | "access";
+  notes?: string | null;
+  at?: Date;
+}): Promise<number> {
+  if (!emailNotificationsEnabled()) return 0;
+  const info = await loadDocumentInfo(tx, e.tenantId, e.documentId);
+  if (!info) return 0;
+  const who = await userName(tx, e.rejecterId);
+  return enqueueAttention(tx, {
+    tenantId: e.tenantId,
+    event: "document_rejected",
+    recipientIds: e.recipientIds.filter((id) => id !== e.rejecterId),
+    documentId: e.documentId,
+    dedupe: `rejected:${e.approvalId}`,
+    build: {
+      subject: e.kind === "access"
+        ? `Pedido de acesso recusado: ${info.identifier}`
+        : `Partilha recusada: ${info.identifier} — ${info.title}`,
+      title: e.kind === "access" ? "O seu pedido de acesso foi recusado" : "A partilha do documento foi recusada",
+      badge: "Recusado",
+      tone: "danger",
+      intro: [e.kind === "access"
+        ? `${who} recusou o pedido de acesso ao documento.`
+        : `${who} recusou o envio do documento para fora do sector. O destinatário não recebeu acesso.`],
+      rows: [["Documento", info.title], ["Identificador", info.identifier], ["Recusado por", who]],
+      note: e.notes?.trim() ? { label: `Motivo indicado por ${who}`, text: e.notes } : null,
+      at: (e.at ?? new Date()).toISOString(),
+    },
+  });
+}
+
+/** Password alterada ou reposta. Aviso de segurança obrigatório para o próprio utilizador. */
+export async function onPasswordChanged(tx: DB, e: {
+  tenantId: string;
+  userId: string;
+  via: "change" | "reset";
+  ip?: string | null;
+  at?: Date;
+}): Promise<number> {
+  const at = e.at ?? new Date();
+  return enqueueAttention(tx, {
+    tenantId: e.tenantId,
+    event: "password_changed",
+    recipientIds: [e.userId],
+    dedupe: `password:${e.userId}:${at.getTime()}`,
+    build: {
+      subject: "A password da sua conta DocID foi alterada",
+      title: "Password alterada",
+      badge: "Segurança",
+      tone: "info",
+      intro: [e.via === "reset"
+        ? "A password da sua conta foi reposta com um código enviado para este e-mail."
+        : "A password da sua conta foi alterada."],
+      rows: e.ip ? [["Endereço IP", e.ip]] : [],
+      at: at.toISOString(),
+      action: "Se não foi você, peça já a um administrador da organização para bloquear a conta e repor a password. As sessões abertas noutros computadores já foram terminadas.",
+    },
+  });
+}
+
+/** Nova função atribuída a um utilizador (ex.: Administrador, Supervisor de sector). */
+export async function onRoleGranted(tx: DB, e: {
+  tenantId: string;
+  userId: string;
+  roleId: string;
+  grantedBy: string;
+  sectorId?: string | null;
+  userRoleId: string;
+}): Promise<number> {
+  if (!emailNotificationsEnabled() || e.userId === e.grantedBy) return 0;
+  const role = await tx.query.roles.findFirst({ where: eq(roles.id, e.roleId), columns: { name: true } });
+  if (!role) return 0;
+  const label = ROLE_LABELS[role.name] ?? role.name;
+  const sector = e.sectorId
+    ? await tx.query.sectors.findFirst({ where: and(eq(sectors.id, e.sectorId), eq(sectors.tenantId, e.tenantId)), columns: { name: true } })
+    : null;
+  const who = await userName(tx, e.grantedBy);
+  return enqueueAttention(tx, {
+    tenantId: e.tenantId,
+    event: "role_granted",
+    recipientIds: [e.userId],
+    dedupe: `role:${e.userRoleId}`,
+    build: {
+      subject: `Tem uma nova função no DocID: ${label}`,
+      title: "Recebeu uma nova função",
+      badge: "Permissões",
+      tone: "info",
+      intro: [`${who} atribuiu-lhe a função ${label}${sector ? ` no sector ${sector.name}` : ""}.`],
+      rows: [["Função", label], ...(sector ? [["Sector", sector.name] as [string, string]] : []), ["Atribuída por", who]],
+      at: new Date().toISOString(),
+      action: "As novas permissões ficam disponíveis da próxima vez que abrir a aplicação DocID.",
+    },
+  });
+}
+
+/** Novo computador registado na organização. Destinatários: os administradores. */
+export async function onDeviceRegistered(tx: DB, e: {
+  tenantId: string;
+  deviceId: string;
+  deviceName: string;
+  userId: string;
+  ip?: string | null;
+}): Promise<number> {
+  if (!emailNotificationsEnabled()) return 0;
+  const who = await userName(tx, e.userId);
+  return enqueueAttention(tx, {
+    tenantId: e.tenantId,
+    event: "device_registered",
+    recipientIds: await adminIds(tx, e.tenantId, e.userId),
+    dedupe: `device:${e.deviceId}`,
+    build: {
+      subject: `Novo computador registado: ${e.deviceName}`,
+      title: "Novo computador na organização",
+      badge: "Segurança",
+      tone: "warning",
+      intro: [`${who} registou um novo computador. A partir dele é possível gerar identificadores, incluindo sem ligação à internet.`],
+      rows: [["Computador", e.deviceName], ["Registado por", who], ...(e.ip ? [["Endereço IP", e.ip] as [string, string]] : [])],
+      at: new Date().toISOString(),
+      action: "Se não reconhece este computador, desactive-o em Configurações › Dispositivos.",
+    },
+  });
+}
+
+/** Identificador anulado (afecta a numeração, incluindo a fiscal). Destinatários: os administradores. */
+export async function onIdentifierCancelled(tx: DB, e: {
+  tenantId: string;
+  identifier: string;
+  userId: string;
+  reason?: string | null;
+}): Promise<number> {
+  if (!emailNotificationsEnabled()) return 0;
+  const who = await userName(tx, e.userId);
+  return enqueueAttention(tx, {
+    tenantId: e.tenantId,
+    event: "identifier_cancelled",
+    recipientIds: await adminIds(tx, e.tenantId, e.userId),
+    dedupe: `cancel:${e.identifier}`,
+    build: {
+      subject: `Identificador anulado: ${e.identifier}`,
+      title: "Um identificador foi anulado",
+      badge: "Anulação",
+      tone: "warning",
+      intro: [`${who} anulou o identificador ${e.identifier}. O número não volta a ser usado e fica registado na auditoria.`],
+      rows: [["Identificador", e.identifier], ["Anulado por", who]],
+      note: e.reason?.trim() ? { label: "Motivo", text: e.reason } : null,
+      at: new Date().toISOString(),
+    },
+  });
 }

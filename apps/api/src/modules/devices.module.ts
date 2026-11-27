@@ -5,6 +5,7 @@ import { devices, auditLogs, sectors, users } from "../db/schema";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, requireRole, getFreshRoles } from "../middleware/auth";
 import { withTenant } from "../db/withTenant";
+import { onDeviceRegistered } from "../services/email/tenant-email.service";
 import { safeError } from "../lib/errors";
 import { getClientIp } from "../lib/ip";
 
@@ -39,6 +40,7 @@ export const devicesModule = new (Elysia as any)({ prefix: "/devices" })
           metadata: JSON.stringify({ name: body.name, sectorId: resolvedSectorId }),
           ip,
         });
+        await onDeviceRegistered(tx, { tenantId, deviceId: device.id, deviceName: body.name, userId: auth!.userId, ip });
 
         return device;
       });

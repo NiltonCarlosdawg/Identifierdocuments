@@ -13,7 +13,7 @@ import { requireAuth, getFreshRoles } from "../middleware/auth";
 import { documents, documentShares, approvals, sectors, auditLogs, identifiers, users, documentAccessRequests } from "../db/schema";
 import { eq, and, isNull, or } from "drizzle-orm";
 import { notify } from "../services/notification.service";
-import { onDocumentApproved, onDocumentShared } from "../services/email/tenant-email.service";
+import { onApprovalRequested, onDocumentApproved, onDocumentRejected, onDocumentShared } from "../services/email/tenant-email.service";
 import { withTenant } from "../db/withTenant";
 import { safeError } from "../lib/errors";
 import { isTenantAdmin, shouldCreateShare, syncCounterpart } from "../services/access-decision.service";
@@ -486,6 +486,12 @@ export const documentsModule = new (Elysia as any)({ prefix: "/documents" })
               tenantId,
               payload: { documentId: docId, identifier: params.param, sectorId: approvalSectorId, shareId: share.id, approvalId: approval.id },
             });
+            await onApprovalRequested(tx, {
+              tenantId, kind: "share", documentId: docId, approvalId: approval.id,
+              supervisorId: approvalSupervisorId, requesterId: auth!.userId,
+              targetName: body.sectorId ? targetSector?.name ?? null : null,
+              targetUserId: body.sectorId ? null : body.userId ?? null,
+            });
           } else if (body.sectorId && targetSector) {
             const members = await tx.query.users.findMany({
               where: eq(users.sectorId, body.sectorId),
@@ -647,6 +653,10 @@ export const documentsModule = new (Elysia as any)({ prefix: "/documents" })
             userId: supervisorId,
             tenantId,
             payload: { documentId: idRow.document.id, identifier: params.param, requesterId: auth!.userId, requestId: request.id },
+          });
+          await onApprovalRequested(tx, {
+            tenantId, kind: "access", documentId: idRow.document.id, approvalId: approval.id,
+            supervisorId, requesterId: auth!.userId,
           });
 
           await tx.insert(auditLogs).values({
@@ -813,6 +823,11 @@ export const documentsModule = new (Elysia as any)({ prefix: "/documents" })
               resource: "documents", resourceId: idRow.document.id,
               metadata: JSON.stringify({ requestId: params.requestId, notes: body.notes }),
               ip: clientIp,
+            });
+
+            await onDocumentRejected(tx, {
+              tenantId, kind: "access", documentId: idRow.document.id, approvalId: params.requestId,
+              rejecterId: auth!.userId, recipientIds: [req.requesterId], notes: body.notes ?? null, at: now,
             });
           }
 

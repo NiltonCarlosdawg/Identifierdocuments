@@ -9,6 +9,17 @@ import { withTenant } from "../db/withTenant";
 import { safeError } from "../lib/errors";
 import { getClientIp } from "../lib/ip";
 
+/** Preferências de notificação que o utilizador pode ligar/desligar (desktop › Configurações › Notificações). */
+export const NOTIFICATION_PREFERENCE_KEYS = [
+  // Avisos na aplicação
+  "approval_pending", "approval_resolved", "document_shared", "sync_complete", "sync_failed",
+  "queue_enqueued", "write_enqueued", "watcher_detected",
+  // E-mails (ver services/email/tenant-email.service.ts › wantsEmail)
+  "email", "email_document_shared", "email_document_approved", "email_approval_requested",
+  "email_access_requested", "email_document_rejected", "email_role_granted",
+  "email_device_registered", "email_identifier_cancelled",
+] as const;
+
 export const authModule = new (Elysia as any)({ prefix: "/auth" })
 
   .post("/login", async (ctx: any) => {
@@ -151,12 +162,7 @@ export const authModule = new (Elysia as any)({ prefix: "/auth" })
       }
     });
   }, {
-    body: t.Object({
-      approval_pending: t.Optional(t.Boolean()),
-      approval_resolved: t.Optional(t.Boolean()),
-      document_shared: t.Optional(t.Boolean()),
-      sync_complete: t.Optional(t.Boolean()),
-      watcher_detected: t.Optional(t.Boolean()),
-    }),
+    // Só chaves conhecidas (as outras eram descartadas em silêncio e a escolha perdia-se).
+    body: t.Object(Object.fromEntries(NOTIFICATION_PREFERENCE_KEYS.map((k) => [k, t.Optional(t.Boolean())]))),
     detail: { summary: "Actualizar preferências de notificação", tags: ["Autenticação"] },
   });
