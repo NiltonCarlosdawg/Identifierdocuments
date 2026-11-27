@@ -23,3 +23,15 @@ describe("configuração de e-mail na app", () => {
     expect("smtpPort" in p).toBe(false);
   });
 });
+
+import { friendlyMessage } from "../shared/errors/mapError";
+
+describe("mensagens da configuração rápida", () => {
+  it("as dicas da API chegam ao utilizador (não são trocadas pela mensagem genérica)", () => {
+    for (const msg of [
+      "O servidor de e-mail recusou o e-mail ou a palavra-passe. Confirme a palavra-passe da caixa. Nas contas Microsoft da empresa, o envio autenticado tem de estar activo para esta caixa (centro de administração › Utilizadores › Correio › Aplicações de e-mail).",
+      "O servidor de e-mail recusou o e-mail ou a palavra-passe. Confirme a palavra-passe da caixa. No Gmail e no Google Workspace use uma \"palavra-passe de aplicação\" (Conta Google › Segurança › Palavras-passe de aplicações), não a palavra-passe normal.",
+      "Não encontrámos o servidor de envio de empresa.ao. Use a configuração manual com os dados do seu fornecedor de e-mail.",
+    ]) expect(friendlyMessage(msg, "GENÉRICA")).toBe(msg);
+  });
+});

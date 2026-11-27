@@ -75,6 +75,7 @@ Verificado com PostgreSQL real (papel sem BYPASSRLS): com o contexto do tenant B
 |---|---|---|
 | GET | `/email/settings` | Configuração actual (sem segredo), modo de fallback |
 | PUT | `/email/settings` | Guardar (o segredo é opcional; omitir mantém o actual; mudar de fornecedor exige um novo) |
+| POST | `/email/settings/quick` | `{ "email", "password" }`: configuração rápida. Descobre o servidor, confirma o login, guarda e envia um teste ao administrador (5 tentativas / 10 min) |
 | DELETE | `/email/settings` | Remover (volta ao fallback) |
 | POST | `/email/settings/test` | `{ "to": "..." }` envia logo um e-mail de teste e marca `verified_at` se correr bem (5 testes / 10 min) |
 | GET | `/email/logs?status=&eventType=&page=&limit=` | Histórico (sem `template_data`) |
@@ -88,6 +89,19 @@ PUT /email/settings
   "smtpHost": "smtp.empresaA.com", "smtpPort": 587, "smtpSecurity": "starttls",
   "smtpUser": "notificacoes@empresaA.com", "secret": "<password>" }
 ```
+
+### Configuração rápida (desde 27/11/2026)
+
+No desktop, Configurações › E-mail pede só **e-mail + palavra-passe** e um botão "Ligar e testar". O resto fica em "Configuração manual (avançado)".
+
+`services/email/smtp-autodetect.ts`:
+1. Lê o MX do domínio. Google → `smtp.gmail.com:465` (SSL); Microsoft → `smtp.office365.com:587` (STARTTLS); Zoho → `smtp.zoho.com:465`.
+2. Se o fornecedor não for conhecido (alojamento próprio, cPanel), experimenta por ordem `mail.<domínio>` e `smtp.<domínio>` (465 SSL, depois 587 STARTTLS) e o próprio MX.
+3. Cada candidato passa pela protecção SSRF (`resolveSafeSmtpHost`) e é validado com um login real (`transporter.verify()`), sem enviar nada.
+4. **Pára na primeira recusa de login** (`EAUTH`/535): o servidor certo respondeu e a palavra-passe está errada. Assim evita mais tentativas e bloqueios da conta. Para Google e Microsoft a resposta inclui a dica (palavra-passe de aplicação, envio autenticado activo).
+5. Se funcionar, guarda como SMTP (remetente = o e-mail, nome = a organização, palavra-passe encriptada) e envia um e-mail de teste para o administrador. A configuração fica verificada.
+
+As mensagens não incluem o nome do servidor, siglas nem números: o desktop troca textos "técnicos" por uma mensagem genérica (`mapError`).
 
 ### Fornecedores
 - **Resend:** `{ "provider": "resend", "fromEmail": "notificacoes@empresaA.com", "secret": "re_..." }`. O domínio tem de estar verificado no painel da Resend (registos DNS SPF/DKIM).

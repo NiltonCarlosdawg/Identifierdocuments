@@ -11,7 +11,7 @@ import { useCachedAux } from "../hooks/useCachedAux";
 import { mapError, friendlyMessage, friendlyPlan, friendlyLicenseState, friendlySubscription, friendlyStatus } from "../../shared/errors/mapError";
 import { sync, api } from "../../infrastructure/di/container";
 import type { WatcherFileRow } from "../../domain/entities/Watcher";
-import { Server, Sun, Moon, Save, RotateCcw, FolderPlus, Trash2, Play, Square, Eye, RefreshCw, Building2, Bell, Download, Smartphone, AlertTriangle, Printer, Mail } from "lucide-react";
+import { Server, Sun, Moon, Save, RotateCcw, FolderPlus, Trash2, Play, Square, Eye, RefreshCw, Building2, Bell, Download, Smartphone, AlertTriangle, Printer, Mail, CheckCircle2, ChevronDown } from "lucide-react";
 
 export default function Settings() {
   const user = useAuthStore(s => s.user);
@@ -1014,11 +1014,19 @@ const emptyEmailForm: EmailForm = {
   secret: "", enabled: true,
 };
 
+type QuickResult = {
+  detected: { host: string; port: number; provider: string | null };
+  testSentTo: string | null; testError: string | null;
+};
+
 function EmailTab() {
+  const userEmail = useAuthStore(s => s.user?.email) ?? "";
+  const [quick, setQuick] = useState({ email: "", password: "" });
+  const [changing, setChanging] = useState(false);
   const [form, setForm] = useState<EmailForm>(emptyEmailForm);
   const [settings, setSettings] = useState<EmailSettingsView | null>(null);
   const [logs, setLogs] = useState<EmailLog[]>([]);
-  const [testTo, setTestTo] = useState("");
+  const [testTo, setTestTo] = useState(userEmail);
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -1046,7 +1054,7 @@ function EmailTab() {
 
   const run = async (action: string, fn: () => Promise<unknown>, ok: string) => {
     setBusy(action); setError(""); setMessage("");
-    try { await fn(); setMessage(ok); await load(); }
+    try { await fn(); if (ok) setMessage(ok); await load(); }
     catch (err: any) { setError(mapError(err, "Não foi possível guardar a configuração de e-mail.")); }
     finally { setBusy(""); }
   };
@@ -1056,15 +1064,67 @@ function EmailTab() {
   return (
     <div className="space-y-5" data-testid="email-settings">
       <div>
-        <h3 className="text-sm font-semibold text-docid-text">Alertas por e-mail</h3>
-        <p className="text-xs text-docid-muted">Configure o envio de avisos quando um documento é aprovado ou partilhado. Sem configuração própria, os avisos são enviados pela DocID.</p>
+        <h3 className="text-sm font-semibold text-docid-text">E-mail da organização</h3>
+        <p className="text-xs text-docid-muted">Os avisos (aprovações, pedidos de acesso, documentos recebidos...) podem sair do e-mail da sua empresa em vez do e-mail do DocID.</p>
       </div>
 
-      <div className="docid-panel p-4 space-y-3">
+      <div className="docid-panel p-4" data-testid="email-status">
+        {settings ? (
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <CheckCircle2 className={`h-5 w-5 ${settings.verifiedAt && !settings.lastTestError ? "text-docid-secondary" : "text-docid-muted"}`} />
+              <div>
+                <p className="text-sm text-docid-text">Os avisos saem de <strong>{settings.fromEmail}</strong></p>
+                <p className="text-xs text-docid-muted">{settings.lastTestError ? "O último teste falhou: verifique a palavra-passe." : settings.verifiedAt ? "Ligação verificada." : "Ainda não testado."}</p>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button disabled={!!busy} className="docid-button-secondary" onClick={() => setChanging(c => !c)}>Mudar e-mail</button>
+              <button disabled={!!busy} className="docid-button-secondary text-docid-error" onClick={() => run("remover", () => api.delete("/email/settings"), "Pronto: os avisos voltam a sair pelo e-mail do DocID.")}><Trash2 className="h-4 w-4" /> Deixar de usar</button>
+            </div>
+          </div>
+        ) : (
+          <p className="text-sm text-docid-text">Neste momento os avisos saem pelo <strong>e-mail do DocID</strong>, em nome da sua organização. Não precisa de fazer nada.</p>
+        )}
+      </div>
+
+      {(!settings || changing) && (
+        <div className="docid-panel p-4 space-y-3" data-testid="email-quick">
+          <p className="text-sm font-medium text-docid-text">Usar o e-mail da empresa</p>
+          <p className="text-xs text-docid-muted">Indique o e-mail e a palavra-passe da caixa que vai enviar os avisos. O DocID encontra sozinho as definições do servidor e envia-lhe um e-mail de teste.</p>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <label className="text-xs text-docid-muted">E-mail
+              <input data-testid="email-quick-address" type="email" className="docid-input mt-1 w-full" value={quick.email} onChange={e => setQuick(q => ({ ...q, email: e.target.value }))} placeholder="avisos@empresa.ao" />
+            </label>
+            <label className="text-xs text-docid-muted">Palavra-passe do e-mail
+              <input data-testid="email-quick-password" type="password" className="docid-input mt-1 w-full" value={quick.password} onChange={e => setQuick(q => ({ ...q, password: e.target.value }))} />
+            </label>
+          </div>
+          <button data-testid="email-quick-connect" disabled={!!busy || !quick.email.trim() || !quick.password} className="docid-button-primary"
+            onClick={() => run("ligar", async () => {
+              const r = await api.post<{ data: QuickResult }>("/email/settings/quick", { email: quick.email.trim(), password: quick.password });
+              setQuick({ email: "", password: "" }); setChanging(false);
+              const where = r.data.detected.provider ?? r.data.detected.host;
+              setMessage(r.data.testSentTo
+                ? `Ligado (${where}). Enviámos um e-mail de teste para ${r.data.testSentTo}.`
+                : `Ligado (${where}), mas o e-mail de teste não saiu. ${friendlyMessage(r.data.testError, "Experimente \"Enviar teste\" na configuração manual.")}`);
+            }, "")}>
+            <Mail className="h-4 w-4" /> {busy === "ligar" ? "A procurar o servidor e a testar..." : "Ligar e testar"}
+          </button>
+          <p className="text-xs text-docid-muted">Gmail e contas Google da empresa: use uma palavra-passe de aplicação (Conta Google › Segurança). Contas Microsoft da empresa: o envio autenticado tem de estar activo para a caixa.</p>
+        </div>
+      )}
+
+      {message && <p data-testid="email-message" className="text-xs text-docid-secondary">{message}</p>}
+      {error && <p data-testid="email-error" className="text-xs text-docid-error">{error}</p>}
+
+      <details className="docid-panel p-4 group">
+        <summary className="flex cursor-pointer list-none items-center gap-2 text-sm text-docid-muted"><ChevronDown className="h-4 w-4 transition-transform group-open:rotate-180" /> Configuração manual (avançado)</summary>
+      <div className="mt-3 space-y-3">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
           <label className="text-xs text-docid-muted">Fornecedor
             <select data-testid="email-provider" className="docid-input mt-1 w-full" value={form.provider} onChange={e => set("provider", e.target.value as EmailForm["provider"])}>
-              <option value="smtp">Servidor da empresa</option><option value="resend">Serviço de e-mail A</option><option value="sendgrid">Serviço de e-mail B</option>
+              <option value="smtp">Servidor de e-mail da empresa</option><option value="resend">Resend</option><option value="sendgrid">SendGrid</option>
             </select>
           </label>
           <label className="text-xs text-docid-muted">Remetente (e-mail)
@@ -1113,12 +1173,9 @@ function EmailTab() {
             <Mail className="h-4 w-4" /> Enviar teste
           </button>
           <input className="docid-input w-56" value={testTo} onChange={e => setTestTo(e.target.value)} placeholder="destinatario@empresa.ao" />
-          {settings && <button disabled={!!busy} className="docid-button-secondary text-docid-error" onClick={() => run("remover", () => api.delete("/email/settings"), "Configuração removida. Os avisos voltam a ser enviados pela DocID.")}><Trash2 className="h-4 w-4" /> Remover</button>}
         </div>
-        {message && <p data-testid="email-message" className="text-xs text-docid-secondary">{message}</p>}
-        {error && <p className="text-xs text-docid-error">{error}</p>}
-        {settings?.lastTestError && <p className="text-xs text-docid-error">O último e-mail de teste não foi enviado. Verifique a configuração.</p>}
       </div>
+      </details>
 
       <div>
         <h3 className="mb-2 text-sm font-semibold text-docid-text">Histórico de envios</h3>
