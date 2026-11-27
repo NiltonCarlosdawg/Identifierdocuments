@@ -1,7 +1,21 @@
 import { createHash } from "node:crypto";
 
-const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
-const MODEL = "llama-3.3-70b-versatile";
+/**
+ * Fornecedor de IA (API compatível com OpenAI). KAMBA_AI_* tem prioridade; GROQ_API_KEY
+ * continua a funcionar como antes (mesmo URL e modelo por defeito).
+ */
+export function aiConfig() {
+  const baseUrl = (process.env.KAMBA_AI_BASE_URL || "https://api.groq.com/openai/v1").replace(/\/+$/, "");
+  const model = process.env.KAMBA_AI_MODEL || "llama-3.3-70b-versatile";
+  return {
+    apiKey: process.env.KAMBA_AI_API_KEY || process.env.GROQ_API_KEY || "",
+    url: `${baseUrl}/chat/completions`,
+    model,
+    // Modelos de raciocínio (gpt-oss): pensam antes de responder; com pouco orçamento de
+    // tokens a resposta vinha vazia. Raciocínio "low" chega para escolher uma categoria.
+    reasoning: /gpt-oss/i.test(model),
+  };
+}
 
 const SYSTEM_PROMPT = `Classifique o documento empresarial abaixo numa das 45 categorias do sistema DocID.
 Responda APENAS com um JSON: { "categoryId": "XXX", "confidence": 0.0-1.0, "reasoning": "curta justificação" }
@@ -114,13 +128,13 @@ export function parseCachedClassification(raw: string): ClassificationResult | n
 }
 
 export async function suggestCategory(text: string, filename?: string): Promise<ClassificationResult> {
-  const apiKey = process.env.GROQ_API_KEY;
+  const { apiKey, url, model, reasoning } = aiConfig();
   const enabled = process.env.CLASSIFIER_ENABLED === "true";
   if (!apiKey || !enabled) {
     return {
       categoryId: "UNKNOWN",
       confidence: 0,
-      reasoning: !apiKey ? "GROQ_API_KEY não configurada." : "Classificador IA desativado. Active CLASSIFIER_ENABLED=true nas variáveis de ambiente.",
+      reasoning: !apiKey ? "KAMBA_AI_API_KEY não configurada." : "Classificador IA desativado. Active CLASSIFIER_ENABLED=true nas variáveis de ambiente.",
     };
   }
 
@@ -130,14 +144,14 @@ export async function suggestCategory(text: string, filename?: string): Promise<
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 15_000);
-  const res = await fetch(GROQ_API_URL, {
+  const res = await fetch(url, {
     method: "POST",
     headers: {
       "Authorization": `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: MODEL,
+      model,
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: userContent },
@@ -146,7 +160,8 @@ export async function suggestCategory(text: string, filename?: string): Promise<
       // CORREÇÃO: 200 tokens é uma margem apertada para { categoryId, confidence,
       // reasoning } — um "reasoning" um pouco mais longo pode cortar o JSON a meio e
       // partir o JSON.parse abaixo. Aumentado para dar folga sem custo relevante.
-      max_tokens: 300,
+      max_tokens: reasoning ? 1500 : 300,
+      ...(reasoning ? { reasoning_effort: "low" } : {}),
     }),
     signal: controller.signal,
   });
@@ -154,15 +169,15 @@ export async function suggestCategory(text: string, filename?: string): Promise<
 
   if (!res.ok) {
     const err = await res.text();
-    throw new Error(`Groq API error (${res.status}): ${err}`);
+    throw new Error(`Erro do fornecedor de IA (${res.status}): ${err.slice(0, 300)}`);
   }
 
   const data = await res.json() as any;
   const content = data.choices?.[0]?.message?.content;
-  if (!content) throw new Error("Resposta vazia da Groq API.");
+  if (!content) throw new Error("Resposta vazia do fornecedor de IA.");
 
   const jsonMatch = content.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error("Formato inesperado da Groq API.");
+  if (!jsonMatch) throw new Error("Formato inesperado do fornecedor de IA.");
 
   // CORREÇÃO: antes fazia-se `JSON.parse(...)` e devolvia-se directamente o resultado,
   // confiando cegamente em (a) o parse não rebentar com uma resposta truncada/malformada
