@@ -1,5 +1,12 @@
 # Licenças das organizações
 
+> Há duas camadas que coexistem: as **licenças** descritas aqui (`license.service`,
+> `license-enforcement.service`, `licenseGuard`), que decidem o modo só consulta, e as
+> **subscrições** por plano (`subscription.service`, checkout e painel da provedora), que impõem
+> os limites de utilizadores, identificadores e números offline. A aprovação de um pedido no
+> painel (`issueLicense`) actualiza as duas. As regras de expiração ainda divergem: aqui, só
+> consulta; nas subscrições, 1 upload por dia por utilizador. Unificar está no BACKLOG (Fase 16).
+
 Cada organização (tenant) tem um **número de licença** único, por exemplo
 `DOCID-2026-A3TB-TE43-2ZPX`, e uma licença que controla o acesso.
 
@@ -80,7 +87,7 @@ desbloqueio aplica-se logo.
 
 ## Detalhes técnicos
 
-- Migrações: `0024_tenant_license_number.sql` (número de licença) e `0025_license_enforcement.sql` (validade, limite, estado, triggers e funções da plataforma).
+- Migrações: `0026_tenant_license_number.sql` (número de licença), `0027_license_enforcement.sql` (validade, limite, estado, triggers e funções da plataforma) e `0028_legacy_license_lookup.sql` (números de licença antigos). Os ficheiros `0024_tenant_license_number.sql` e `0025_license_enforcement.sql` são cópias de referência fora do journal e não correm.
 - Regras e cache: `apps/api/src/services/license.service.ts`. O bloqueio em só consulta está em `middleware/licenseGuard.ts`.
 - Endpoints da plataforma: `apps/api/src/modules/platform.module.ts`, autenticados pelo cabeçalho `x-platform-admin-token`. Sem `PLATFORM_ADMIN_TOKEN`, ficam desligados (404).
 - O limite de utilizadores é aplicado por um trigger na tabela `users` (erro `LIC01`), com lock na organização para dois pedidos simultâneos não passarem ambos.

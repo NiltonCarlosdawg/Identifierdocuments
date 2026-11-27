@@ -1,5 +1,9 @@
 # Ponto de Situação (PDS) — DocID Platform
 
+> **Documento histórico** (ponto de situação de Julho–Agosto de 2026). O estado actual está em
+> `docs/BACKLOG.md`. Nota: a configuração do tamanho dos lotes por computador (10 a 500, §4) foi
+> substituída pelo orçamento offline do plano de subscrição.
+
 > **Período coberto:** 20 de Julho a 3 de Agosto de 2026 (2 semanas)
 > **Objectivo deste documento:** apresentar, em linguagem simples, tudo o que foi feito neste período.
 > **Data do documento:** 03-08-2026

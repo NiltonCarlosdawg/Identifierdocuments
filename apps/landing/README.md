@@ -3,9 +3,10 @@
 Static marketing site for the DocID desktop app. Published at
 <https://docid.milvendas.ao>.
 
-Stack: Vite + React 18 + Tailwind. No router, no backend — one page, all
-sections in `src/components/sections`, downloads point straight at the GitHub
-release assets.
+Stack: Vite + React 18 + Tailwind. One page, all sections in
+`src/components/sections`. The plan table and the checkout call the API
+(`VITE_API_URL`, `https://didall.milvendas.ao` in production). Downloads are
+served by the site itself from `/downloads/` (installer, `.deb`, `SHA256SUMS`).
 
 ## Commands
 
@@ -20,24 +21,19 @@ cd apps/landing && bun run preview  # serve dist on :4173
 
 ## Publishing a new desktop version
 
-1. Build and sign the installer; upload it to the GitHub release.
-2. Update `DOWNLOADS` in `src/components/ui/download-section.tsx` (URL, size,
-   SHA-256) and the version strings in `Nav`, `Hero`, `Footer`, `index.html`
-   (`softwareVersion`, preload/noscript link) and `public/sitemap.xml`.
-3. `bun run build`, then upload the contents of `dist/` to the subdomain
-   docroot on cPanel.
-
-Quote the SHA-256 from the file you actually published:
-
-```bash
-sha256sum dist-windows/DocID_<version>_x64-setup.exe
-```
+Automatic. Bump the version with `bash scripts/bump-desktop-version.sh X.Y.Z` and
+merge to `main`: the *Build & Release* workflow builds the installers, uploads
+them to `/downloads/`, rewrites `SHA256SUMS`, updates `DOWNLOADS` in
+`src/components/ui/download-section.tsx` and the version and link in
+`index.html` (`scripts/update-download-section.py`), commits that to `main`,
+deploys the landing and verifies the published installer
+(`scripts/verify-installer.sh`). See `apps/desktop/UPDATER.md`.
 
 ## Deploy (cPanel)
 
-Subdomain `docid.milvendas.ao` → docroot contains the files of `dist/`
-(not the `dist` folder itself). `.htaccess` ships in `public/` and sets
-charset plus cache headers.
+Automatic on every push to `main` (*Deploy DocID* workflow): `dist/` is
+extracted into the `docid.milvendas.ao` docroot and the admin panel into
+`admin/`. `.htaccess` ships in `public/` and sets charset plus cache headers.
 
 ## Assets
 

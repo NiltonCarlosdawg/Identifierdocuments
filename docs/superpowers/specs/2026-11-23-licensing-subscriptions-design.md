@@ -1,7 +1,9 @@
 # Design: Sistema de Licenças e Subscrições (DocID)
 
 **Data:** 2026-11-23
-**Estado:** Aguarda aprovação do utilizador
+**Estado:** Implementado e em produção (ver `docs/BACKLOG.md`, Fase 16). Diferenças: coexiste com
+as licenças por organização (`docs/LICENCAS.md`), que trazem o período de teste de 14 dias e o
+modo só consulta.
 
 ## 1. Intenção
 

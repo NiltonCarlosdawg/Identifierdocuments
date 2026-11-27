@@ -1,104 +1,85 @@
 # Verano Labs — DocID Platform
 
-Plataforma desktop de gestão de documentos empresariais com rastreabilidade
-fim-a-fim, multi-tenancy, RBAC, geração de identificadores fiscalmente
-válidos (mesmo offline), e classificação por IA.
+Plataforma de gestão de documentos empresariais com rastreabilidade de ponta a ponta,
+várias organizações isoladas, controlo de acesso por sector e numeração fiscal válida
+mesmo sem internet.
 
-> **DocID** resolve um problema real no mercado angolano: documentos
-> empresariais (contratos, propostas, facturas, etc.) circulam sem
-> rastreabilidade, perdem-se, são duplicados, e não têm controlo de acesso
-> por sector — e continuam a precisar de numeração fiscalmente válida mesmo
-> quando o dispositivo não tem ligação à internet.
+> **DocID** resolve um problema real no mercado angolano: documentos empresariais
+> (contratos, propostas, facturas) circulam pelo WhatsApp, email e pastas soltas, sem
+> rastreabilidade, perdem-se, duplicam-se e não têm controlo de acesso por sector — e
+> continuam a precisar de numeração fiscal válida quando o computador não tem rede.
+
+Em produção: API em `https://didall.milvendas.ao`, site, downloads e painel da provedora em
+`https://docid.milvendas.ao`. App desktop na versão **1.2.7** (Windows e Linux).
 
 ## Funcionalidades principais
 
-- **Multi-tenancy com isolamento reforçado por Row Level Security** — o
-  isolamento entre organizações não depende só de filtros na aplicação;
-  é imposto ao nível da base de dados (Postgres RLS), com testes de
-  concorrência dedicados a confirmar zero fuga de dados entre tenants.
-- **Geração de identificadores fiscalmente válidos, mesmo offline** —
-  categorias fiscais (Factura, Recibo, Nota de Crédito/Débito, e outras
-  identificadas por análise jurídica) mantêm numeração sequencial e
-  cronológica em conformidade com o Decreto Presidencial 292/18 e 71/25,
-  através de um mecanismo de reserva antecipada de lotes de sequência por
-  dispositivo — sem depender de ligação constante à internet e sem risco
-  de identificadores duplicados entre dispositivos.
-- **Sincronização offline-first** — documentos e identificadores gerados
-  sem rede são enfileirados localmente e sincronizados automaticamente ao
-  reconectar, com retry, backoff exponencial, e recuperação de itens
-  presos após um encerramento inesperado da aplicação.
-- **Vigilância automática de pastas** — deteta identificadores em
-  ficheiros novos ou já existentes numa pasta monitorizada (extracção de
-  texto nativa em Rust, sem depender de rede), evitando notificações
-  repetidas para ficheiros já processados.
-- **Integração de scanner** — digitalização directa de documentos físicos
-  a partir da aplicação desktop.
-- **Classificação de documentos por IA** (Groq) — sugestão automática de
-  categoria com nível de confiança, e registo de feedback do utilizador
-  (aceitação ou correcção) para acompanhamento de precisão ao longo do
-  tempo.
-- **RBAC por sector** — permissões e visibilidade de documentos por
-  sector, com fluxo de aprovação dedicado para partilhas entre sectores
-  diferentes e pedidos de acesso a documentos restritos.
-- **Auditoria completa** — registo de todas as acções relevantes, com
-  exportação para CSV/JSON sujeita a limite de utilização.
+- **Identificador antes do documento** — cada documento recebe um identificador único
+  (`VL-PROP-2026-0424-001`) antes de ser emitido. Ao anexar o ficheiro, a API procura o
+  identificador no texto e regista o resultado, mas já não o exige (desde 25/11/2026).
+- **Várias organizações com isolamento na base de dados** — Row Level Security do
+  PostgreSQL em todas as tabelas com dados de uma organização; o utilizador da API em
+  produção não tem `BYPASSRLS` (ver [`docs/RLS_PRODUCAO.md`](docs/RLS_PRODUCAO.md)).
+- **Numeração fiscal offline** — as categorias fiscais (FAT, REC, NOT, NDB, GUE, ORD) usam
+  lotes de números reservados por computador, conforme os Decretos Presidenciais 292/18 e
+  71/25; números devolvidos só são reaproveitados se a ordem cronológica o permitir.
+- **Offline primeiro** — leitura a partir de cache encriptada, fila de uploads, fila de
+  escritas com idempotência e downloads em cache; tudo sincroniza sozinho, sempre com a
+  sessão de quem criou cada item.
+- **Documentos com versões e anexos**, tags e perfis para contratos.
+- **Partilha entre sectores com aprovação** do supervisor e pedidos de acesso a
+  documentos restritos; notificações em tempo real (SSE) e por e-mail.
+- **Vigilância de pastas, scanner e impressoras** no desktop; classificação de categoria
+  por IA (Groq) com registo de feedback.
+- **Licenças e subscrições** — planos em Kwanzas, período de teste, modo só consulta,
+  checkout na landing e painel da provedora (`apps/admin`).
+- **Auditoria** de todas as acções, com exportação CSV/JSON.
+
+## Repositório
+
+| Pasta | O que é |
+|---|---|
+| [`apps/api`](apps/api) | API (Bun/Elysia em desenvolvimento, `node dist/index.js` em produção) — [README](apps/api/README.md) |
+| [`apps/desktop`](apps/desktop) | App desktop Tauri v2 (React + Rust + SQLite local) — [actualizações e releases](apps/desktop/UPDATER.md) |
+| [`apps/admin`](apps/admin) | Painel da provedora (planos, pedidos, organizações, licenças) — [README](apps/admin/README.md) |
+| [`apps/landing`](apps/landing) | Site público com downloads e checkout — [README](apps/landing/README.md) |
+| [`packages/types`](packages/types) | Tipos TypeScript partilhados |
+| [`e2e`](e2e) | Testes Playwright (desktop e painel, contra uma API real) |
+| [`scripts`](scripts) | Versão do desktop, publicação na landing, verificação do instalador |
 
 ## Stack
 
 | Camada | Tecnologia |
 |---|---|
-| Desktop runtime | Tauri v2 |
-| Desktop UI | React + Vite + TailwindCSS |
-| Desktop core | Rust |
-| Persistência local (offline) | SQLite (via `rusqlite`) |
-| API runtime | Bun |
-| API framework | Elysia |
-| ORM | Drizzle ORM |
-| Base de Dados | PostgreSQL 16+ (com Row Level Security) |
-| Cache | Redis 7+ |
-| Auth | JWT (jose) |
-| IA classificação | Groq API (llama-3.3-70b) |
-| Real-time | SSE |
+| Desktop | Tauri v2, React 18 + Vite + TailwindCSS (componentes próprios em `docid-ui.tsx`, não shadcn/ui), Rust, SQLite (`rusqlite`) |
+| API | Elysia + Drizzle ORM; Bun em desenvolvimento e testes, bundle Node em produção (cPanel/CloudLinux) |
+| Dados | PostgreSQL 16+ com RLS (produção em PostgreSQL 13), Redis opcional (rate limit, BullMQ) |
+| Auth | JWT (`jose`), sessão máxima de 7 dias; no desktop, chave de encriptação local no cofre do sistema (Windows e macOS) |
+| IA | Groq API (llama-3.3-70b) |
+| Tempo real | SSE; e-mails por fila transaccional em PostgreSQL |
 
-> **Nota:** a UI desktop usa componentes Tailwind próprios (`docid-ui.tsx`
-> — `PageHeader`, `Modal`, `StatusChip`, `EmptyState`, `Pagination`, etc.),
-> não `shadcn/ui`. Se o projecto vier a adoptar `shadcn/ui` no futuro,
-> actualizar esta tabela nessa altura.
+## Operação
 
-## Arquitectura (resumo)
-
-- **Backend**: multi-tenant com RLS activo em todas as tabelas com
-  `tenantId`, acesso à base de dados sempre através de uma transacção com
-  `SET LOCAL app.current_tenant` (helper `withTenant`), nunca acesso
-  directo fora desse contexto em rotas autenticadas.
-- **Desktop**: arquitectura hexagonal no frontend (domain / application /
-  infrastructure / interfaces), com injecção de dependência centralizada
-  num único módulo de composição (`infrastructure/di/container.ts`) —
-  evita instâncias soltas de clientes HTTP ou adapters Tauri espalhadas
-  pelo código.
-- **Geração de identificadores**: dividida em dois caminhos consoante a
-  categoria do documento —
-  - Categorias com exigência legal de sequência: reserva de lotes
-    (*lease*) por dispositivo, com pool de reaproveitamento de fragmentos
-    devolvidos e não usados.
-  - Restantes categorias: geração local mais simples, sem reserva prévia,
-    com o número final confirmado apenas na sincronização.
-
-## Repositórios
-
-- **API:** [`apps/api/`](./apps/api) — [README](./apps/api/README.md)
-- **Desktop:** [`apps/desktop/`](./apps/desktop)
-- **Types:** [`packages/types/`](./packages/types)
+- **Deploy da API, landing e painel:** automático em cada push para `main` (workflow
+  *Deploy DocID*): gera o bundle, aplica migrações pendentes com o dono das tabelas,
+  reinicia e confirma o `/health`, repondo o código anterior se algo falhar.
+- **Publicar o desktop:** `bash scripts/bump-desktop-version.sh X.Y.Z` e merge para
+  `main`; o workflow *Build & Release* gera os instaladores, publica-os no site e só no
+  fim os anuncia ao auto-update ([`apps/desktop/UPDATER.md`](apps/desktop/UPDATER.md)).
+- **CI:** typecheck e testes da API e do desktop, testes Rust (Linux e Windows) e E2E.
 
 ## Documentação
 
-- [`CLAUDE.md`](./CLAUDE.md) — Arquitectura completa do sistema
-- [`BACKLOG.md`](./BACKLOG.md) — Backlog organizado por fases
-- `apps/api/README.md` — Documentação detalhada da API
+- [`docs/CLAUDE.md`](docs/CLAUDE.md) — arquitectura e regras do sistema (fonte de verdade técnica)
+- [`docs/BACKLOG.md`](docs/BACKLOG.md) — estado por fase
+- [`docs/LICENCAS.md`](docs/LICENCAS.md) · [`docs/NOTIFICACOES_EMAIL.md`](docs/NOTIFICACOES_EMAIL.md) · [`docs/RLS_PRODUCAO.md`](docs/RLS_PRODUCAO.md)
+- [`docs/offline-persistence-invariants.md`](docs/offline-persistence-invariants.md) — regras da persistência offline
+- [`docs/pesquisa-mercado-docid.md`](docs/pesquisa-mercado-docid.md) — mercado, concorrência e regulamentação
 
 ## Estado do projecto
 
-Em desenvolvimento activo. Consultar `BACKLOG.md` para o estado detalhado
-por fase, incluindo pendências conhecidas (ex.: confirmação profissional
-da classificação de categorias fiscais para numeração sequencial, e
-cobertura de testes de alguns caminhos de sincronização nativa).
+Em desenvolvimento activo e em produção. Pendências principais em
+[`docs/BACKLOG.md`](docs/BACKLOG.md): confirmação por um contabilista angolano das
+categorias fiscais com numeração sequencial, testes manuais em runtime dos fluxos offline,
+monitorização própria (Fase 15) e assinatura do instalador Windows (Authenticode) e do
+macOS (Apple Developer).
