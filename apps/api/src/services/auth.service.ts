@@ -1,6 +1,7 @@
 import { hashPassword, verifyPassword } from "../lib/password";
 import { db } from "../db";
 import { withTenant } from "../db/withTenant";
+import { onPasswordChanged } from "./email/tenant-email.service";
 import { users, organizations, userRoles, roles, passwordResetTokens } from "../db/schema";
 import { eq, and, gt, isNull, sql } from "drizzle-orm";
 import { signToken, verifyTokenWithGrace, getFreshRoles, sessionExpired } from "../middleware/auth";
@@ -124,9 +125,10 @@ export async function changePassword(auth: AuthPayload, currentPassword: string,
   const newHash = await hashPassword(newPassword);
   // Termina todas as sessões existentes (incluindo um token roubado). Esta sessão
   // continua com o token novo devolvido abaixo, porque o utilizador acabou de provar a password.
-  await withTenant(auth.tenantId, (tx) =>
-    tx.update(users).set({ passwordHash: newHash, tokensValidAfter: new Date() }).where(eq(users.id, auth.userId)),
-  );
+  await withTenant(auth.tenantId, async (tx) => {
+    await tx.update(users).set({ passwordHash: newHash, tokensValidAfter: new Date() }).where(eq(users.id, auth.userId));
+    await onPasswordChanged(tx, { tenantId: auth.tenantId, userId: auth.userId, via: "change" });
+  });
   const freshRoles = await getFreshRoles(auth.userId, auth.tenantId);
   const token = await signToken({
     userId: auth.userId,
@@ -233,6 +235,7 @@ export async function resetPassword(token: string, newPassword: string) {
 
   await withTenant(rec.tenant_id, async (tx) => {
     await tx.update(users).set({ passwordHash: newHash, tokensValidAfter: new Date() }).where(eq(users.id, rec.user_id));
+    await onPasswordChanged(tx, { tenantId: rec.tenant_id, userId: rec.user_id, via: "reset" });
     await tx.update(passwordResetTokens)
       .set({ usedAt: new Date() })
       .where(eq(passwordResetTokens.id, rec.id));

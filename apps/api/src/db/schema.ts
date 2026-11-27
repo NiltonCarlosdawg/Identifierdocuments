@@ -522,14 +522,20 @@ export const tenantEmailSettings = pgTable("tenant_email_settings", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-export type EmailEventType = "document_approved" | "document_shared" | "test";
+export const EMAIL_EVENT_TYPES = [
+  "document_approved", "document_shared", "test",
+  // Acções que pedem atenção (0031): ver services/email/tenant-email.service.ts.
+  "approval_requested", "access_requested", "document_rejected",
+  "password_changed", "role_granted", "device_registered", "identifier_cancelled",
+] as const;
+export type EmailEventType = (typeof EMAIL_EVENT_TYPES)[number];
 export type EmailStatus = "queued" | "sending" | "sent" | "failed" | "skipped";
 
 /** Histórico de envios e fila de saída (outbox) de e-mails. */
 export const emailLogs = pgTable("email_logs", {
   id: uuid("id").primaryKey().defaultRandom(),
   tenantId: uuid("tenant_id").notNull().references(() => organizations.id),
-  eventType: text("event_type", { enum: ["document_approved", "document_shared", "test"] }).notNull(),
+  eventType: text("event_type", { enum: EMAIL_EVENT_TYPES }).notNull(),
   recipientEmail: text("recipient_email").notNull(),
   recipientUserId: uuid("recipient_user_id").references(() => users.id),
   documentId: uuid("document_id").references(() => documents.id),

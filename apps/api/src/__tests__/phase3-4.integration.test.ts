@@ -266,6 +266,24 @@ describe("Fluxo completo — documentos, partilha e aprovações", () => {
     expect(res.status).toBe(200);
   });
 
+  test("partilha cross-sector recusada pelo supervisor", async () => {
+    const share = await api<any>(`/documents/${identifier}/share`, {
+      method: "POST",
+      token: adminToken,
+      body: JSON.stringify({ sectorId: sectorBId }),
+    });
+    expect(share.status).toBe(200);
+    const pending = await api<any>("/approvals?status=pending", { token: supervisorToken });
+    const match = pending.body.data.find((a: any) => a.document?.identifier?.identifier === identifier);
+    expect(match).toBeDefined();
+    const res = await api<any>(`/approvals/${match.id}`, {
+      method: "PATCH",
+      token: supervisorToken,
+      body: JSON.stringify({ status: "rejected", notes: "Não é para este sector" }),
+    });
+    expect(res.status).toBe(200);
+  });
+
   test("listar partilhas do documento", async () => {
     const res = await api<any>(`/documents/${identifier}/shares`, { token: adminToken });
     expect(res.status).toBe(200);

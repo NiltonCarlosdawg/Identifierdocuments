@@ -29,11 +29,12 @@ export default function Settings() {
         <TabBtn active={tab === "watcher"} onClick={() => setTab("watcher")}>Pastas Vigiladas</TabBtn>
         {isAdmin && <TabBtn active={tab === "organizacao"} onClick={() => setTab("organizacao")}><Building2 className="h-4 w-4" /> Organização</TabBtn>}
         <TabBtn active={tab === "dispositivos"} onClick={() => setTab("dispositivos")}><Smartphone className="h-4 w-4" /> Dispositivos</TabBtn>
-        {isAdmin && <TabBtn active={tab === "notificacoes"} onClick={() => setTab("notificacoes")}><Bell className="h-4 w-4" /> Notificações</TabBtn>}
+        {/* Preferências pessoais: todos os utilizadores escolhem os avisos que recebem. */}
+        <TabBtn active={tab === "notificacoes"} onClick={() => setTab("notificacoes")}><Bell className="h-4 w-4" /> Notificações</TabBtn>
         {isAdmin && <TabBtn active={tab === "email"} onClick={() => setTab("email")}><Mail className="h-4 w-4" /> E-mail</TabBtn>}
       </div>
       <div className="w-full">
-        {tab === "server" ? <ServerTab /> : tab === "appearance" ? <AppearanceTab /> : tab === "watcher" ? <WatcherTab /> : tab === "organizacao" ? <OrganizationTab /> : tab === "dispositivos" ? <DevicesTab /> : tab === "email" ? <EmailTab /> : <NotificationsTab />}
+        {tab === "server" ? <ServerTab /> : tab === "appearance" ? <AppearanceTab /> : tab === "watcher" ? <WatcherTab /> : tab === "organizacao" ? <OrganizationTab /> : tab === "dispositivos" ? <DevicesTab /> : tab === "email" ? <EmailTab /> : <NotificationsTab isAdmin={isAdmin} />}
       </div>
     </div>
   );
@@ -737,7 +738,19 @@ function DevicesTab() {
   );
 }
 
-function NotificationsTab() {
+/** Avisos por e-mail que cada utilizador pode desligar (chaves `email_<evento>` na API). */
+export const EMAIL_PREFERENCES: Array<{ key: string; label: string; desc: string; adminOnly?: boolean }> = [
+  { key: "email_approval_requested", label: "Aprovação pendente", desc: "Um documento precisa da sua aprovação para sair do sector" },
+  { key: "email_access_requested", label: "Pedido de acesso", desc: "Alguém pede acesso a um documento do seu sector" },
+  { key: "email_document_shared", label: "Documento recebido", desc: "Um documento é partilhado consigo ou com o seu sector" },
+  { key: "email_document_approved", label: "Documento aprovado", desc: "Uma partilha ou pedido de acesso seu é aprovado" },
+  { key: "email_document_rejected", label: "Pedido recusado", desc: "Uma partilha ou pedido de acesso seu é recusado" },
+  { key: "email_role_granted", label: "Nova função", desc: "Recebe uma nova função ou permissão" },
+  { key: "email_device_registered", label: "Novo computador", desc: "Um computador novo é registado na organização", adminOnly: true },
+  { key: "email_identifier_cancelled", label: "Identificador anulado", desc: "Alguém anula um identificador (incluindo facturas)", adminOnly: true },
+];
+
+function NotificationsTab({ isAdmin = false }: { isAdmin?: boolean }) {
   const [prefs, setPrefs] = useState<Record<string, boolean>>({});
   const [saving, setSaving] = useState<string | null>(null);
   const setNotificationPrefs = useAppConfigStore(s => s.setNotificationPrefs);
@@ -784,21 +797,31 @@ function NotificationsTab() {
     { key: "watcher_detected", label: "Novo ficheiro detectado", desc: "Quando aparece um ficheiro novo na pasta vigiada" },
   ];
 
+  const emailOn = "email" in prefs ? !!prefs.email : true;
+  const toggle = (key: string, label: string, desc: string) => (
+    <label key={key} className="flex items-center justify-between gap-4 rounded-lg border border-docid-border p-4 hover:bg-docid-surface-high cursor-pointer">
+      <div>
+        <p className="text-sm font-medium text-docid-text">{label}</p>
+        <p className="text-xs text-docid-muted">{desc}</p>
+      </div>
+      <input type="checkbox" data-testid={`pref-${key}`} checked={key in prefs ? !!prefs[key] : true} onChange={() => handleToggle(key)} disabled={saving === key} className="rounded border-docid-border bg-docid-surface-low text-docid-primary focus:ring-docid-primary" />
+    </label>
+  );
+
   return (
     <div className="docid-panel p-6 space-y-6">
       <h3 className="text-sm font-semibold text-docid-text">Preferências de Notificação</h3>
       <p className="text-xs text-docid-muted">Seleccione os avisos que pretende receber. Alguns aparecem directamente no computador.</p>
       {isStale && <OfflineNotice cachedAt={cachedAt} onRetry={refresh} />}
       {error && <p className="text-xs text-docid-error">{error}</p>}
-      {items.map(({ key, label, desc }) => (
-        <label key={key} className="flex items-center justify-between gap-4 rounded-lg border border-docid-border p-4 hover:bg-docid-surface-high cursor-pointer">
-          <div>
-            <p className="text-sm font-medium text-docid-text">{label}</p>
-            <p className="text-xs text-docid-muted">{desc}</p>
-          </div>
-          <input type="checkbox" checked={key in prefs ? !!prefs[key] : true} onChange={() => handleToggle(key)} disabled={saving === key} className="rounded border-docid-border bg-docid-surface-low text-docid-primary focus:ring-docid-primary" />
-        </label>
-      ))}
+      {items.map(({ key, label, desc }) => toggle(key, label, desc))}
+
+      <div className="space-y-3 border-t border-docid-border pt-6" data-testid="email-preferences">
+        <h3 className="text-sm font-semibold text-docid-text">Avisos por e-mail</h3>
+        <p className="text-xs text-docid-muted">Enviados para o e-mail da sua conta quando algo precisa da sua atenção. O aviso de password alterada é sempre enviado, por segurança.</p>
+        {toggle("email", "Receber avisos por e-mail", "Desligue para deixar de receber todos os avisos abaixo")}
+        {emailOn && EMAIL_PREFERENCES.filter(p => isAdmin || !p.adminOnly).map(({ key, label, desc }) => toggle(key, label, desc))}
+      </div>
     </div>
   );
 }

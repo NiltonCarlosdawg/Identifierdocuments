@@ -3,7 +3,7 @@ import Elysia from "elysia";
 import { Type as t } from "@sinclair/typebox";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { withTenant } from "../db/withTenant";
-import { auditLogs, emailLogs, organizations, tenantEmailSettings, users } from "../db/schema";
+import { auditLogs, EMAIL_EVENT_TYPES, emailLogs, organizations, tenantEmailSettings, users } from "../db/schema";
 import { getFreshRoles, requireRole, type AuthPayload } from "../middleware/auth";
 import { checkRateLimit } from "../middleware/rateLimit";
 import { getClientIp } from "../lib/ip";
@@ -205,7 +205,7 @@ export const emailModule = new (Elysia as any)({ prefix: "/email" })
     query: t.Object({
       page: t.Optional(t.String()), limit: t.Optional(t.String()),
       status: t.Optional(t.Union([t.Literal("queued"), t.Literal("sending"), t.Literal("sent"), t.Literal("failed"), t.Literal("skipped")])),
-      eventType: t.Optional(t.Union([t.Literal("document_approved"), t.Literal("document_shared"), t.Literal("test")])),
+      eventType: t.Optional(t.Union(EMAIL_EVENT_TYPES.map((e) => t.Literal(e)))),
     }),
     detail: { summary: "Histórico de envios de e-mail", tags: ["E-mail"] },
   })

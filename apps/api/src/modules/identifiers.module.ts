@@ -6,6 +6,7 @@ import { leaseIdentifiers, releaseLease, forceReleaseLease, registerOfflineIdent
 import { requireAuth, getFreshRoles } from "../middleware/auth";
 import { checkRateLimit } from "../middleware/rateLimit";
 import { withTenant } from "../db/withTenant";
+import { onIdentifierCancelled } from "../services/email/tenant-email.service";
 import { eq, and } from "drizzle-orm";
 import { categories, devices } from "../db/schema";
 import { safeError } from "../lib/errors";
@@ -274,6 +275,7 @@ export const identifiersModule = new (Elysia as any)({ prefix: "/identifiers" })
       return await withTenant(tenantId, async (tx) => {
         try {
           const result = await cancelIdentifier(tx, auth!, params.identifier, body.reason, clientIp);
+          await onIdentifierCancelled(tx, { tenantId, identifier: params.identifier, userId: auth!.userId, reason: body.reason });
           return { data: result };
         } catch (err: any) {
           console.error("[CANCEL_ERROR]", err);

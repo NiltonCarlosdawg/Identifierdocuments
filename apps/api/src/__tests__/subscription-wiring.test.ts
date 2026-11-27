@@ -9,7 +9,7 @@ import { eq, sql } from "drizzle-orm";
 
 import { db } from "../db";
 import { withTenant } from "../db/withTenant";
-import { auditLogs, devices, documents, documentVersions, identifiers, organizations, plans, roles, rolePermissions, sectors, users, userRoles , licenses } from "../db/schema";
+import { auditLogs, devices, emailLogs, documents, documentVersions, identifiers, organizations, plans, roles, rolePermissions, sectors, users, userRoles , licenses } from "../db/schema";
 
 const API_ROOT = join(import.meta.dir, "..", "..");
 const TEST_PORT = process.env.SUBSCRIPTION_WIRING_PORT || "3104";
@@ -103,6 +103,7 @@ async function cleanupTenant(id: string) {
     await tx.delete(documentVersions).where(eq(documentVersions.tenantId, id));
     await tx.delete(documents).where(eq(documents.tenantId, id));
     await tx.delete(auditLogs).where(eq(auditLogs.tenantId, id));
+    await tx.delete(emailLogs).where(eq(emailLogs.tenantId, id)); // avisos de função atribuída, etc.
     await tx.delete(identifiers).where(eq(identifiers.tenantId, id));
     await tx.delete(devices).where(eq(devices.tenantId, id));
     await tx.delete(userRoles).where(

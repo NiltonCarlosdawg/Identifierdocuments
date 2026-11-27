@@ -5,6 +5,7 @@ import { users, userRoles, sectors, roles, organizations } from "../db/schema";
 import { eq, and, or, isNull } from "drizzle-orm";
 import { requireAuth, getFreshRoles } from "../middleware/auth";
 import { withTenant } from "../db/withTenant";
+import { onRoleGranted } from "../services/email/tenant-email.service";
 import { safeError } from "../lib/errors";
 import { getClientIp } from "../lib/ip";
 import { checkRateLimit } from "../middleware/rateLimit";
@@ -383,6 +384,10 @@ export const usersModule = new (Elysia as any)({ prefix: "/users" })
             const [ur] = await tx.insert(userRoles).values({
               userId: params.id, roleId: body.roleId, sectorId: body.sectorId, grantedBy: auth!.userId,
             }).returning();
+            await onRoleGranted(tx, {
+              tenantId, userId: params.id, roleId: body.roleId, grantedBy: auth!.userId,
+              sectorId: body.sectorId ?? null, userRoleId: ur.id,
+            });
             return { data: ur };
           } catch (err: any) {
             console.error("[ASSIGN_ROLE_ERROR]", err);
