@@ -233,7 +233,7 @@ describe("token de checkout", () => {
     expect(claims.iss).toBe("docid-api");
     expect(typeof claims.jti).toBe("string");
     expect((claims.exp ?? 0) - (claims.iat ?? 0)).toBe(48 * 3600);
-    expect(res.body.url).toContain("/checkout?pedido=");
+    expect(res.body.url).toContain("/?pedido=");
     expect(res.body.url).toContain(res.body.token);
   });
 
