@@ -12,7 +12,7 @@ import { decodeJwt, SignJWT } from "jose";
 
 import { db } from "../db";
 import { withTenant } from "../db/withTenant";
-import { auditLogs, documents, identifiers, orders, organizations, plans, providerUsers, roles, sectors, userRoles, users , licenses } from "../db/schema";
+import { auditLogs, documents, emailLogs, identifiers, orders, organizations, plans, providerUsers, roles, sectors, userRoles, users , licenses } from "../db/schema";
 import { hashPassword } from "../lib/password";
 import { signProviderToken } from "../middleware/auth";
 import { checkUploadLimit } from "../services/subscription.service";
@@ -200,6 +200,7 @@ afterAll(async () => {
     await db.delete(orders).where(eq(orders.tenantId, tenantId));
     await withTenant(tenantId, async (tx) => {
       await tx.delete(auditLogs).where(eq(auditLogs.tenantId, tenantId));
+      await tx.delete(emailLogs).where(eq(emailLogs.tenantId, tenantId));
       await tx.delete(documents).where(eq(documents.tenantId, tenantId));
       await tx.delete(identifiers).where(eq(identifiers.tenantId, tenantId));
       await tx.delete(userRoles).where(
@@ -619,6 +620,15 @@ describe("suspensão e reativação de tenants (painel)", () => {
     expect(audit).toBeTruthy();
     expect(audit.userId).toBeNull();
     expect(JSON.parse(audit.metadata!).providerUserId).toBe(providerUserId);
+
+    // E-mail aos administradores, só na passagem para suspensa.
+    const suspendedMails = () => withTenant(tenantId, (tx) => tx.select().from(emailLogs).where(and(
+      eq(emailLogs.tenantId, tenantId), eq(emailLogs.eventType, "license_alert"))));
+    const mails = await suspendedMails();
+    expect(mails.map((m) => m.recipientUserId)).toEqual([adminUserId]);
+    expect(mails[0].subject).toBe("A licença do DocID foi suspensa");
+    await api<any>(`/provider/tenants/${tenantId}/suspend`, { method: "POST", token: providerToken });
+    expect(await suspendedMails()).toHaveLength(1);
   });
 
   test("reativar com expiresAt futuro: paid e auditoria tenant.reactivate", async () => {
