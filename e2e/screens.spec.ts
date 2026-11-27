@@ -32,7 +32,7 @@ test.describe("Ecrãs da aplicação", () => {
 
     await page.getByPlaceholder("Ex: Minha Empresa").fill(`Org E2E ${suffix}`);
     await page.getByPlaceholder("minha-empresa").fill(`e2e-${suffix}`);
-    await page.getByPlaceholder("VL").fill("E2E");
+    await page.getByPlaceholder("VL").fill("PWE");
     await page.getByRole("button", { name: /Avançar/ }).click();
 
     await page.getByPlaceholder("Ex: João Silva").fill("Admin E2E");
@@ -67,9 +67,9 @@ test.describe("Ecrãs da aplicação", () => {
     await page.getByRole("link", { name: "Identificadores" }).click();
     await page.getByRole("button", { name: /Gerar identificador/ }).click();
     await page.getByRole("button", { name: /Seleccionar categoria/ }).click();
-    await page.getByPlaceholder("Pesquisar por nome, código ou grupo...").fill("Proposta");
+    await page.getByPlaceholder("Pesquisar por nome ou grupo...").fill("Proposta");
     await page.getByRole("button", { name: /Proposta Comercial/ }).click();
     await page.getByRole("button", { name: "Gerar", exact: true }).click();
-    await expect(page.getByText(/VL-PROP|E2E-PROP/)).toBeVisible();
+    await expect(page.getByText(/PWE-PROP-/)).toBeVisible();
   });
 });
