@@ -36,7 +36,11 @@ test.describe("Landing — pedido de um cliente novo", () => {
   test("cliente que diz ter conta mas não existe vê a mensagem da API", async ({ page }) => {
     await page.goto("/?plano=Essencial#pedido");
     await page.getByTestId("checkout-existing").click();
+    // Preencher um campo não pode apagar o outro (antes, escrever o e-mail apagava o identificador).
     await page.getByTestId("checkout-slug").fill("organizacao-que-nao-existe");
+    await page.getByTestId("checkout-tenant-email").fill("admin@example.invalid");
+    await expect(page.getByTestId("checkout-slug")).toHaveValue("organizacao-que-nao-existe");
+    await expect(page.getByTestId("checkout-tenant-email")).toHaveValue("admin@example.invalid");
     await page.getByTestId("checkout-phone").fill("923000000");
     await page.getByTestId("checkout-email").fill("cliente-e2e@example.invalid");
     await page.getByTestId("checkout-submit").click();

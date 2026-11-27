@@ -77,8 +77,8 @@ export function Checkout() {
     else if (lead) {
       body.companyName = companyName.trim();
       if (contactName.trim()) body.contactName = contactName.trim();
-    } else if (slug) body.tenantSlug = slug;
-    else body.tenantEmail = tenantEmail;
+    } else if (slug.trim()) body.tenantSlug = slug.trim(); // basta um: o identificador tem prioridade
+    else body.tenantEmail = tenantEmail.trim();
     try {
       const res = await fetch(`${API}/orders`, {
         method: "POST",
@@ -178,12 +178,13 @@ export function Checkout() {
                 <div className="grid gap-4 sm:grid-cols-2">
                   <label className="block">
                     <span className="mb-1.5 block text-xs font-medium text-docid-text">Identificador da organização</span>
-                    <input data-testid="checkout-slug" value={slug} onChange={(e) => { setSlug(e.target.value); setTenantEmail(""); }} className="docid-input" placeholder="minha-empresa" />
+                    <input data-testid="checkout-slug" value={slug} onChange={(e) => setSlug(e.target.value)} className="docid-input" placeholder="minha-empresa" />
                   </label>
                   <label className="block">
                     <span className="mb-1.5 block text-xs font-medium text-docid-text">E-mail da organização</span>
-                    <input data-testid="checkout-tenant-email" type="email" value={tenantEmail} onChange={(e) => { setTenantEmail(e.target.value); setSlug(""); }} className="docid-input" placeholder="admin@empresa.com" />
+                    <input data-testid="checkout-tenant-email" type="email" value={tenantEmail} onChange={(e) => setTenantEmail(e.target.value)} className="docid-input" placeholder="admin@empresa.com" />
                   </label>
+                  <p className="text-xs text-docid-muted sm:col-span-2">Basta preencher um dos dois: o identificador da organização ou o e-mail de quem entra no DocID.</p>
                 </div>
               )}
 
@@ -211,7 +212,7 @@ export function Checkout() {
               </fieldset>
 
               {error && <p data-testid="checkout-error" className="text-sm text-docid-error">{error}</p>}
-              <button data-testid="checkout-submit" type="submit" disabled={busy || !planId || (!tenantName && (existing ? !slug && !tenantEmail : companyName.trim().length < 2))}
+              <button data-testid="checkout-submit" type="submit" disabled={busy || !planId || (!tenantName && (existing ? !slug.trim() && !tenantEmail.trim() : companyName.trim().length < 2))}
                 className="btn-primary flex w-full items-center justify-center gap-2">
                 {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
                 {busy ? "A enviar..." : "Enviar pedido"}
