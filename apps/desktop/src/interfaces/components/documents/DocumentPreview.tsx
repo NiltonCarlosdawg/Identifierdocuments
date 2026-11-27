@@ -40,6 +40,9 @@ export default function DocumentPreview({ documentId, mime, filename, thumbnailU
 // Sem cor de fundo: cada tipo escolhe a sua (PDF e Word em branco, como no papel).
 const FRAME = "rounded-lg border border-docid-border";
 const DARK = "bg-docid-surface-low";
+/** A pré-visualização enche o contentor (o painel dá-lhe a altura visível da área com scroll). */
+const FILL_H = "h-full";
+const FILL_MAX_H = "max-h-full";
 
 function Loading() {
   return (
@@ -68,6 +71,18 @@ function PdfPreview({ blob, fallback }: { blob: Blob; fallback: React.ReactNode 
   const [pages, setPages] = useState(0);
   const [page, setPage] = useState(1);
   const [failed, setFailed] = useState(false);
+  const [width, setWidth] = useState(0);
+
+  // O painel cresce com a janela: voltar a desenhar a página à nova largura (sem ficar desfocada).
+  useEffect(() => {
+    const box = boxRef.current;
+    if (!box) return;
+    let t: ReturnType<typeof setTimeout> | undefined;
+    const ro = new ResizeObserver(() => { clearTimeout(t); t = setTimeout(() => setWidth(box.clientWidth), 150); });
+    ro.observe(box);
+    setWidth(box.clientWidth);
+    return () => { clearTimeout(t); ro.disconnect(); };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -106,10 +121,11 @@ function PdfPreview({ blob, fallback }: { blob: Blob; fallback: React.ReactNode 
       try {
         const p = await doc.getPage(page);
         if (cancelled) return;
-        const width = boxRef.current!.clientWidth || 400;
         const base = p.getViewport({ scale: 1 });
+        // Largura útil (menos a barra de scroll vertical, se aparecer).
+        const avail = Math.max(200, (width || boxRef.current!.clientWidth || 400) - 2);
         const ratio = window.devicePixelRatio || 1;
-        const viewport = p.getViewport({ scale: (width / base.width) * ratio });
+        const viewport = p.getViewport({ scale: (avail / base.width) * ratio });
         const canvas = canvasRef.current!;
         canvas.width = viewport.width; canvas.height = viewport.height;
         canvas.style.width = `${viewport.width / ratio}px`; canvas.style.height = `${viewport.height / ratio}px`;
@@ -120,12 +136,12 @@ function PdfPreview({ blob, fallback }: { blob: Blob; fallback: React.ReactNode 
       }
     })();
     return () => { cancelled = true; task?.cancel?.(); };
-  }, [pages, page]);
+  }, [pages, page, width]);
 
   if (failed) return <>{fallback}</>;
   return (
-    <div className="space-y-2" data-testid="preview-pdf">
-      <div ref={boxRef} className={`max-h-[28rem] overflow-auto bg-white ${FRAME}`}>
+    <div className="flex h-full flex-col gap-2" data-testid="preview-pdf">
+      <div ref={boxRef} className={`min-h-0 flex-1 overflow-auto bg-white ${FRAME}`}>
         {!pages && <div className="flex h-48 items-center justify-center text-xs text-docid-muted"><Loader2 className="mr-2 h-4 w-4 animate-spin" /> A abrir o PDF...</div>}
         <canvas ref={canvasRef} className={pages ? "block" : "hidden"} />
       </div>
@@ -160,7 +176,7 @@ function DocxPreview({ blob, fallback }: { blob: Blob; fallback: React.ReactNode
   if (failed) return <>{fallback}</>;
   if (html === null) return <Loading />;
   return (
-    <div className={`docid-doc-preview max-h-[28rem] overflow-auto bg-white p-5 text-[13px] leading-relaxed text-neutral-900 ${FRAME}`}
+    <div className={`docid-doc-preview ${FILL_H} overflow-auto bg-white p-5 text-[13px] leading-relaxed text-neutral-900 ${FRAME}`}
       data-testid="preview-docx" dangerouslySetInnerHTML={{ __html: html || "<p><em>Documento sem texto.</em></p>" }} />
   );
 }
@@ -173,7 +189,7 @@ function ImagePreview({ blob, filename }: { blob: Blob; filename: string }) {
     return () => URL.revokeObjectURL(u);
   }, [blob]);
   if (!url) return <Loading />;
-  return <img src={url} alt={filename} className={`max-h-[28rem] w-full object-contain ${FRAME} ${DARK}`} data-testid="preview-image" />;
+  return <img src={url} alt={filename} className={`${FILL_H} w-full object-contain ${FRAME} ${DARK}`} data-testid="preview-image" />;
 }
 
 const TEXT_LIMIT = 200_000;
@@ -189,7 +205,7 @@ function TextPreview({ blob, kind }: { blob: Blob; kind: PreviewKind }) {
   if (kind === "csv") {
     const rows = text.split(/\r?\n/).filter(Boolean).slice(0, 200).map(l => l.split(/[;,]/));
     return (
-      <div className={`max-h-[28rem] overflow-auto ${FRAME} ${DARK}`} data-testid="preview-csv">
+      <div className={`${FILL_MAX_H} overflow-auto ${FRAME} ${DARK}`} data-testid="preview-csv">
         <table className="w-full text-xs">
           <tbody>{rows.map((r, i) => (
             <tr key={i} className={i === 0 ? "bg-docid-surface-high font-semibold" : "border-t border-docid-border"}>
@@ -201,7 +217,7 @@ function TextPreview({ blob, kind }: { blob: Blob; kind: PreviewKind }) {
     );
   }
   return (
-    <pre className={`max-h-[28rem] overflow-auto whitespace-pre-wrap break-words p-4 font-mono text-xs text-docid-text ${FRAME} ${DARK}`} data-testid="preview-text">
+    <pre className={`${FILL_MAX_H} overflow-auto whitespace-pre-wrap break-words p-4 font-mono text-xs text-docid-text ${FRAME} ${DARK}`} data-testid="preview-text">
       {text || "(ficheiro vazio)"}{blob.size > TEXT_LIMIT && "\n\n… (mostra só o início; use \"Abrir\" para ver tudo)"}
     </pre>
   );

@@ -41,7 +41,7 @@ export default function HrProfiles({ q, onOpen }: { q: string; onOpen: (person: 
       {error && <p className="text-sm text-docid-error">{error}</p>}
 
       {loading && profiles.length === 0 ? (
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 min-[1900px]:grid-cols-5">
           {[...Array(6)].map((_, i) => <div key={i} className="h-40 animate-pulse rounded-xl bg-docid-surface-high" />)}
         </div>
       ) : people.length === 0 && !unnamed ? (
@@ -51,7 +51,7 @@ export default function HrProfiles({ q, onOpen }: { q: string; onOpen: (person: 
           {!q && <p className="max-w-md text-xs text-docid-muted">Gere identificadores das categorias de RH (contrato de trabalho, admissão, recibos...) e escreva o nome do colaborador em "Emitido para". Os perfis aparecem aqui sozinhos.</p>}
         </div>
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 min-[1900px]:grid-cols-5">
           {people.map(p => (
             <button key={p.key} type="button" onClick={() => onOpen(p.name)} data-testid="hr-profile-card"
               className="flex flex-col gap-3 rounded-xl border border-docid-border bg-docid-surface-low p-4 text-left transition hover:border-docid-primary/50 hover:bg-docid-surface">

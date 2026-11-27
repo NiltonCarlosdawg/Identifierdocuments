@@ -261,7 +261,7 @@ export default function Documents() {
       {error && <div className="rounded-lg border border-docid-error/30 bg-docid-error/10 px-4 py-3 text-sm text-docid-error">{error}</div>}
 
       {/* Lista + painel */}
-      <div className={`grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)] gap-4 ${selectedRow ? "grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(22rem,28rem)] xl:grid-cols-[minmax(0,1fr)_32rem]" : "grid-cols-1"}`}>
+      <div className={`grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)] gap-4 ${selectedRow ? "grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(24rem,42%)] 2xl:grid-cols-[minmax(0,1fr)_minmax(32rem,50%)]" : "grid-cols-1"}`}>
         <section className={`docid-panel flex min-h-0 flex-col overflow-hidden ${selectedRow ? "hidden lg:flex" : "flex"}`} aria-label="Lista de documentos">
           {filters.view === "perfis" && filters.person && (
             <div className="flex items-center gap-2 border-b border-docid-border px-4 py-2.5" data-testid="hr-person-header">
