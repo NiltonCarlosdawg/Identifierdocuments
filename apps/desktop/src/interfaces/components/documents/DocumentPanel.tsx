@@ -9,9 +9,10 @@ import ShareDocumentModal from "../ShareDocumentModal";
 import DocumentSharesPanel from "../DocumentSharesPanel";
 import DocumentAccessRequestsPanel from "../DocumentAccessRequestsPanel";
 import RequestAccessModal from "./RequestAccessModal";
+import DocumentPreview from "./DocumentPreview";
 import { DOCUMENT_PRESET_TAGS, formatSize, type DocDetail, type DocRow } from "./types";
 import {
-  X, ExternalLink, Share2, MoreHorizontal, Printer, History, Paperclip, Copy, Lock, Download, FileText, Check, Tag,
+  X, ExternalLink, Share2, MoreHorizontal, Printer, History, Paperclip, Copy, Lock, Download, Check, Tag,
 } from "lucide-react";
 
 type Tab = "detalhes" | "versoes" | "anexos" | "partilhas" | "pedidos" | "actividade";
@@ -35,7 +36,6 @@ export default function DocumentPanel({ row, onClose, onChanged, onOpen }: Props
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState("");
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [offline, setOffline] = useState<boolean | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [showShare, setShowShare] = useState(false);
@@ -64,22 +64,13 @@ export default function DocumentPanel({ row, onClose, onChanged, onOpen }: Props
 
   useEffect(() => {
     let cancelled = false;
-    let objectUrl: string | null = null;
-    setTab("detalhes"); setDetail(null); setError(""); setNotice(""); setPreviewUrl(null); setMenuOpen(false);
+    setTab("detalhes"); setDetail(null); setError(""); setNotice(""); setMenuOpen(false);
     void loadDetail();
     if (isTauri) {
       loadPrinters();
       sync.isDocumentCached(row.id).then(v => { if (!cancelled) setOffline(v); }).catch(() => {});
     } else setOffline(null);
-    const isPdf = (row.mimeType || "").includes("pdf") || row.filename?.toLowerCase().endsWith(".pdf");
-    if (isPdf) {
-      api.getBlob(`/documents/${row.id}/download`).then(blob => {
-        if (cancelled || !blob) return;
-        objectUrl = URL.createObjectURL(blob);
-        setPreviewUrl(objectUrl);
-      }).catch(() => {});
-    }
-    return () => { cancelled = true; if (objectUrl) URL.revokeObjectURL(objectUrl); };
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [row.id]);
 
@@ -244,7 +235,7 @@ export default function DocumentPanel({ row, onClose, onChanged, onOpen }: Props
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
         {tab === "detalhes" && (
           <div className="space-y-5">
-            <Preview previewUrl={previewUrl} thumbnailUrl={thumbnailUrl} mime={row.mimeType} filename={row.filename} />
+            <DocumentPreview documentId={row.id} mime={detail?.mimeType || row.mimeType} filename={row.filename} thumbnailUrl={thumbnailUrl} />
             <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
               <Field label="Ficheiro" wide>{row.filename || "—"}</Field>
               <Field label="Tamanho">{[formatSize(detail?.fileSize ?? row.fileSize), friendlyMime(row.mimeType)].filter(Boolean).join(" · ") || "—"}</Field>
@@ -321,21 +312,6 @@ function Field({ label, children, wide }: { label: string; children: React.React
     <div className={wide ? "col-span-2 min-w-0" : "min-w-0"}>
       <dt className="text-[11px] text-docid-muted">{label}</dt>
       <dd className="truncate font-medium text-docid-text">{children}</dd>
-    </div>
-  );
-}
-
-function Preview({ previewUrl, thumbnailUrl, mime, filename }: { previewUrl: string | null; thumbnailUrl: string | null; mime: string; filename: string }) {
-  if (previewUrl) {
-    return <iframe title="Pré-visualização" src={previewUrl} className="h-80 w-full rounded-lg border border-docid-border bg-docid-surface-low" />;
-  }
-  if (thumbnailUrl) {
-    return <img src={thumbnailUrl} alt={`Miniatura de ${filename}`} className="max-h-64 w-full rounded-lg border border-docid-border bg-docid-surface-low object-contain" />;
-  }
-  return (
-    <div className="flex h-32 flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-docid-border text-docid-muted">
-      <FileText className="h-8 w-8" />
-      <span className="text-xs">{friendlyMime(mime)} · sem pré-visualização</span>
     </div>
   );
 }

@@ -84,6 +84,8 @@ test.describe("Documentos", () => {
     const panel = page.getByTestId("document-panel");
     await expect(panel).toBeVisible();
     await expect(page).toHaveURL(/doc=/);
+    // Pré-visualização do PDF desenhada na app (pdf.js em <canvas>), não num iframe.
+    await expect(page.locator('[data-testid="preview-pdf"] canvas.block')).toBeVisible({ timeout: 15_000 });
     await page.getByTestId("document-tab-actividade").click();
     await expect(page.getByTestId("document-activity")).toContainText("Documento associado");
 
