@@ -782,6 +782,10 @@ aplicadas posteriormente a itens aqui marcados como completos)*
   `subscription.service`) e as suas regras de expiração (só consulta vs. 1 upload/dia)
 - [ ] **P2** `PATCH` da plataforma não actualiza `organizations.subscription_expires_at`
   (os lembretes de renovação podem continuar a disparar)
+- [x] **P0** Pedidos de clientes novos (sem conta) a partir do site: ficam no painel como
+  "Cliente novo" (migração 0030); antes o formulário recusava-os todos. O botão "Falar com a
+  equipa" do Empresarial passou a usar o mesmo formulário (era um `mailto`), e a tabela de preços
+  da landing lê os planos da API (os preços fixos no código estavam errados)
 - [ ] **P3** Pagamento Multicaixa automático (hoje a validação é manual)
 
 ---

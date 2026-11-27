@@ -211,6 +211,7 @@ afterAll(async () => {
       await tx.delete(organizations).where(eq(organizations.id, tenantId));
     });
   }
+  await db.delete(orders).where(sql`${orders.companyName} LIKE ${`%${RUN_ID}%`}`);
   if (providerUserId) await db.delete(providerUsers).where(eq(providerUsers.id, providerUserId));
   if (paidPlanId) await db.delete(plans).where(eq(plans.id, paidPlanId));
   if (upgradePlanId) await db.delete(plans).where(eq(plans.id, upgradePlanId));
@@ -406,6 +407,51 @@ describe("criação de pedidos", () => {
 
     const [row] = await db.select().from(orders).where(eq(orders.id, result.orderId));
     expect(row.tenantId).toBe(tenantId);
+  });
+});
+
+describe("pedidos de clientes novos (sem conta)", () => {
+  const company = `Empresa Nova ${RUN_ID}`;
+  let leadId = "";
+
+  test("sem organização nem nome da empresa: 400 COMPANY_REQUIRED", async () => {
+    const res = await api<any>("/orders", { method: "POST", body: JSON.stringify(orderBody()) });
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe("COMPANY_REQUIRED");
+  });
+
+  test("com o nome da empresa cria pedido pending sem organização", async () => {
+    const res = await api<any>("/orders", {
+      method: "POST",
+      body: JSON.stringify({ ...orderBody(), companyName: company, contactName: "Ana Teste" }),
+    });
+    expect(res.status).toBe(200);
+    leadId = res.body.orderId;
+    const [row] = await db.select().from(orders).where(eq(orders.id, leadId));
+    expect(row.tenantId).toBeNull();
+    expect(row.companyName).toBe(company);
+    expect(row.contactName).toBe("Ana Teste");
+    expect(row.status).toBe("pending");
+  });
+
+  test("o painel lista-o como cliente novo", async () => {
+    const res = await api<any>("/provider/orders", { token: providerToken });
+    expect(res.status).toBe(200);
+    const lead = res.body.find((o: any) => o.id === leadId);
+    expect(lead.isNewCustomer).toBe(true);
+    expect(lead.tenantName).toContain(company);
+    expect(lead.tenantName).toContain("cliente novo");
+  });
+
+  test("não se aprova sem organização (409); rejeita-se com motivo", async () => {
+    const ap = await approve(leadId);
+    expect(ap.status).toBe(409);
+    expect(ap.body.error.code).toBe("ORDER_WITHOUT_TENANT");
+
+    const rj = await reject(leadId, { reason: "Contactado por telefone; conta criada à parte." });
+    expect(rj.status).toBe(200);
+    const [row] = await db.select().from(orders).where(eq(orders.id, leadId));
+    expect(row.status).toBe("rejected");
   });
 });
 

@@ -62,14 +62,19 @@ function Orders() {
     <section data-testid="orders-panel">
       <h2>Pedidos de subscrição</h2>
       {error && <p className="error">{error}</p>}
+      <p className="hint">Pedidos de clientes novos não têm organização: contacte o cliente, crie a organização e
+        rejeite este pedido com o motivo (ex.: "conta criada"); depois o cliente pede o plano a partir da conta.</p>
       <table><thead><tr><th>Organização</th><th>Plano</th><th>Pagamento</th><th>Contacto</th><th>Estado</th><th></th></tr></thead>
         <tbody>{(data || []).map(o => (
           <tr key={o.id} data-testid="order-row">
-            <td>{o.tenantName}</td><td>{o.planName}</td><td>{friendly(PAYMENT_METHODS, o.paymentMethod)}</td>
-            <td>{o.contactEmail || o.phone || "—"}</td><td>{friendly(ORDER_STATUSES, o.status)}</td>
+            <td>{o.isNewCustomer ? <><strong>{o.companyName}</strong> <span className="badge" data-testid="order-new-customer">Cliente novo</span></> : o.tenantName}</td>
+            <td>{o.planName}</td><td>{friendly(PAYMENT_METHODS, o.paymentMethod)}</td>
+            <td>{[o.contactName, o.contactEmail, o.phone].filter(Boolean).join(" · ") || "—"}</td><td>{friendly(ORDER_STATUSES, o.status)}</td>
             <td>{o.status === "pending" && (
               <div className="row-actions">
-                <button data-testid="order-approve" disabled={busy === o.id} onClick={() => act(o.id, "approve")}>Aprovar</button>
+                {!o.isNewCustomer && (
+                  <button data-testid="order-approve" disabled={busy === o.id} onClick={() => act(o.id, "approve")}>Aprovar</button>
+                )}
                 <input placeholder="Motivo" value={reason[o.id] || ""} onChange={e => setReason(r => ({ ...r, [o.id]: e.target.value }))} />
                 <button data-testid="order-reject" disabled={busy === o.id} onClick={() => act(o.id, "reject")}>Rejeitar</button>
               </div>

@@ -14,6 +14,7 @@ type Method = "multicaixa" | "transfer" | "send_order";
 
 export function Checkout() {
   const [plans, setPlans] = useState<Plan[]>([]);
+  const [plansLoaded, setPlansLoaded] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
@@ -24,6 +25,11 @@ export function Checkout() {
   const [slug, setSlug] = useState("");
   const [tenantEmail, setTenantEmail] = useState("");
   const [tenantName, setTenantName] = useState("");
+  // Clientes novos (sem conta) são o caso por omissão: quem chega pelo site ainda não usa o DocID.
+  const [existing, setExisting] = useState(false);
+  const [companyName, setCompanyName] = useState("");
+  const [contactName, setContactName] = useState("");
+  const [sentAsLead, setSentAsLead] = useState(false);
 
   useEffect(() => {
     const token = new URLSearchParams(window.location.search).get("pedido");
@@ -41,11 +47,12 @@ export function Checkout() {
       .then((d) => {
         const available: Plan[] = (d.plans || []).filter((p: Plan) => p.price > 0);
         setPlans(available);
+        setPlansLoaded(true);
         const chosen = new URLSearchParams(window.location.search).get("plano");
         const match = available.find((p) => p.name.toLowerCase() === (chosen || "").toLowerCase());
         if (match) setPlanId(match.id);
       })
-      .catch(() => setError("Não foi possível carregar os planos."));
+      .catch(() => { setPlansLoaded(true); setError("Não foi possível carregar os planos."); });
   }, []);
 
   const choosePlan = (name: string) => {
@@ -65,8 +72,12 @@ export function Checkout() {
       phone,
       contactEmail,
     };
+    const lead = !token && !existing;
     if (token) body.token = token;
-    else if (slug) body.tenantSlug = slug;
+    else if (lead) {
+      body.companyName = companyName.trim();
+      if (contactName.trim()) body.contactName = contactName.trim();
+    } else if (slug) body.tenantSlug = slug;
     else body.tenantEmail = tenantEmail;
     try {
       const res = await fetch(`${API}/orders`, {
@@ -74,10 +85,15 @@ export function Checkout() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      if (!res.ok) throw new Error("Não foi possível enviar o pedido. Verifique os dados e tente novamente.");
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        const message = data?.error?.code === "VALIDATION_ERROR" ? null : data?.error?.message;
+        throw new Error(message || "Não foi possível enviar o pedido. Verifique os dados e tente novamente.");
+      }
+      setSentAsLead(lead);
       setDone(true);
-    } catch {
-      setError("Não foi possível enviar o pedido. Verifique os dados e tente novamente.");
+    } catch (err) {
+      setError(err instanceof Error && err.message ? err.message : "Não foi possível enviar o pedido. Verifique os dados e tente novamente.");
     } finally {
       setBusy(false);
     }
@@ -94,14 +110,21 @@ export function Checkout() {
         </p>
       </div>
 
-      <ComparisonBlock onChoosePlan={choosePlan} />
+      <ComparisonBlock
+        onChoosePlan={choosePlan}
+        prices={plansLoaded ? Object.fromEntries(plans.map((p) => [p.name.toLowerCase(), p.price])) : undefined}
+      />
 
       <div className="mx-auto mt-12 max-w-3xl">
         {done ? (
           <div data-testid="checkout-success" className="docid-panel p-8 text-center">
             <Check className="mx-auto h-8 w-8 text-docid-secondary" aria-hidden="true" />
             <h3 className="mt-4 text-lg font-semibold">Pedido recebido</h3>
-            <p className="mt-2 text-sm text-docid-muted">A MilVendas vai confirmar o pagamento e activar a sua licença. Receberá um e-mail com a confirmação.</p>
+            <p className="mt-2 text-sm text-docid-muted">
+              {sentAsLead
+                ? "A equipa MilVendas vai contactá-lo pelo telefone ou e-mail indicados para criar a conta da sua empresa e combinar o pagamento."
+                : "A MilVendas vai confirmar o pagamento e activar a sua licença. Receberá um e-mail com a confirmação."}
+            </p>
           </div>
         ) : (
           <form id="pedido" onSubmit={submit} className="space-y-5" data-testid="checkout-form">
@@ -119,11 +142,39 @@ export function Checkout() {
             <div className="docid-panel space-y-5 p-5 sm:p-6">
               <div>
                 <h3 className="text-base font-semibold text-docid-text">Dados para o pedido</h3>
-                <p className="mt-1 text-xs text-docid-muted">Indique a organização e como quer ser contactado.</p>
+                <p className="mt-1 text-xs text-docid-muted">Indique a empresa e como quer ser contactado.</p>
               </div>
 
-              {tenantName && <p className="rounded-lg bg-docid-surface-low px-4 py-3 text-sm text-docid-text">Organização: <strong>{tenantName}</strong></p>}
               {!tenantName && (
+                <fieldset className="space-y-2">
+                  <legend className="text-xs font-semibold uppercase tracking-wider text-docid-muted">Já usa o DocID?</legend>
+                  <div className="flex flex-wrap gap-2">
+                    {([[false, "Ainda não"], [true, "Sim, a minha empresa já tem conta"]] as Array<[boolean, string]>).map(([value, label]) => (
+                      <button key={label} type="button" data-testid={value ? "checkout-existing" : "checkout-new"} aria-pressed={existing === value}
+                        onClick={() => setExisting(value)}
+                        className={`min-h-11 rounded-lg border px-4 text-sm font-medium transition ${existing === value ? "border-docid-primary bg-docid-primary/10 text-docid-text ring-1 ring-docid-primary" : "border-docid-border bg-docid-surface-lowest text-docid-muted hover:border-docid-primary/50 hover:text-docid-text"}`}>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </fieldset>
+              )}
+
+              {!tenantName && !existing && (
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="block">
+                    <span className="mb-1.5 block text-xs font-medium text-docid-text">Empresa</span>
+                    <input data-testid="checkout-company" value={companyName} onChange={(e) => setCompanyName(e.target.value)} className="docid-input" placeholder="Nome da empresa" required minLength={2} maxLength={160} />
+                  </label>
+                  <label className="block">
+                    <span className="mb-1.5 block text-xs font-medium text-docid-text">O seu nome</span>
+                    <input data-testid="checkout-contact-name" value={contactName} onChange={(e) => setContactName(e.target.value)} className="docid-input" placeholder="Nome e apelido" maxLength={120} />
+                  </label>
+                </div>
+              )}
+
+              {tenantName && <p className="rounded-lg bg-docid-surface-low px-4 py-3 text-sm text-docid-text">Organização: <strong>{tenantName}</strong></p>}
+              {!tenantName && existing && (
                 <div className="grid gap-4 sm:grid-cols-2">
                   <label className="block">
                     <span className="mb-1.5 block text-xs font-medium text-docid-text">Identificador da organização</span>
@@ -160,7 +211,7 @@ export function Checkout() {
               </fieldset>
 
               {error && <p data-testid="checkout-error" className="text-sm text-docid-error">{error}</p>}
-              <button data-testid="checkout-submit" type="submit" disabled={busy || !planId || (!tenantName && !slug && !tenantEmail)}
+              <button data-testid="checkout-submit" type="submit" disabled={busy || !planId || (!tenantName && (existing ? !slug && !tenantEmail : companyName.trim().length < 2))}
                 className="btn-primary flex w-full items-center justify-center gap-2">
                 {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
                 {busy ? "A enviar..." : "Enviar pedido"}

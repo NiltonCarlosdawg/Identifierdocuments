@@ -49,6 +49,12 @@ export const subscriptionsModule = new (Elysia as any)()
       set.status = 429;
       return { error: { code: "RATE_LIMITED", message: "Muitas tentativas. Tente novamente em 1 minuto." } };
     }
+    // Pedidos de clientes novos não precisam de conta: limite extra contra spam.
+    const isLead = !body.token && !body.tenantSlug && !body.tenantEmail;
+    if (isLead && !(await checkRateLimit(`orders-lead:${ip}`, 10, 3_600_000))) {
+      set.status = 429;
+      return { error: { code: "RATE_LIMITED", message: "Muitos pedidos. Tente novamente mais tarde." } };
+    }
     try {
       const result = await createOrder(body);
       return { orderId: result.orderId, status: result.status };
@@ -70,10 +76,12 @@ export const subscriptionsModule = new (Elysia as any)()
         t.Literal("transfer"),
         t.Literal("send_order"),
       ]),
-      phone: t.String(),
-      contactEmail: t.String({ format: "email" }),
+      phone: t.String({ minLength: 6, maxLength: 30 }),
+      contactEmail: t.String({ format: "email", maxLength: 200 }),
+      companyName: t.Optional(t.String({ minLength: 2, maxLength: 160 })),
+      contactName: t.Optional(t.String({ maxLength: 120 })),
     }),
-    detail: { summary: "Criar pedido de subscrição (público)", tags: ["Subscrições"] },
+    detail: { summary: "Criar pedido de subscrição ou contacto de cliente novo (público)", tags: ["Subscrições"] },
   })
 
   .use(requireAuth())

@@ -189,7 +189,7 @@ Não há logout no servidor: a app apaga o token e as credenciais locais.
 | GET | `/plans` | Planos públicos (landing) |
 | POST | `/subscriptions/checkout-token` | Link de checkout a partir da app |
 | GET | `/subscriptions/checkout` | Dados do checkout |
-| POST | `/orders` | Pedido de subscrição (público) |
+| POST | `/orders` | Pedido de subscrição (público): de uma organização existente (token, slug ou e-mail) ou de um cliente novo sem conta (`companyName`, `contactName`) |
 | POST | `/provider/login` | Login do painel da provedora |
 | GET · POST · PUT | `/provider/plans` · `/provider/plans/:id` | Planos |
 | GET · POST | `/provider/orders` · `…/:id/approve` · `…/:id/reject` | Pedidos |

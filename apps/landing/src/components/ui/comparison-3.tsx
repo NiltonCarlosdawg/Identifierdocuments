@@ -30,11 +30,19 @@ type FeatureGroup = {
   features: Feature[];
 };
 
+// Os preços vêm da API (/plans), que é o que fica registado no pedido; aqui só a apresentação.
 const plans = [
-  { name: "Essencial", price: "50.000 Kz", cadence: "Por mês", highlighted: false },
-  { name: "Profissional", price: "100.000 Kz", cadence: "Por mês", highlighted: true },
-  { name: "Empresarial", price: "250.000 Kz", cadence: "Por mês", highlighted: false },
+  { name: "Essencial", cadence: "Por mês", highlighted: false },
+  { name: "Profissional", cadence: "Por mês", highlighted: true },
+  { name: "Empresarial", cadence: "Por mês", highlighted: false },
 ] as const;
+
+const kz = new Intl.NumberFormat("pt-PT");
+function priceLabel(prices: Record<string, number> | undefined, name: string): string {
+  if (!prices) return "…";
+  const value = prices[name.toLowerCase()];
+  return typeof value === "number" ? `${kz.format(value)} Kz` : "Consultar";
+}
 
 const groups: FeatureGroup[] = [
   {
@@ -94,11 +102,16 @@ function Cell({ value, highlighted }: { value: CellValue; highlighted: boolean }
   );
 }
 
-export default function ComparisonBlock({ onChoosePlan }: { onChoosePlan?: (name: string) => void } = {}) {
-  const planHref = (plan: (typeof plans)[number]) =>
-    plan.name === "Empresarial" ? "mailto:geral@milvendas.ao" : `/?plano=${encodeURIComponent(plan.name)}#pedido`;
+export default function ComparisonBlock({ onChoosePlan, prices }: {
+  onChoosePlan?: (name: string) => void;
+  /** Preço mensal em Kz por nome do plano em minúsculas; undefined enquanto carrega. */
+  prices?: Record<string, number>;
+} = {}) {
+  // Todos os planos, incluindo o Empresarial, levam ao formulário: assim cada contacto fica
+  // registado como pedido no painel da provedora (antes o Empresarial abria um mailto).
+  const planHref = (plan: (typeof plans)[number]) => `/?plano=${encodeURIComponent(plan.name)}#pedido`;
   const planClick = (e: React.MouseEvent<HTMLAnchorElement>, plan: (typeof plans)[number]) => {
-    if (!onChoosePlan || plan.name === "Empresarial") return;
+    if (!onChoosePlan) return;
     e.preventDefault();
     onChoosePlan(plan.name);
   };
@@ -145,7 +158,7 @@ export default function ComparisonBlock({ onChoosePlan }: { onChoosePlan?: (name
                     >
                       <div className="flex flex-col items-center gap-1 py-3">
                         <span className="text-sm font-semibold text-foreground">{plan.name}</span>
-                        <span className="text-lg font-bold text-foreground">{plan.price}</span>
+                        <span className="text-lg font-bold text-foreground">{priceLabel(prices, plan.name)}</span>
                         <span className="text-xs font-normal text-muted-foreground">{plan.cadence}</span>
                       </div>
                     </TableHead>
@@ -214,7 +227,7 @@ export default function ComparisonBlock({ onChoosePlan }: { onChoosePlan?: (name
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="font-semibold text-foreground">{plan.name}</p>
-                    <p className="mt-1 text-2xl font-bold text-foreground">{plan.price}</p>
+                    <p className="mt-1 text-2xl font-bold text-foreground">{priceLabel(prices, plan.name)}</p>
                     <p className="text-xs text-muted-foreground">{plan.cadence}</p>
                   </div>
                   {plan.highlighted && <Badge variant="default">Mais escolhido</Badge>}

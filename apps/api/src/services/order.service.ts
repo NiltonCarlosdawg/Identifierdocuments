@@ -56,17 +56,36 @@ export interface CreateOrderInput {
   paymentMethod: PaymentMethod;
   phone: string;
   contactEmail: string;
+  /** Cliente novo, sem organização: obrigatório quando não há token, slug nem email. */
+  companyName?: string;
+  contactName?: string;
+}
+
+const LEAD_LABEL = "cliente novo, sem conta";
+
+/** Nome a mostrar: organização existente ou empresa indicada por um cliente novo. */
+export function orderDisplayName(tenantName: string | null, companyName: string | null): string {
+  return tenantName ?? `${companyName ?? "—"} (${LEAD_LABEL})`;
 }
 
 export async function createOrder(input: CreateOrderInput): Promise<{ orderId: string; status: "pending" }> {
   const identifiers = [input.token, input.tenantSlug, input.tenantEmail].filter(Boolean);
-  if (identifiers.length !== 1) {
+  if (identifiers.length > 1) {
     throw new OrderError("INVALID_TENANT_IDENTIFIER", "Indique exatamente um identificador da organização.", 400);
   }
+  const companyName = input.companyName?.trim() || undefined;
+  if (identifiers.length === 0 && !companyName) {
+    throw new OrderError("COMPANY_REQUIRED", "Indique o nome da empresa.", 400);
+  }
 
-  let tenantId: string;
+  let tenantId: string | null = null;
   let jti: string;
-  if (input.token) {
+  let tenantName: string;
+  if (identifiers.length === 0) {
+    // Cliente novo: o pedido fica sem organização até a provedora a criar.
+    jti = randomUUID();
+    tenantName = orderDisplayName(null, companyName!);
+  } else if (input.token) {
     const claims = await resolveCheckoutToken(input.token);
     tenantId = claims.tenantId;
     jti = claims.jti;
@@ -85,9 +104,12 @@ export async function createOrder(input: CreateOrderInput): Promise<{ orderId: s
     jti = randomUUID();
   }
 
-  // Tabelas globais: SEM withTenant.
-  const [org] = await lookupDb.select().from(organizations).where(eq(organizations.id, tenantId)).limit(1);
-  if (!org) throw new OrderError("TENANT_NOT_FOUND", "Organização não encontrada.", 404);
+  if (tenantId) {
+    // Tabelas globais: SEM withTenant.
+    const [org] = await lookupDb.select().from(organizations).where(eq(organizations.id, tenantId)).limit(1);
+    if (!org) throw new OrderError("TENANT_NOT_FOUND", "Organização não encontrada.", 404);
+    tenantName = org.name;
+  }
 
   const [plan] = await db.select().from(plans).where(eq(plans.id, input.planId)).limit(1);
   if (!plan || !plan.active || plan.isFree) {
@@ -98,6 +120,8 @@ export async function createOrder(input: CreateOrderInput): Promise<{ orderId: s
   try {
     [inserted] = await db.insert(orders).values({
       tenantId,
+      companyName: tenantId ? null : companyName,
+      contactName: input.contactName?.trim() || null,
       planId: plan.id,
       paymentMethod: input.paymentMethod,
       phone: input.phone,
@@ -115,7 +139,8 @@ export async function createOrder(input: CreateOrderInput): Promise<{ orderId: s
   try {
     await sendOrderReceivedEmail(process.env.PROVIDER_NOTIFY_EMAIL || "provedor@docid.local", {
       id: inserted.id,
-      tenantName: org.name,
+      tenantName: tenantName!,
+      contactName: inserted.contactName,
       planName: plan.name,
       paymentMethod: inserted.paymentMethod,
       phone: inserted.phone,
@@ -153,17 +178,17 @@ async function pendingOrderWithNames(orderId: string) {
   // Join com organizations: RLS esconde-as no pool normal (ver lookupDb).
   const [row] = await lookupDb.select({
     order: orders,
-    tenantName: organizations.name,
+    orgName: organizations.name,
     planName: plans.name,
   }).from(orders)
-    .innerJoin(organizations, eq(orders.tenantId, organizations.id))
+    .leftJoin(organizations, eq(orders.tenantId, organizations.id))
     .innerJoin(plans, eq(orders.planId, plans.id))
     .where(eq(orders.id, orderId)).limit(1);
   if (!row) throw new OrderError("ORDER_NOT_FOUND", "Pedido não encontrado.", 404);
   if (row.order.status !== "pending") {
     throw new OrderError("ORDER_NOT_PENDING", "Este pedido já foi decidido.", 409);
   }
-  return row;
+  return { order: row.order, planName: row.planName, tenantName: orderDisplayName(row.orgName, row.order.companyName) };
 }
 
 export async function approveOrder(
@@ -171,7 +196,16 @@ export async function approveOrder(
   providerUserId: string,
   ip?: string | null,
 ): Promise<{ orderId: string; status: "approved" }> {
-  const { order, tenantName, planName } = await pendingOrderWithNames(orderId);
+  const pending = await pendingOrderWithNames(orderId);
+  const { tenantName, planName } = pending;
+  if (!pending.order.tenantId) {
+    throw new OrderError(
+      "ORDER_WITHOUT_TENANT",
+      "Este pedido é de um cliente novo: crie primeiro a organização e peça-lhe o pedido a partir da conta, ou rejeite este com o motivo.",
+      409,
+    );
+  }
+  const order = { ...pending.order, tenantId: pending.order.tenantId };
   const decidedAt = new Date();
   const expiresAt = new Date(decidedAt.getTime() + SUBSCRIPTION_DAYS * DAY_MS);
 
@@ -234,14 +268,22 @@ export async function rejectOrder(
     throw new OrderError("REASON_REQUIRED", "Indique o motivo da rejeição.", 400);
   }
   const { order, tenantName, planName } = await pendingOrderWithNames(orderId);
+  const decision = {
+    status: "rejected" as const,
+    rejectReason: reason,
+    decidedAt: new Date(),
+    decidedBy: providerUserId,
+  };
 
-  await withTenant(order.tenantId, async (tx) => {
-    const [updated] = await tx.update(orders).set({
-      status: "rejected",
-      rejectReason: reason,
-      decidedAt: new Date(),
-      decidedBy: providerUserId,
-    }).where(and(eq(orders.id, orderId), eq(orders.status, "pending"))).returning();
+  if (!order.tenantId) {
+    // Cliente novo: sem organização não há auditoria de tenant; fica no próprio pedido.
+    const [updated] = await db.update(orders).set(decision)
+      .where(and(eq(orders.id, orderId), eq(orders.status, "pending"))).returning();
+    if (!updated) throw new OrderError("ORDER_NOT_PENDING", "Este pedido já foi decidido.", 409);
+    logger.info({ orderId, providerUserId }, "[ORDERS] Pedido de cliente novo rejeitado.");
+  } else await withTenant(order.tenantId, async (tx) => {
+    const [updated] = await tx.update(orders).set(decision)
+      .where(and(eq(orders.id, orderId), eq(orders.status, "pending"))).returning();
     if (!updated) throw new OrderError("ORDER_NOT_PENDING", "Este pedido já foi decidido.", 409);
 
     await tx.insert(auditLogs).values({
@@ -257,7 +299,9 @@ export async function rejectOrder(
 
   if (order.contactEmail) {
     try {
-      await sendOrderRejectedEmail(order.contactEmail, { tenantName, planName, reason });
+      // Ao cliente novo mostra-se só o nome da empresa, sem a etiqueta interna.
+      const name = order.tenantId ? tenantName : (order.companyName ?? tenantName);
+      await sendOrderRejectedEmail(order.contactEmail, { tenantName: name, planName, reason });
     } catch (err) {
       logger.warn({ err, orderId }, "[ORDERS] Falha ao notificar a rejeição por email.");
     }
