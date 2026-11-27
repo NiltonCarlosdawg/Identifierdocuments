@@ -7,19 +7,19 @@ const ALL_RELEASES = "https://github.com/NiltonCarlosdawg/Identifierdocuments/re
 
 export const DOWNLOADS = {
   installer: {
-    href: "/downloads/DocID_1.2.8_x64-setup.exe",
+    href: "/downloads/DocID_1.2.9_x64-setup.exe",
     size: "6 MB",
-    sha256: "ec129866c90a6b8569cb5bbdaafd031ae433547f2c5056be2dae6caf92a4e747",
+    sha256: "4da986b3c83168567ad47bf99ac7d40c9142d6aa7780be5ccd62f9feceb44e61",
   },
   installerOffline: {
-    href: "/downloads/DocID_1.2.8_x64-setup-offline.exe",
+    href: "/downloads/DocID_1.2.9_x64-setup-offline.exe",
     size: "304 MB",
-    sha256: "0e5cb9735b156dae8b586ba2c3a6a66b7371f1997c87252490732ee46af4fa37",
+    sha256: "43404e2b7a98b00aa265287d14e0bbb13381fe53c4accd70cdacf674d4ea4444",
   },
   linux: {
-    href: "/downloads/DocID_1.2.8_amd64.deb",
+    href: "/downloads/DocID_1.2.9_amd64.deb",
     size: "10 MB",
-    sha256: "2c800658c156f94d3a6c4d1e9f4b5898afdb7f7a97bbc778f91dce69f429929c",
+    sha256: "38dc3165c1d8ec0a84bbcd9edcd81e70ca246f85576e69ede56795912b18b78a",
   },
 } as const;
 
@@ -127,7 +127,7 @@ export function DownloadSection() {
               mark={<LinuxMark className="h-4 w-4" />}
               name="Linux"
               meta="Pacote para Linux · 64 bits"
-              detail="Pacote .deb para Ubuntu 22.04 e compatíveis. Para instalar, execute sudo apt install ./DocID_1.2.8_amd64.deb."
+              detail="Pacote .deb para Ubuntu 22.04 e compatíveis. Para instalar, execute sudo apt install ./DocID_1.2.9_amd64.deb."
               action={
                 <a className="btn-primary w-full sm:w-auto" href={DOWNLOADS.linux.href}>
                   <Download className="h-4 w-4" />
