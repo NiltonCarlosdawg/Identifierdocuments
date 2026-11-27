@@ -13,6 +13,9 @@ Este documento consolida as regras arquiteturais da persistência offline do Ide
 7. Categorias fiscais (`requires_sequential = true`) só podem consumir sequências de leases locais com `status = 'active'`.
 8. Categorias não fiscais (`requires_sequential = false`) usam `local_loose_counters` como fonte local de verdade.
 9. O backend continua a ser a autoridade final durante a sincronização.
+10. Cada item de `upload_queue` e `local_write_queue` pertence a uma sessão (`tenant_id` + `user_id`, lidos do JWT). O sincronizador só envia os itens da sessão actual; num computador partilhado, o que um utilizador deixou pendente nunca é enviado em nome de outro. Escritas de versões anteriores sem dono ficam em `conflict` até alguém as reenviar, e reenviar atribui-as à sessão actual.
+11. O logout limpa o token do motor de sync nativo (`clear_sync_credentials`).
+12. Um identificador fiscal emitido offline é registado no servidor tal como foi emitido (`register-offline` recebe o campo `identifier`): a data é a do dia da emissão, não a da sincronização. O servidor valida prefixo, categoria, sequência e uma data entre a véspera da reserva do lote e o dia seguinte a hoje.
 
 ## Force-Release
 
@@ -81,9 +84,9 @@ Neste momento o identificador Y-001 existe na BD mas ninguém o reivindica.
 
 **Porque é aceitável:**
 
-- O precedente com `identifier_release_pool` já estabelece que números
-  de sequência podem ser permanentemente queimados quando um lease é
-  libertado antes de consumir todo o intervalo.
+- Números de sequência já podem ficar sem uso por outras vias: a parte
+  de um lease devolvido que já não pode sair por ordem cronológica é
+  anulada e registada em `audit_logs` (`SEQUENCE_VOIDED`).
 - O desperdício é um subproduto inevitável de locks independentes por
   categoria. Para partilhar um lock global por tenant (e serializar
   todas as gerações independentemente da categoria) perder-se-ia

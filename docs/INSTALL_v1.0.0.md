@@ -1,5 +1,15 @@
 # DocID v1.0.0 — Guia de Instalação
 
+> **Guia da versão 1.0.0** para instalar a API num servidor próprio (on-premise). Diferenças para
+> a versão actual:
+> - Os instaladores actuais estão em `https://docid.milvendas.ao` (Windows `.exe`, Linux `.deb`).
+> - A API deve ligar com um utilizador de BD **sem** `BYPASSRLS` nem superutilizador, diferente do
+>   dono das tabelas: ver `docs/RLS_PRODUCAO.md`. Ponha `REQUIRE_RLS_ROLE=true` no `.env`.
+> - Copie `apps/api/.env.example` (lista completa de variáveis), não o `.env` de desenvolvimento.
+> - Em produção na MilVendas a API corre como bundle Node (`node dist/index.js`) gerado pelo CI;
+>   `bun run start` continua a servir num servidor onde o Bun corra.
+> - É preciso criar uma organização com `ALLOW_PUBLIC_ONBOARDING=true` ou `ONBOARDING_SECRET`.
+
 > Plataformas: Windows (`.exe`/`.msi`) e Linux (`.AppImage`/`.deb`)
 
 ---

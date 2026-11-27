@@ -8,7 +8,7 @@ Quatro falhas encontradas numa revisão posterior à auditoria `AUDITORIA_SEGURA
 
 **Correção:**
 - Novo claim `authTime` (instante do último login com password), mantido em cada renovação. A renovação falha ao fim de `SESSION_MAX_AGE_HOURS` (por defeito 168 h = 7 dias).
-- Nova coluna `users.tokens_valid_after` (migração `0021_session_hardening`). Mudar ou repor a password actualiza-a, e qualquer token emitido antes deixa de renovar.
+- Nova coluna `users.tokens_valid_after` (migração `0023_session_hardening`; o ficheiro `0021_session_hardening.sql` é uma cópia de referência fora do journal). Mudar ou repor a password actualiza-a, e qualquer token emitido antes deixa de renovar.
 - `PATCH /auth/me/password` devolve agora `{ message, token }`. A app desktop guarda esse token, por isso quem mudou a password continua com sessão iniciada.
 
 **Limite conhecido:** um token roubado ainda funciona até expirar (máximo 15 min + 60 s), porque o middleware não consulta a BD em cada pedido. Para o cortar logo, seria preciso verificar `tokens_valid_after` no `authMiddleware`.
@@ -32,7 +32,7 @@ Quatro falhas encontradas numa revisão posterior à auditoria `AUDITORIA_SEGURA
 
 **Correção:** novo comando Rust `secure_key_get_or_init` (crate `keyring`), que guarda a chave no Gestor de Credenciais do Windows ou na Keychain do macOS. Nas instalações existentes, a chave antiga é migrada para o cofre e apagada do ficheiro, sem perder a sessão. No Linux mantém-se o comportamento antigo.
 
-**A fazer:** compilar e testar no Windows (`bunx tauri build`). O `Cargo.lock` é actualizado automaticamente na primeira compilação.
+**Feito:** compila no Windows (job `Desktop Rust (Windows)` do CI e builds de release desde a 1.2.2).
 
 ## 4. Configuração perigosa por defeito
 
@@ -47,7 +47,7 @@ Quatro falhas encontradas numa revisão posterior à auditoria `AUDITORIA_SEGURA
 - `tsc --noEmit` sem erros na API e na app desktop.
 - Novo teste `session-hardening.test.ts`: 10/10 a passar (adicionado ao CI).
 - Testes unitários existentes: os mesmos resultados que antes das alterações. As 2 falhas que existem já falhavam antes, porque precisam de PostgreSQL.
-- **Ainda não verificado:** compilação Rust, migração numa BD real e o teste de integração do fluxo de login/refresh.
+- **Verificado depois:** compilação Rust no CI (Linux e Windows), migrações aplicadas em produção e teste `session-hardening` no CI.
 
 ## 5. App Windows não conseguia falar com a API (CORS)
 
@@ -67,8 +67,8 @@ Confirmado a 23/11/2026 contra a produção, com um pedido preflight a `https://
 
 Reproduzido em 23/11/2026 **no código original**, com PostgreSQL 17 real e um papel sem BYPASSRLS: o 1.º onboarding funciona; a partir daí, login e onboarding falham sempre com esse erro.
 
-**Correcção:** migração `0023_rls_empty_tenant.sql`. Reescreve todas as policies públicas (21) para usarem `NULLIF(current_setting('app.current_tenant', true), '')`. Um tenant vazio passa a ser tratado como "nenhum tenant": devolve zero linhas, sem erro e sem fuga de dados. É idempotente.
+**Correcção:** migração `0024_rls_empty_tenant.sql` (a cópia `0023_rls_empty_tenant.sql` está fora do journal). Reescreve todas as policies públicas (21) para usarem `NULLIF(current_setting('app.current_tenant', true), '')`. Um tenant vazio passa a ser tratado como "nenhum tenant": devolve zero linhas, sem erro e sem fuga de dados. É idempotente.
 
 **Verificação:** depois da migração, o teste ponta-a-ponta (dois tenants, vários logins e onboardings seguidos) passa 25/25.
 
-**Nota:** se em produção o login funciona, é provável que o utilizador da BD em produção seja superutilizador ou tenha BYPASSRLS. Nesse caso o RLS não está de facto a proteger nada (ver o aviso em `0017_force_rls.sql`), e convém passar a um papel sem BYPASSRLS depois de aplicar esta migração.
+**Nota (actualizada a 26/11/2026):** confirmado em produção que o utilizador da API (`milvendas_MV`) não é superutilizador nem tem BYPASSRLS, por isso o RLS está a proteger os dados. A API avisa no arranque se isso mudar (ver `docs/RLS_PRODUCAO.md`).

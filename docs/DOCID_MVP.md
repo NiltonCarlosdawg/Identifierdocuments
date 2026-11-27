@@ -1,5 +1,11 @@
 # DocID — Estratégia MVP para Claude Code
 
+> **Documento histórico (Junho de 2026).** O MVP descrito aqui foi concluído e ultrapassado: as
+> fases "pós-MVP" (IA, offline, watcher, scanner, roles custom, partilha com utilizador) já estão
+> feitas. Estado actual em `docs/BACKLOG.md`; arquitectura em `docs/CLAUDE.md`. Duas regras daqui
+> mudaram: o anexo já não é recusado com 422 quando o identificador não está no documento, e a
+> sequência do identificador não é "por dia" (§12 do `CLAUDE.md`).
+
 > Este ficheiro é a fonte de verdade para o desenvolvimento do MVP do DocID.
 > Lê o `CLAUDE.md` (contexto técnico completo do produto) antes de ler este ficheiro.
 > Este documento define **o que construir**, **em que ordem**, e **porquê** — com base em sessões de product strategy da VERANO Labs.
@@ -56,7 +62,7 @@ Não faz sentido construir partilha e aprovações por cima de uma base com prob
 > **Estado (24 Junho 2026):** Todos os fixes de arquitectura foram implementados e validados:
 > - Rate limiting: `middleware/rateLimit.ts`
 > - RBAC: `middleware/rbac.ts` + `middleware/auth.ts`
-> - Tenant isolation: `middleware/tenant.ts` + `db/rls.ts` (corrigido bug em roles de sistema)
+> - Tenant isolation: `middleware/tenant.ts` + policies RLS nas migrações (corrigido bug em roles de sistema; o antigo `db/rls.ts` foi removido a 26/11/2026)
 > - Cross-sector sharing: `modules/documents.module.ts`
 > - SSE notifications: `services/notification.service.ts`
 

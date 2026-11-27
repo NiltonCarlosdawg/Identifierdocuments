@@ -1,6 +1,6 @@
 # Notificações por e-mail por tenant
 
-Data: 23/11/2026. Âmbito: API (`apps/api`). A UI de configuração no desktop ainda não existe (ver "Próximos passos").
+Data: 23/11/2026, revisto a 27/11/2026. Âmbito: API (`apps/api`) e desktop (Configurações › E-mail, só `ORG_ADMIN`).
 
 ## 1. O que faz
 
@@ -40,7 +40,7 @@ O worker arranca com a API (`startEmailWorker()` em `index.ts`), corre a cada `E
 - Sem configuração (`EMAIL_FALLBACK_MODE=block`) ou envio desactivado: `skipped`.
 - Um admin pode repor na fila: `POST /email/logs/:id/retry`.
 
-## 3. Modelo de dados (migração `0022_email_notifications.sql`)
+## 3. Modelo de dados (migração `0025_email_notifications.sql`)
 
 **`tenant_email_settings`** (1 linha por tenant, PK = `tenant_id`): `provider` (`smtp` | `resend` | `sendgrid`), `from_email`, `from_name`, `reply_to`, `smtp_host`, `smtp_port`, `smtp_security` (`ssl` | `starttls` | `none`), `smtp_user`, `secret_encrypted`, `enabled`, `verified_at`, `last_test_at`, `last_test_error`, `updated_by`, datas.
 
@@ -103,7 +103,7 @@ Perder a `EMAIL_SECRETS_KEY` não afecta mais nada, mas cada tenant tem de volta
 
 ## 9. Ficheiros
 
-- `src/db/migrations/0022_email_notifications.sql`, tabelas em `src/db/schema.ts`
+- `src/db/migrations/0025_email_notifications.sql`, tabelas em `src/db/schema.ts` (o ficheiro `0022_email_notifications.sql` é uma cópia de referência fora do journal)
 - `src/lib/secret-box.ts` (encriptação), `src/lib/signed-link.ts` (links), `src/lib/smtp-guard.ts` (SSRF)
 - `src/services/email/templates.ts` (2 templates + teste), `transport.ts` (SMTP/Resend/SendGrid), `tenant-email.service.ts` (config, fallback, fila, handlers)
 - `src/jobs/email-worker.ts` (worker), `src/modules/email.module.ts` (endpoints)
@@ -116,7 +116,7 @@ Perder a `EMAIL_SECRETS_KEY` não afecta mais nada, mas cada tenant tem de volta
 
 ## 11. Próximos passos
 
-1. **UI no desktop** (Definições › E-mail): formulário da configuração, botão "Testar" e tabela do histórico com "Reenviar".
+1. ~~UI no desktop~~ — feito (`920f82c`): Configurações › E-mail com a configuração, botão "Testar" e histórico com "Reenviar".
 2. Opção, por evento, de destinatários extra definidos pela organização (lista de interessados).
 3. Métricas e alertas: número de `failed` por tenant e por dia.
 4. Limpeza periódica de `email_logs` com mais de N meses (retenção).

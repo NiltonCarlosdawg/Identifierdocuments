@@ -1,6 +1,9 @@
 # Cenários de Teste e Problemas Encontrados — DocID v2
 
 > Fases 1–4: auth, identificadores, documentos, partilha, aprovações, notificações, visibility
+>
+> Documento histórico (Junho de 2026), revisto a 27/11/2026: o cenário 8 mudou — o `ORG_ADMIN`
+> passou a ter acesso a todos os documentos da organização (`attachment-admin.test.ts`).
 
 ---
 
@@ -68,12 +71,16 @@
   - Supervisor vê `public` identifier normalmente
 - **Problemas associados:** Ordem de verificação em `canAccessDocument` (ver Problema #2)
 
-### 8. Download: Admin Bloqueado em `sector_only`, `public` OK
+### 8. Download: Admin em `sector_only` e `public`
 
-- **Ficheiro:** `phase3-4.integration.test.ts:417-431`
-- **Testes:**
-  - `GET /documents/:sector_only/download` por admin → `403` com `{ error: { code: "ACCESS_REQUIRED" } }`
+- **Ficheiro:** `phase3-4.integration.test.ts:417-431`, `attachment-admin.test.ts`
+- **Testes (comportamento actual):**
+  - `GET /documents/:sector_only/download` por admin → `200` (o `ORG_ADMIN` tem acesso a todos os
+    documentos da organização)
   - `GET /documents/:public/download` por admin → `200`
+  - A listagem de identificadores continua a marcar o `sector_only` de outro sector com
+    `restricted: true` para o admin (incoerência conhecida, ver `docs/CLAUDE.md` §6)
+- **Antes:** admin → `403 ACCESS_REQUIRED`, e precisava do fluxo de pedido de acesso (cenário 9)
 - **Problemas associados:** Ordem de verificação em `canAccessDocument` (ver Problema #2)
 
 ### 9. Request-Access Flow: Criar, Duplicado, Aprovar, Download

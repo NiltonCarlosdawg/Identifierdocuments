@@ -1,5 +1,10 @@
 # Análise dos instaladores Windows — estado atual, requisitos Microsoft e melhorias
 
+> **Análise de 20/11/2026, sobre a versão 1.1.6.** Desde então: o instalador NSIS com WebView2 é
+> publicado automaticamente pelo workflow *Build & Release* (versão actual 1.2.7, ~304 MB), o MSI
+> é gerado e anexado ao release, e o macOS gera `.dmg`. Continua por fazer a assinatura
+> Authenticode. Processo actual em `apps/desktop/UPDATER.md`.
+
 Data: 2026-11-20. Âmbito: instaladores do release `desktop-v1.1.6` (NSIS), build portátil e POC MSIX.
 Todas as afirmações sobre código têm evidência `ficheiro:linha`; as afirmações sobre a Microsoft
 têm URL de documentação oficial e citação literal. O que não foi encontrado está assinalado.

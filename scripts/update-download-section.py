@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Aponta a secção de downloads da landing para os instaladores de uma versão.
+"""Aponta a landing para os instaladores de uma versão.
 
-Muda, em apps/landing/src/components/ui/download-section.tsx, o link, o tamanho e o
-SHA-256 do instalador Windows e do pacote Linux, e o nome do .deb no texto de ajuda.
-O scripts/verify-installer.sh lê este mesmo ficheiro para conferir o que está publicado.
+- apps/landing/src/components/ui/download-section.tsx: link, tamanho e SHA-256 do
+  instalador Windows e do pacote Linux, e o nome do .deb no texto de ajuda. O
+  scripts/verify-installer.sh lê este ficheiro para conferir o que está publicado.
+- apps/landing/index.html: versão e link nos dados estruturados (motores de busca) e no
+  link de download para quem não tem JavaScript.
 
   update-download-section.py <versão> <exe> <deb>   (os ficheiros já descarregados)
 """
@@ -13,6 +15,8 @@ import re
 import sys
 
 SOURCE = "apps/landing/src/components/ui/download-section.tsx"
+INDEX_HTML = "apps/landing/index.html"
+SITE = "https://docid.milvendas.ao"
 
 
 def sha256(path: str) -> str:
@@ -54,6 +58,19 @@ def main() -> None:
     if n != 1:
         sys.exit("não encontrei o comando de instalação do .deb")
     open(SOURCE, "w", encoding="utf-8").write(text)
+
+    html = open(INDEX_HTML, encoding="utf-8").read()
+    exe_url = f"{SITE}/downloads/{exe_name}"
+    for pattern, repl in [
+        (r'("softwareVersion":\s*")[^"]*(")', rf"\g<1>{version}\g<2>"),
+        (r'("downloadUrl":\s*")[^"]*(")', rf"\g<1>{exe_url}\g<2>"),
+        (r'(<noscript>.*?<a href=")[^"]*(">\s*Descarregar o instalador )[^<]*?(\s*</a>)',
+         rf"\g<1>{exe_url}\g<2>{version} ({size_label(exe)})\g<3>"),
+    ]:
+        html, n = re.subn(pattern, repl, html, count=1, flags=re.S)
+        if n != 1:
+            sys.exit(f"não encontrei {pattern[:30]}… em {INDEX_HTML}")
+    open(INDEX_HTML, "w", encoding="utf-8").write(html)
     print(f"landing aponta para {exe_name} e {deb_name}")
 
 

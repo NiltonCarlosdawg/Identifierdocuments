@@ -3,25 +3,12 @@
 > Backlog organizado por fases. Cada fase é um entregável funcional e independente.
 > Critério de prioridade: P0 = bloqueante | P1 = essencial | P2 = importante | P3 = nice-to-have
 >
-> **Estado: Fases 1-5 completas e validadas E2E (impressoras e convite por email
-> incluídos). Preview PDF/multi-página no scanner, extracção `.docx` e cache Redis
-> do classificador concluídos.
-> Fase 6 — Geração Offline de Identificadores
-> — completa (backend, motor de sync nativo, renovação de lease, UI e registo de
-> dispositivos). Fase 7 — Cache Offline de Leitura — completa (leitura de
-> listagens offline a partir de cache encriptada). Fase 8 — Seed Offline —
-> completa (corrige a lacuna da geração offline: caches e leases agora são
-> semeados). Fase 9 — Upload Offline Ligado à UI — completa (upload que falha
-> por rede é enfileirado). Fase 10 — Cache de Endpoints Auxiliares — completa.
-> Fase 11 — Download Offline de Documentos — completa. Fase 12 — Fila de
-> Escritas Offline — completa. Ronda de "itens fáceis" do backlog concluída:
-> `GET /tenants/me/stats`, `GET /roles/:id/users`, widgets do Dashboard (fila
-> offline, aprovações pendentes, documentos recentes), prompt few-shot do
-> classificador e evicção da cache de downloads (30 dias). **Fase 14 — Anexos
-> múltiplos + versionamento** concluída (`document_versions`, kind/label,
-> endpoints e UI de lote/detalhe). **P2** (preview PDF, perfil utilizador, fila
-> com upload_mode, CI) e **P3** (Playwright) concluídos; placeholders **2.7**
-> (perfis contratos) e **3.4** (BullMQ) concluídos.**
+> **Estado a 27/11/2026:** Fases 1–14 e 16–20 completas e em produção (API, painel, site e app
+> desktop 1.2.7). Fase 15 (monitorização própria) planeada, não iniciada.
+> Pendências principais: confirmação por um contabilista angolano das categorias fiscais
+> (`categories.requiresSequential`), testes manuais em runtime dos fluxos offline
+> (`docs/CLAUDE.md` §17), unificação do licenciamento (Fase 16), assinatura dos instaladores
+> (Fase 20). Itens marcados como completos que mudaram depois estão anotados no próprio item.
 
 ---
 
@@ -66,7 +53,8 @@ aplicadas posteriormente a itens aqui marcados como completos)*
 ### 1.4 — Módulo Auth
 - [x] **P0** `POST /auth/login`
 - [x] **P0** `POST /auth/refresh`
-- [x] **P0** `POST /auth/logout`
+- [x] **P0** Logout — **só no cliente** (a app apaga o token e as credenciais do motor de sync);
+  não existe `POST /auth/logout` no servidor: o token expira em 15 min
 - [x] **P1** `GET /auth/me`
 - [x] **P1** `PATCH /auth/me/password`
 - [x] **P1** `PATCH /auth/me/notifications-preferences` *(novo — Fase 5.5)*
@@ -77,7 +65,8 @@ aplicadas posteriormente a itens aqui marcados como completos)*
 - [x] **P0** `POST /tenants`
 - [x] **P0** `GET /tenants/me`
 - [x] **P1** `PATCH /tenants/me`
-- [x] **P1** `PATCH /tenants/me/identifier-prefix`
+- [x] **P1** Prefixo do identificador via `PATCH /tenants/me` (1–6 letras A–Z; bloqueado depois
+  do 1.º identificador emitido — ver Fase 19)
 - [x] **P2** `GET /tenants/me/stats` — reutiliza `collectStats` do módulo de stats (ORG_ADMIN)
 
 ### 1.6 — Módulo Sectores
@@ -354,8 +343,8 @@ aplicadas posteriormente a itens aqui marcados como completos)*
 
 ### 6.1 — Schema (M0)
 - [x] **P0** Coluna `categories.requiresSequential` (boolean, default false)
-- [x] **P0** Coluna `organizations.identifierLeaseBatchSize` (default 50,
-  configurável pelo ORG_ADMIN)
+- [x] **P0** ~~Coluna `organizations.identifierLeaseBatchSize`~~ — **removida** com as
+  subscrições (Fase 16): o lote é `min(50, orçamento offline do plano por máquina)`
 - [x] **P0** Tabela `devices` — identidade estável de cada instalação desktop
 - [x] **P0** Tabela `identifier_leases` — lotes de sequência reservados por
   dispositivo (chave de alocação `tenantId + categoryId`, sem `sectorId`,
@@ -371,12 +360,12 @@ aplicadas posteriormente a itens aqui marcados como completos)*
   activos de outros dispositivos (`GREATEST(MAX(sequence), MAX(lease.endSeq))`)
   — sem isto, geração online podia colidir com um lote já reservado mas
   ainda não consumido offline
-- [x] **P0** `POST /identifiers/lease` — reserva um lote, com first-fit no
-  pool de fragmentos devolvidos antes de estender a sequência
-- [x] **P0** `POST /identifiers/lease/:id/release` — devolve a sobra não
-  usada ao pool
-- [x] **P0** `PATCH /devices/:id/force-release` — acção administrativa
-  irreversível para dispositivo perdido/nunca reconectado (`ORG_ADMIN` only)
+- [x] **P0** `POST /identifiers/lease` — reserva um lote; usa primeiro um fragmento devolvido
+  **só se ainda respeitar a ordem cronológica**, senão estende a sequência (até 26/11/2026 o
+  pool nunca era lido — corrigido na Fase 19)
+- [x] **P0** `POST /identifiers/release` — devolve a sobra não usada ao pool
+- [x] **P0** `POST /identifiers/force-release` — acção administrativa irreversível para
+  dispositivo perdido/nunca reconectado (`ORG_ADMIN` only)
 - [x] **P0** `POST /identifiers/register-offline` — regista um identificador
   já gerado offline com o número exacto reservado no lote
 
@@ -431,8 +420,8 @@ aplicadas posteriormente a itens aqui marcados como completos)*
   número "definitivo" (fiscal, via lease) vs "provisório até sincronizar"
   (não-fiscal, via `register-offline-loose`) — badges verde/âmbar no
   GenerateModal
-- [x] **P1** `Settings` → "Organização": configurar `identifierLeaseBatchSize`
-  (10–500, default 50)
+- [x] **P1** ~~`Settings` → "Organização": configurar `identifierLeaseBatchSize`~~ — removido
+  (o tamanho do lote vem do plano, Fase 16)
 - [x] **P1** Gestão de dispositivos (listar, force-release com aviso de
   irreversibilidade) — separador "Dispositivos" em Settings
 
@@ -771,6 +760,90 @@ aplicadas posteriormente a itens aqui marcados como completos)*
 
 ---
 
+## FASE 16 — Subscrições, planos e licenças *(novembro de 2026)*
+> Especificação: `docs/superpowers/specs/2026-11-23-licensing-subscriptions-design.md`;
+> regras e operação: `docs/LICENCAS.md`.
+
+- [x] **P0** Planos dinâmicos (`plans`: preço em Kz, utilizadores, identificadores online/mês,
+  orçamento offline por máquina), geridos no painel; plano free fixo no seed
+- [x] **P0** Limites impostos na API: utilizadores, quota mensal de identificadores (também no
+  caminho offline não fiscal desde a Fase 19), orçamento de lotes offline
+- [x] **P0** Checkout na landing (Multicaixa, transferência, pedido) → `orders` pendentes →
+  aprovação manual no painel → e-mail ao criador da organização
+- [x] **P0** Painel da provedora (`apps/admin`): pedidos, planos, organizações, licenças;
+  suspender/reactivar com auditoria
+- [x] **P0** Licenças por organização: número `DOCID-AAAA-XXXX-XXXX-XXXX`, teste de 14 dias e 5
+  utilizadores, 7 dias de tolerância, depois só consulta (`licenseGuard`); triggers `LIC01`
+  (limite de utilizadores) e `LIC02` (sem auto-renovação)
+- [x] **P1** API da plataforma (`/platform/licenses`, cabeçalho `x-platform-admin-token`)
+- [x] **P1** Lembretes de renovação a 30, 14 e 2 dias; desktop com faixa de aviso e estado da
+  licença em Configurações → Organização
+- [ ] **P2** Unificar as três peças de licenciamento (`license.service`, `license-enforcement`,
+  `subscription.service`) e as suas regras de expiração (só consulta vs. 1 upload/dia)
+- [ ] **P2** `PATCH` da plataforma não actualiza `organizations.subscription_expires_at`
+  (os lembretes de renovação podem continuar a disparar)
+- [ ] **P3** Pagamento Multicaixa automático (hoje a validação é manual)
+
+---
+
+## FASE 17 — Notificações por e-mail por organização *(novembro de 2026)*
+> Detalhes: `docs/NOTIFICACOES_EMAIL.md`.
+
+- [x] **P0** SMTP por organização (segredos encriptados), e-mails de documento partilhado e de
+  documento aprovado, links assinados
+- [x] **P0** Fila transaccional em PostgreSQL (`email_logs`, `FOR UPDATE SKIP LOCKED`): funciona
+  sem Redis; o e-mail só existe se a transacção do evento fizer commit
+- [x] **P1** Preferências por utilizador e ecrã de configuração de alertas no desktop
+
+---
+
+## FASE 18 — Correcções de segurança de 23/11/2026
+> Detalhes: `docs/CORRECOES_SEGURANCA_2026-11-23.md`.
+
+- [x] **P0** Sessões com duração máxima (`authTime`, `SESSION_MAX_AGE_HOURS`) e invalidação ao
+  mudar a password (`tokens_valid_after`)
+- [x] **P0** IP do cliente a partir do proxy de confiança; limite de login por email; rate limit em
+  memória sem Redis
+- [x] **P0** Chave de encriptação local no cofre do sistema (Windows e macOS)
+- [x] **P0** CORS da app Windows (`http://tauri.localhost`)
+- [x] **P0** RLS com tenant vazio (`NULLIF`, migração 0024)
+- [ ] **P2** Cortar um token roubado antes de expirar (verificar `tokens_valid_after` em cada pedido)
+
+---
+
+## FASE 19 — Correcções da validação do código contra a documentação *(26/11/2026, PR #14)*
+
+- [x] **P0** Números fiscais devolvidos reaproveitados só se a ordem cronológica o permitir; o
+  resto é anulado e auditado (`SEQUENCE_VOIDED`)
+- [x] **P0** RLS activado em `document_shares`, `user_roles`, `role_permissions` (migração 0029);
+  aviso no arranque se o utilizador da BD ignorar o RLS (`docs/RLS_PRODUCAO.md`)
+- [x] **P0** `PATCH /tenants/me` dentro de `withTenant` (com RLS activo não gravava nada)
+- [x] **P0** Filas offline (escritas e uploads) enviadas só com a sessão de quem as criou; logout
+  limpa o token do motor nativo
+- [x] **P0** Prefixo da organização validado (1–6 letras) e bloqueado depois do 1.º identificador
+- [x] **P0** Sequências acima de 999 lidas por inteiro (watcher e API)
+- [x] **P0** Quota mensal aplicada ao `register-offline-loose`
+- [x] **P0** Identificadores fiscais emitidos offline registados com a data de emissão; datas do
+  servidor no fuso `IDENTIFIER_TIMEZONE`
+
+---
+
+## FASE 20 — Deploy, releases e testes automáticos *(26–27/11/2026, PRs #15–#18)*
+
+- [x] **P0** Deploy da API real (desde 25/11 o workflow só copiava os pacotes): bundle Node em modo
+  produção (o Swagger estava público), migrações com o dono das tabelas, reinício com `/health` e
+  reposição do código anterior em caso de falha; landing e painel publicados de novo
+- [x] **P0** Publicação automática do desktop: versão nos 4 ficheiros
+  (`scripts/bump-desktop-version.sh`) → release, instaladores no site, `SHA256SUMS`, landing
+  (incluindo `index.html`), verificação e só depois *latest* para o auto-update (1.2.7 publicada
+  assim)
+- [x] **P1** Build de macOS gera `.app` e `.dmg` (não assinado; não é distribuído)
+- [x] **P1** E2E no CI contra uma API real (desktop e painel da provedora)
+- [ ] **P1** Assinatura Authenticode do instalador Windows (o SmartScreen avisa)
+- [ ] **P2** Assinatura e notarização Apple para distribuir o `.dmg`
+
+---
+
 ## Resumo por Fase
 
 | Fase | Foco | Estado |
@@ -791,6 +864,11 @@ aplicadas posteriormente a itens aqui marcados como completos)*
 | **13** | Itens fáceis do backlog | ✅ Completo — `GET /tenants/me/stats`, `GET /roles/:id/users`, widgets do Dashboard (fila offline, aprovações pendentes, documentos recentes), prompt few-shot do classificador, evicção da cache de downloads |
 | **14** | Anexos múltiplos + versionamento | ✅ Completo — `document_versions`, kind/label, endpoints attach/attachments/versions, UI lote + detalhe |
 | **15** | Painel de monitorização próprio | 📋 Planeado — ver FASE 15 (origem: incidente de 19/11/2026 sem supervisor nem alerta) |
+| **16** | Subscrições, planos e licenças | ✅ Em produção — falta unificar as três peças de licenciamento e o pagamento automático |
+| **17** | Notificações por e-mail | ✅ Em produção |
+| **18** | Correcções de segurança 23/11 | ✅ Completo — falta cortar tokens roubados antes de expirarem |
+| **19** | Correcções da validação código vs docs | ✅ Em produção (API) e na app 1.2.7 (desktop) |
+| **20** | Deploy, releases e E2E automáticos | ✅ Completo — faltam as assinaturas Windows e Apple |
 
 > Consultar `README.md` para visão geral do produto e arquitectura; este
 > ficheiro é o documento vivo de estado por fase.
