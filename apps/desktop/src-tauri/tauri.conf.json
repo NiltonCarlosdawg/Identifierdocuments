@@ -26,12 +26,7 @@
   "bundle": {
     "active": true,
     "createUpdaterArtifacts": true,
-    "targets": [
-      "nsis",
-      "msi",
-      "deb",
-      "appimage"
-    ],
+    "targets": ["nsis", "msi", "deb", "appimage", "app", "dmg"],
     "publisher": "VeranoLabs",
     "copyright": "© 2026 VeranoLabs. Todos os direitos reservados.",
     "category": "Business",

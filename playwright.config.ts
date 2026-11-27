@@ -5,6 +5,8 @@ const BASE_URL = `http://127.0.0.1:${PORT}`;
 
 export default defineConfig({
   testDir: "./e2e",
+  // O painel da provedora é outra app (apps/admin): corre com playwright.admin.config.ts.
+  testIgnore: "provider-admin.spec.ts",
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,

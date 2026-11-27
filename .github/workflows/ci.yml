@@ -111,15 +111,59 @@ jobs:
     name: E2E (Playwright UI smoke)
     runs-on: ubuntu-22.04
     needs: [desktop]
+    # Os ecrãs do desktop e o painel da provedora correm contra uma API real (porta 3002,
+    # a que os testes esperam) com PostgreSQL próprio.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: docid_test
+          POSTGRES_PASSWORD: test-only-password
+          POSTGRES_DB: docid_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U docid_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://docid_test:test-only-password@localhost:5432/docid_test
+      JWT_SECRET: test-only-secret-for-e2e-0123456789
+      BULLMQ_ENABLED: "false"
+      CLASSIFIER_ENABLED: "false"
+      E2E_API_URL: http://127.0.0.1:3002
+      API_E2E_URL: http://127.0.0.1:3002
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
       - name: Install
         run: bun install --frozen-lockfile
+      - name: Prepare database
+        working-directory: apps/api
+        run: |
+          bun src/db/migrate.ts
+          bun src/db/seed.ts
+          bun src/db/create-provider-user.ts admin@docid.local testpass123
+      - name: Start API
+        working-directory: apps/api
+        # NODE_ENV=test desliga os limites de pedidos (o teste cria organizações e faz vários logins).
+        run: |
+          PORT=3002 NODE_ENV=test ALLOW_PUBLIC_ONBOARDING=true nohup bun src/index.ts > /tmp/api.log 2>&1 &
+          for i in $(seq 1 30); do curl -fs http://127.0.0.1:3002/health && exit 0; sleep 1; done
+          cat /tmp/api.log; exit 1
       - name: Build desktop frontend
         working-directory: apps/desktop
         run: bun run build
+      - name: Build admin panel
+        working-directory: apps/admin
+        run: VITE_API_URL=http://127.0.0.1:3002 bun run build
       - name: Install Playwright Chromium
         run: bunx playwright install --with-deps chromium
-      - name: Run E2E
+      - name: Run E2E (desktop)
         run: bun run test:e2e
+      - name: Run E2E (painel da provedora)
+        run: bun run test:e2e:admin
+      - name: API log
+        if: failure()
+        run: tail -n 200 /tmp/api.log
