@@ -33,7 +33,7 @@ Jurídico, Financeiro, Comercial, Técnico, Administrativo.
 ## 2. Decisões de Arquitectura (e o Porquê)
 
 ### Desktop-first com Tauri v2
-- **Porquê Tauri e não Electron:** o instalador Windows normal tem ~9 MB e descarrega o WebView2
+- **Porquê Tauri e não Electron:** o instalador Windows normal tem ~6 MB e descarrega o WebView2
   só se faltar (há também um completo de ~300 MB, com o WebView2, para instalar sem internet),
   contra ~180 MB de uma app Electron. Em Angola, máquinas corporativas têm
   frequentemente 4–8 GB de RAM e HDDs lentos. Tauri usa a WebView nativa do SO (Edge no Windows,

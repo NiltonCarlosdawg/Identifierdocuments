@@ -47,7 +47,7 @@ Publique `latest.json` (e os artefactos `.sig`) no GitHub Release, no formato do
    `Cargo.toml` e `Cargo.lock` de uma vez) e faça merge para `main`.
 2. O workflow **Build & Release** faz o resto sozinho:
    - cria o release `desktop-vX.Y.Z` como pré-release e gera os instaladores: Windows leve
-     (`DocID_X.Y.Z_x64-setup.exe`, ~9 MB, descarrega o WebView2 só se faltar; é o que o
+     (`DocID_X.Y.Z_x64-setup.exe`, ~6 MB, descarrega o WebView2 só se faltar; é o que o
      auto-update usa), Windows completo (`…_x64-setup-offline.exe`, ~300 MB, com o WebView2
      para instalar sem internet), Linux e macOS (`.dmg` não assinado, não publicado no site);
    - envia os dois `.exe` e o `.deb` para `docid.milvendas.ao/downloads` e regenera o `SHA256SUMS`;
