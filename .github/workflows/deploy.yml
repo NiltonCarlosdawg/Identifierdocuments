@@ -84,7 +84,13 @@ jobs:
 
       - name: Check public endpoints
         run: |
-          curl -fsS -m 20 https://didall.milvendas.ao/health
+          # Logo após o reinício o proxy do cPanel pode responder 503 durante alguns segundos
+          # (o deploy de 27/11 falhou assim com a API bem). Tentar até ~1 minuto.
+          for i in $(seq 1 12); do
+            curl -fsS -m 20 https://didall.milvendas.ao/health && break
+            [ "$i" = 12 ] && exit 1
+            echo " (tentativa $i falhou; nova tentativa em 5 s)"; sleep 5
+          done
           echo
           # Em produção o Swagger tem de estar desligado (só com ENABLE_SWAGGER=true).
           code=$(curl -s -m 20 -o /dev/null -w '%{http_code}' https://didall.milvendas.ao/docs)
