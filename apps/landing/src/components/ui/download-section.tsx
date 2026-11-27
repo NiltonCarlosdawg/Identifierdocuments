@@ -7,19 +7,19 @@ const ALL_RELEASES = "https://github.com/NiltonCarlosdawg/Identifierdocuments/re
 
 export const DOWNLOADS = {
   installer: {
-    href: "/downloads/DocID_1.2.7_x64-setup.exe",
-    size: "304 MB",
-    sha256: "8d41751a40bc7cf09321c9f4a2d1611e54e3db4ad869f6d0a1e4592078aa3b32",
+    href: "/downloads/DocID_1.2.8_x64-setup.exe",
+    size: "6 MB",
+    sha256: "ec129866c90a6b8569cb5bbdaafd031ae433547f2c5056be2dae6caf92a4e747",
   },
   installerOffline: {
-    href: "/downloads/DocID_1.2.7_x64-setup.exe",
+    href: "/downloads/DocID_1.2.8_x64-setup-offline.exe",
     size: "304 MB",
-    sha256: "8d41751a40bc7cf09321c9f4a2d1611e54e3db4ad869f6d0a1e4592078aa3b32",
+    sha256: "0e5cb9735b156dae8b586ba2c3a6a66b7371f1997c87252490732ee46af4fa37",
   },
   linux: {
-    href: "/downloads/DocID_1.2.7_amd64.deb",
+    href: "/downloads/DocID_1.2.8_amd64.deb",
     size: "10 MB",
-    sha256: "ac33e20c3c821e654d9ce4ec0e99166b9d3dd41a92c415193af8d0b0e97aed13",
+    sha256: "2c800658c156f94d3a6c4d1e9f4b5898afdb7f7a97bbc778f91dce69f429929c",
   },
 } as const;
 
@@ -127,7 +127,7 @@ export function DownloadSection() {
               mark={<LinuxMark className="h-4 w-4" />}
               name="Linux"
               meta="Pacote para Linux · 64 bits"
-              detail="Pacote .deb para Ubuntu 22.04 e compatíveis. Para instalar, execute sudo apt install ./DocID_1.2.7_amd64.deb."
+              detail="Pacote .deb para Ubuntu 22.04 e compatíveis. Para instalar, execute sudo apt install ./DocID_1.2.8_amd64.deb."
               action={
                 <a className="btn-primary w-full sm:w-auto" href={DOWNLOADS.linux.href}>
                   <Download className="h-4 w-4" />
