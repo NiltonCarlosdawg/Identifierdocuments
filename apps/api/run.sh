@@ -17,6 +17,10 @@ log() { printf '%s %s\n' "$(date -Is)" "$*" >> "$WATCHLOG"; }
 alive() { [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; }
 healthy() { curl -fs -m 5 -o /dev/null "http://127.0.0.1:$PORT/health"; }
 
+# Redis (socket privado, ver scripts/redis.sh): repõe-o mesmo com a API saudável,
+# senão a verificação diária das subscrições (BullMQ) deixava de correr sem ninguém notar.
+[ -f scripts/redis.sh ] && bash scripts/redis.sh ensure >/dev/null 2>&1
+
 if alive && healthy; then exit 0; fi
 
 if alive; then

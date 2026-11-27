@@ -1,4 +1,5 @@
 import { Redis } from "ioredis";
+import { quietRedisErrors } from "../lib/redis";
 
 const IS_TEST = process.env.NODE_ENV === "test";
 
@@ -12,12 +13,12 @@ export function getBullConnection(): Redis | null {
   if (!connection) {
     try {
       const password = process.env.REDIS_PASSWORD;
-      connection = new Redis(process.env.REDIS_URL || "redis://localhost:6379", {
+      connection = quietRedisErrors(new Redis(process.env.REDIS_URL || "redis://localhost:6379", {
         maxRetriesPerRequest: null,
         enableOfflineQueue: false,
         lazyConnect: true,
         ...(password ? { password } : {}),
-      });
+      }), "BULLMQ");
       connection.connect().catch((err) => {
         console.warn("[BULLMQ] Ligação Redis falhou — filas desactivadas:", (err as Error)?.message ?? err);
         connection = null;
