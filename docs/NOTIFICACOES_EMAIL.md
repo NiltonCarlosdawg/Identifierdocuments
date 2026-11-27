@@ -25,7 +25,9 @@ Usam um template genérico (`renderAttention`): título, etiqueta colorida, resu
 | **Novo computador** (`device_registered`) | `POST /devices` | Os administradores (`ORG_ADMIN`), excepto quem registou |
 | **Identificador anulado** (`identifier_cancelled`) | `PATCH /identifiers/:identifier/cancel` | Os administradores, excepto quem anulou. Inclui o motivo. |
 
-Ainda por fazer: avisos de licença ou subscrição a terminar para os administradores. Dependem da verificação diária, que hoje corre no Redis (BullMQ) e não corre em produção.
+| **Licença** (`license_alert`, migração `0032`) | Verificação diária (BullMQ, 08:00 UTC, `jobs/license-alerts.ts`): faltam ≤14, ≤7, ≤3 e ≤1 dias; licença terminou (tolerância); último dia da tolerância; organização em só consulta (até 30 dias depois) | Todos os administradores. **Obrigatório.** Uma vez por momento e por prazo de licença (dedupe `license:<data de fim>:<momento>`; uma renovação recomeça a contagem). Licenças suspensas pela provedora não geram aviso. |
+
+O Redis de produção corre num socket privado (`apps/api/scripts/redis.sh`), mantido pelo `run.sh`.
 
 ### Preferências
 

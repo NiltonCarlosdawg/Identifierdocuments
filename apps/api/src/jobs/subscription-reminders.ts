@@ -5,6 +5,7 @@ import { organizations } from "../db/schema";
 import { logger } from "../lib/logger";
 import { sendProviderExpiryAlertEmail, sendRenewalReminderEmail } from "../services/mailer.service";
 import { getTenantContactEmail } from "../services/subscription.service";
+import { runLicenseAlerts } from "./license-alerts";
 
 interface ExpiringTenant {
   tenantId: string;
@@ -56,7 +57,7 @@ export async function flipExpiredTenants(now: Date): Promise<number> {
   return rows.length;
 }
 
-export async function runRenewalSweep(now: Date): Promise<{ reminded: number; expired: number }> {
+export async function runRenewalSweep(now: Date): Promise<{ reminded: number; expired: number; licenseAlerts: number }> {
   // Capturar antes do flip: depois dele estas organizações deixam de ser "paid".
   const overdue = await findByDaysLeft(now, [], true);
   const expiring = await findByDaysLeft(now, [30, 14, 2]);
@@ -85,5 +86,13 @@ export async function runRenewalSweep(now: Date): Promise<{ reminded: number; ex
     }
   }
 
-  return { reminded, expired };
+  // Avisos de licença aos administradores de cada organização (e-mail do tenant ou da plataforma).
+  let licenseAlerts = 0;
+  try {
+    licenseAlerts = await runLicenseAlerts(now);
+  } catch (err) {
+    logger.warn({ err }, "[SWEEP] Falha nos avisos de licença.");
+  }
+
+  return { reminded, expired, licenseAlerts };
 }

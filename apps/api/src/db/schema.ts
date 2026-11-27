@@ -527,6 +527,7 @@ export const EMAIL_EVENT_TYPES = [
   // Acções que pedem atenção (0031): ver services/email/tenant-email.service.ts.
   "approval_requested", "access_requested", "document_rejected",
   "password_changed", "role_granted", "device_registered", "identifier_cancelled",
+  "license_alert", // 0032: licença a terminar / tolerância / só consulta (aos administradores)
 ] as const;
 export type EmailEventType = (typeof EMAIL_EVENT_TYPES)[number];
 export type EmailStatus = "queued" | "sending" | "sent" | "failed" | "skipped";
